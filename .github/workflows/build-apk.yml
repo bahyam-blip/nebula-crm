@@ -157,11 +157,22 @@ jobs:
         run: flutter config --no-analytics
 
       - name: Build debug APK
+        env:
+          STORAGE_BASE_URL: ${{ vars.STORAGE_BASE_URL }}
         run: |
           set -o pipefail
-          if flutter build apk --release --split-per-abi --no-tree-shake-icons 2>&1 | tee /tmp/build.log \
-             && flutter build apk --release --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log \
-             && flutter build apk --debug --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log; then
+          # Worker URL is injected, not hardcoded. Falls back to the
+          # default in storage_service.dart when the variable is unset.
+          DEFINE=""
+          if [ -n "$STORAGE_BASE_URL" ]; then
+            DEFINE="--dart-define=STORAGE_BASE_URL=$STORAGE_BASE_URL"
+            echo "::warning::STORAGE_BASE_URL=$STORAGE_BASE_URL"
+          else
+            echo "::warning::STORAGE_BASE_URL not set - using default in source"
+          fi
+          if flutter build apk --release --split-per-abi $DEFINE --no-tree-shake-icons 2>&1 | tee /tmp/build.log \
+             && flutter build apk --release $DEFINE --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log \
+             && flutter build apk --debug $DEFINE --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log; then
             echo "Build succeeded."
           else
             echo "::group::Root-cause lines"

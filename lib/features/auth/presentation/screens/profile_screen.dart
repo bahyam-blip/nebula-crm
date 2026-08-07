@@ -1,5 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../../../../core/constants/app_constants.dart';
+import '../../../../core/services/firebase_boot.dart';
+import '../../../../core/services/firestore_service.dart';
+import '../../../../core/services/storage_service.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/services/auth_service.dart';
@@ -35,21 +42,41 @@ class ProfileScreen extends ConsumerWidget {
                 Center(
                   child: Column(
                     children: [
-                      CircleAvatar(
-                        radius: 56,
-                        backgroundColor: _hexToColor(user.role.badgeColorHex)
-                            .withValues(alpha: 0.2),
-                        backgroundImage: user.photoUrl != null
-                            ? NetworkImage(user.photoUrl!)
-                            : null,
-                        child: user.photoUrl == null
-                            ? Text(
-                                user.displayName.initials,
-                                style: context.textTheme.displaySmall?.copyWith(
-                                  color: _hexToColor(user.role.badgeColorHex),
-                                ),
-                              )
-                            : null,
+                      GestureDetector(
+                        onTap: () => _changeAvatar(context, ref, user.id),
+                        child: Stack(
+                          alignment: Alignment.bottomRight,
+                          children: [
+                            CircleAvatar(
+                              radius: 56,
+                              backgroundColor:
+                                  _hexToColor(user.role.badgeColorHex)
+                                      .withValues(alpha: 0.2),
+                              backgroundImage: user.photoUrl != null
+                                  ? NetworkImage(user.photoUrl!)
+                                  : null,
+                              child: user.photoUrl == null
+                                  ? Text(
+                                      user.displayName.initials,
+                                      style: context.textTheme.displaySmall
+                                          ?.copyWith(
+                                        color: _hexToColor(
+                                            user.role.badgeColorHex),
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.camera_alt,
+                                  size: 16, color: Colors.white),
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -298,5 +325,61 @@ class _PermissionTile extends StatelessWidget {
         color: granted ? AppColors.success : AppColors.textTertiary,
       ),
     );
+  }
+}
+
+/// Pick a photo, push it to R2 through the storage Worker, then save the
+/// resulting URL on the user document.
+///
+/// Images are downscaled before upload: a modern phone camera produces
+/// several megabytes for what renders as a 112px avatar.
+Future<void> _changeAvatar(
+  BuildContext context,
+  WidgetRef ref,
+  String uid,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Uploading photo...')),
+    );
+
+    final bytes = await picked.readAsBytes();
+    final ext = picked.name.contains('.')
+        ? picked.name.split('.').last.toLowerCase()
+        : 'jpg';
+
+    final url = await ref.read(storageServiceProvider).uploadBytes(
+          key: StorageService.avatarKey(uid, ext),
+          bytes: bytes,
+          contentType: StorageService.contentTypeFor(picked.name),
+        );
+
+    await withFirestoreRetry(
+      () => ref
+          .read(firestoreProvider)
+          .collection(AppConstants.colUsers)
+          .doc(uid)
+          .update({
+        'photoUrl': url,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
+
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Photo updated')),
+    );
+  } catch (e) {
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
   }
 }

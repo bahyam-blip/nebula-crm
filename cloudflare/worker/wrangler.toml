@@ -1,0 +1,16 @@
+name = "nebula-crm-storage"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+account_id = "af3007244dc00e001004045fd488b42b"
+
+# Direct bucket binding. This is why no S3 access keys exist anywhere in
+# the project: the Worker is granted the bucket, not a credential pair.
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "nebula-crm1"
+
+[vars]
+FIREBASE_PROJECT_ID = "nebula-crm-70f58"
+
+[observability]
+enabled = true

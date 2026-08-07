@@ -1,0 +1,64 @@
+name: Deploy Storage Worker
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'cloudflare/worker/**'
+      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Cloudflare Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Deploy worker
+        working-directory: cloudflare/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: af3007244dc00e001004045fd488b42b
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set."
+            exit 1
+          fi
+          set -o pipefail
+          if npx --yes wrangler@latest deploy 2>&1 | tee /tmp/wrangler.log; then
+            # Surface the deployed URL as an annotation so it can be read
+            # without downloading logs.
+            grep -oE "https://[a-z0-9.-]+\.workers\.dev" /tmp/wrangler.log \
+              | sort -u | while IFS= read -r u; do echo "::warning::WORKER_URL $u"; done
+            echo "Deployed."
+          else
+            grep -iE "error|Authentication|permission|not found|binding" /tmp/wrangler.log \
+              | head -15 | while IFS= read -r l; do echo "::error::WRANGLER ${l}"; done
+            exit 1
+          fi
+
+      - name: Smoke test
+        run: |
+          URL=$(grep -oE "https://[a-z0-9.-]+\.workers\.dev" /tmp/wrangler.log | sort -u | head -1)
+          if [ -z "$URL" ]; then
+            echo "::warning::No workers.dev URL found; the worker may use a custom route."
+            exit 0
+          fi
+          sleep 5
+          CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" "$URL/v1/health" || echo 000)
+          echo "::warning::HEALTH $URL/v1/health -> HTTP $CODE $(head -c 120 /tmp/health.txt)"
+          # An unauthenticated upload must be rejected.
+          AUTHCODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/v1/upload?path=avatars/x/a.png" || echo 000)
+          echo "::warning::AUTHCHECK unauthenticated upload -> HTTP $AUTHCODE (expect 401)"
