@@ -94,6 +94,24 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Invites ───────────────────────────────────────────────
+    // Document id is the lowercased email, so signup can resolve its own
+    // invite with a single get() before any profile exists.
+    match /invites/{email} {
+      allow get: if isSignedIn();
+      allow list: if isManager();
+      allow create, update, delete: if isAdmin();
+      // Let the invited user mark their own invite accepted at signup.
+      allow update: if isSignedIn()
+        && request.resource.data.acceptedBy == request.auth.uid;
+    }
+
+    // Migration markers, written once by a super admin.
+    match /system/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
     // ── USERS collection ──────────────────────────────────────
     // Each user can read their own profile. Admins can read all team
     // members. SuperAdmins can read anyone. Only superAdmins can change

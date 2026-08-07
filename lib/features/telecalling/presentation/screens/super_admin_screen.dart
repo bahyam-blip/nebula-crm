@@ -13,6 +13,8 @@ import '../../../auth/models/app_user.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../contacts/models/contact.dart';
+import '../../../../core/services/data_migration.dart';
+import '../../../auth/services/invite_service.dart';
 import '../../providers/telecalling_provider.dart';
 
 /// Cross-team control panel. Super admins only.
@@ -37,7 +39,7 @@ class SuperAdminScreen extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Super admin'),
@@ -45,6 +47,7 @@ class SuperAdminScreen extends ConsumerWidget {
             tabs: [
               Tab(text: 'Teams'),
               Tab(text: 'People'),
+              Tab(text: 'Invites'),
               Tab(text: 'Audit'),
             ],
           ),
@@ -53,6 +56,7 @@ class SuperAdminScreen extends ConsumerWidget {
           children: [
             _TeamsTab(),
             _PeopleTab(),
+            _InvitesTab(),
             _AuditTab(),
           ],
         ),
@@ -315,5 +319,163 @@ class _AuditTab extends ConsumerWidget {
     if (action.contains('rebalance')) return Icons.balance;
     if (action.contains('reassign')) return Icons.swap_horiz;
     return Icons.info;
+  }
+}
+
+/// Add people to the workspace and give them a role up front.
+class _InvitesTab extends ConsumerStatefulWidget {
+  const _InvitesTab();
+
+  @override
+  ConsumerState<_InvitesTab> createState() => _InvitesTabState();
+}
+
+class _InvitesTabState extends ConsumerState<_InvitesTab> {
+  final _email = TextEditingController();
+  UserRole _role = UserRole.salesRep;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final me = ref.read(currentAppUserValueProvider);
+    if (me == null) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(inviteServiceProvider).invite(
+            email: _email.text,
+            role: _role,
+            actor: me,
+          );
+      if (!mounted) return;
+      _email.clear();
+      context.showSuccess('Invite saved. They get this role when they sign up.');
+    } catch (e) {
+      if (mounted) context.showError('$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _runMigration() async {
+    final me = ref.read(currentAppUserValueProvider);
+    if (me == null) return;
+    setState(() => _busy = true);
+    try {
+      final results = await ref.read(dataMigrationProvider).backfillTeamId(
+            teamId: me.teamId ?? '',
+            actorId: me.id,
+          );
+      final total = results.values.fold<int>(0, (a, b) => a + b);
+      if (!mounted) return;
+      context.showSuccess('Repaired $total records.');
+    } catch (e) {
+      if (mounted) context.showError('$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invites = ref.watch(pendingInvitesProvider);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text('Add someone', style: context.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Accounts are created by the person signing up. Record their email '
+          'and role here and it is applied automatically on first login.',
+          style: context.textTheme.bodySmall
+              ?.copyWith(color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _email,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(labelText: 'Work email'),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<UserRole>(
+          initialValue: _role,
+          decoration: const InputDecoration(labelText: 'Role'),
+          items: UserRole.values
+              .where((r) => r != UserRole.superAdmin)
+              .map((r) => DropdownMenuItem(value: r, child: Text(r.label)))
+              .toList(),
+          onChanged: (v) => setState(() => _role = v ?? UserRole.salesRep),
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: _busy ? null : _send,
+          icon: const Icon(Icons.person_add, size: 18),
+          label: const Text('Save invite'),
+        ),
+        const Divider(height: 32),
+        Text('Pending invites', style: context.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        invites.when(
+          loading: () => const LinearProgressIndicator(),
+          error: (e, _) => Text(describeFirestoreError(e),
+              style: context.textTheme.bodySmall
+                  ?.copyWith(color: AppColors.danger)),
+          data: (list) => list.isEmpty
+              ? Text('None yet.',
+                  style: context.textTheme.bodySmall
+                      ?.copyWith(color: AppColors.textTertiary))
+              : Column(
+                  children: list
+                      .map((i) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(
+                              i.isAccepted
+                                  ? Icons.check_circle
+                                  : Icons.hourglass_empty,
+                              size: 18,
+                              color: i.isAccepted
+                                  ? AppColors.success
+                                  : AppColors.textTertiary,
+                            ),
+                            title: Text(i.email),
+                            subtitle: Text(
+                              '${i.role.label}'
+                              '${i.isAccepted ? ' · joined' : ' · pending'}',
+                              style: context.textTheme.bodySmall,
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              onPressed: () => ref
+                                  .read(inviteServiceProvider)
+                                  .revoke(i.email),
+                            ),
+                          ))
+                      .toList(),
+                ),
+        ),
+        const Divider(height: 32),
+        Text('Repair old data', style: context.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Records created before the shared workspace existed carry the '
+          'wrong team and stay invisible to security rules. This stamps the '
+          'current team onto them. Safe to run more than once.',
+          style: context.textTheme.bodySmall
+              ?.copyWith(color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _runMigration,
+          icon: const Icon(Icons.build, size: 18),
+          label: const Text('Repair records'),
+        ),
+        const SizedBox(height: 40),
+      ],
+    );
   }
 }

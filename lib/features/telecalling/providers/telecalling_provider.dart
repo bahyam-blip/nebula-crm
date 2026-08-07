@@ -37,6 +37,7 @@ final myLeadsProvider = StreamProvider<List<Contact>>((ref) {
   return ref
       .watch(firestoreProvider)
       .collection(AppConstants.colContacts)
+      .where('teamId', isEqualTo: ref.watch(currentTeamIdProvider))
       .where('assignedTo', isEqualTo: uid)
       .snapshots()
       .map((s) => s.docs.map(Contact.fromFirestore).toList());
@@ -121,6 +122,7 @@ final contactCallLogsProvider =
   return ref
       .watch(firestoreProvider)
       .collection(TeleCollections.callLogs)
+      .where('teamId', isEqualTo: ref.watch(currentTeamIdProvider))
       .where('contactId', isEqualTo: contactId)
       .snapshots()
       .map((s) {

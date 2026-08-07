@@ -6,6 +6,7 @@ import '../../features/contacts/models/contact.dart';
 import '../../features/marketing/models/campaign.dart';
 import '../../features/pipeline/models/deal.dart';
 import '../../features/service/models/ticket.dart';
+import '../../features/auth/providers/auth_provider.dart';
 import '../constants/app_constants.dart';
 
 /// Firestore instance provider.
@@ -27,8 +28,30 @@ class PaginatedResult<T> {
 /// the UI stays clean. Errors propagate as exceptions — wrap in
 /// `try/catch` or use `AsyncValue.guard` in providers.
 class FirestoreService {
-  FirestoreService(this._db);
+  FirestoreService(this._db, {this.teamId = ''});
+
   final FirebaseFirestore _db;
+
+  /// Team the signed-in user belongs to.
+  ///
+  /// Every rule scopes reads with `resource.data.teamId == userTeamId()`.
+  /// Firestore does not filter a query down to the documents you may see -
+  /// it rejects the whole query unless the query itself proves it only asks
+  /// for permitted documents. So an unscoped `.collection('contacts')` is
+  /// denied outright, which is why the app showed permission-denied
+  /// everywhere. Every collection query below must carry this filter.
+  final String teamId;
+
+  /// Stamp teamId on every write so the document is readable afterwards.
+  Map<String, dynamic> _withTeam(Map<String, dynamic> data) {
+    if (teamId.isEmpty) return data;
+    return {...data, 'teamId': teamId};
+  }
+
+  Query _scoped(String collection) {
+    final Query q = _db.collection(collection);
+    return teamId.isEmpty ? q : q.where('teamId', isEqualTo: teamId);
+  }
 
   // ────────────────────────────────────────────────────────────
   // CONTACTS
@@ -37,12 +60,10 @@ class FirestoreService {
   /// Stream contacts owned by [ownerId] or all team contacts if null.
   Stream<List<Contact>> watchContacts({
     String? ownerId,
-    String? teamId,
     int limit = 50,
   }) {
-    Query query = _db.collection(AppConstants.colContacts);
+    Query query = _scoped(AppConstants.colContacts);
     if (ownerId != null) query = query.where('ownerId', isEqualTo: ownerId);
-    if (teamId != null) query = query.where('teamId', isEqualTo: teamId);
     query = query.orderBy('updatedAt', descending: true).limit(limit);
     return query.snapshots().map((snap) =>
         snap.docs.map((d) => Contact.fromFirestore(d)).toList());
@@ -57,7 +78,7 @@ class FirestoreService {
   Future<String> createContact(Contact contact) async {
     final ref = await _db
         .collection(AppConstants.colContacts)
-        .add(contact.toFirestore());
+        .add(_withTeam(contact.toFirestore()));
     return ref.id;
   }
 
@@ -81,7 +102,7 @@ class FirestoreService {
     String? dealId,
     int limit = 30,
   }) {
-    Query query = _db.collection(AppConstants.colActivities);
+    Query query = _scoped(AppConstants.colActivities);
     if (contactId != null) {
       query = query.where('contactId', isEqualTo: contactId);
     } else if (dealId != null) {
@@ -93,7 +114,7 @@ class FirestoreService {
   }
 
   Future<void> logActivity(Activity activity) async {
-    await _db.collection(AppConstants.colActivities).add(activity.toFirestore());
+    await _db.collection(AppConstants.colActivities).add(_withTeam(activity.toFirestore()));
   }
 
   // ────────────────────────────────────────────────────────────
@@ -105,7 +126,7 @@ class FirestoreService {
     String? stage,
     int limit = 100,
   }) {
-    Query query = _db.collection(AppConstants.colDeals);
+    Query query = _scoped(AppConstants.colDeals);
     if (ownerId != null) query = query.where('ownerId', isEqualTo: ownerId);
     if (stage != null) query = query.where('stage', isEqualTo: stage);
     query = query.orderBy('updatedAt', descending: true).limit(limit);
@@ -127,7 +148,7 @@ class FirestoreService {
 
   Future<String> createDeal(Deal deal) async {
     final ref =
-        await _db.collection(AppConstants.colDeals).add(deal.toFirestore());
+        await _db.collection(AppConstants.colDeals).add(_withTeam(deal.toFirestore()));
     return ref.id;
   }
 
@@ -158,7 +179,7 @@ class FirestoreService {
   // ────────────────────────────────────────────────────────────
 
   Stream<List<Campaign>> watchCampaigns({String? ownerId, int limit = 50}) {
-    Query query = _db.collection(AppConstants.colCampaigns);
+    Query query = _scoped(AppConstants.colCampaigns);
     if (ownerId != null) query = query.where('ownerId', isEqualTo: ownerId);
     query = query.orderBy('updatedAt', descending: true).limit(limit);
     return query.snapshots().map((snap) =>
@@ -167,7 +188,7 @@ class FirestoreService {
 
   Future<String> createCampaign(Campaign c) async {
     final ref =
-        await _db.collection(AppConstants.colCampaigns).add(c.toFirestore());
+        await _db.collection(AppConstants.colCampaigns).add(_withTeam(c.toFirestore()));
     return ref.id;
   }
 
@@ -187,7 +208,7 @@ class FirestoreService {
     String? status,
     int limit = 50,
   }) {
-    Query query = _db.collection(AppConstants.colTickets);
+    Query query = _scoped(AppConstants.colTickets);
     if (assigneeId != null) {
       query = query.where('assigneeId', isEqualTo: assigneeId);
     }
@@ -201,7 +222,7 @@ class FirestoreService {
 
   Future<String> createTicket(Ticket t) async {
     final ref =
-        await _db.collection(AppConstants.colTickets).add(t.toFirestore());
+        await _db.collection(AppConstants.colTickets).add(_withTeam(t.toFirestore()));
     return ref.id;
   }
 
@@ -223,7 +244,7 @@ class FirestoreService {
   // ────────────────────────────────────────────────────────────
 
   Stream<List<Article>> watchArticles({String? category, int limit = 50}) {
-    Query query = _db.collection(AppConstants.colArticles);
+    Query query = _scoped(AppConstants.colArticles);
     if (category != null) query = query.where('category', isEqualTo: category);
     query = query
         .where('published', isEqualTo: true)
@@ -295,5 +316,9 @@ class FirestoreService {
 }
 
 final firestoreServiceProvider = Provider<FirestoreService>((ref) {
-  return FirestoreService(ref.watch(firestoreProvider));
+  // Rebuilds when the user's team resolves, so queries are always scoped.
+  return FirestoreService(
+    ref.watch(firestoreProvider),
+    teamId: ref.watch(currentTeamIdProvider),
+  );
 });

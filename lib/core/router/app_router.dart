@@ -11,6 +11,7 @@ import '../../features/auth/presentation/screens/team_management_screen.dart';
 import '../../features/contacts/presentation/screens/contacts_list_screen.dart';
 import '../../features/contacts/presentation/screens/contact_detail_screen.dart';
 import '../../features/contacts/presentation/screens/contact_form_screen.dart';
+import '../../features/auth/presentation/screens/profile_edit_screen.dart';
 import '../../features/contacts/presentation/screens/csv_import_screen.dart';
 import '../../features/tasks/presentation/screens/tasks_screen.dart';
 import '../../features/telecalling/presentation/screens/calling_dashboard_screen.dart';
@@ -134,6 +135,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         path: '/tasks',
         name: 'tasks',
         builder: (_, __) => const TasksScreen(),
+      ),
+      GoRoute(
+        path: '/profile/edit',
+        name: 'profileEdit',
+        builder: (_, __) => const ProfileEditScreen(),
       ),
       GoRoute(
         path: '/my-leads',

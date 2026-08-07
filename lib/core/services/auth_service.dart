@@ -5,6 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
 
 import '../../features/auth/models/app_user.dart';
+import '../../features/auth/services/invite_service.dart';
 import '../constants/app_constants.dart';
 
 final logger = Logger(printer: PrettyPrinter(methodCount: 0));
@@ -229,8 +230,22 @@ class AuthService {
 
     // Everyone lands in one shared workspace so a team can actually see the
     // same pipeline. A super admin can move people between teams later.
-    const teamId = AppConstants.defaultTeamId;
-    final role = isFirstUser ? UserRole.superAdmin : UserRole.salesRep;
+    var teamId = AppConstants.defaultTeamId;
+    var role = isFirstUser ? UserRole.superAdmin : UserRole.salesRep;
+
+    // A super admin can pre-assign a role by email. Honour it here, so an
+    // invited telecaller lands with the right permissions on first login
+    // instead of needing to be promoted afterwards.
+    if (!isFirstUser) {
+      final invite =
+          await InviteService(_firestore).lookup(user.email ?? '');
+      if (invite != null && !invite.isAccepted) {
+        role = invite.role;
+        teamId = invite.teamId;
+        await InviteService(_firestore)
+            .markAccepted(user.email ?? '', user.uid);
+      }
+    }
 
     final teamRef = _firestore.collection(AppConstants.colTeams).doc(teamId);
     try {
