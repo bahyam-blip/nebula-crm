@@ -295,6 +295,31 @@ service cloud.firestore {
     }
 
     // ── Default deny ──────────────────────────────────────────
+    // ── TASKS + REMINDERS ─────────────────────────────────────
+    // Team-scoped. Anyone on the team can create and see them, since a
+    // task is often assigned to someone other than its author. Only the
+    // assignee, the author, or a manager may change one.
+    match /tasks/{taskId} {
+      allow read: if isSignedIn()
+                  && (isSuperAdmin() || resource.data.teamId == userTeamId());
+      allow create: if isSignedIn()
+                    && request.resource.data.teamId == userTeamId()
+                    && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (resource.data.teamId == userTeamId() && (
+          resource.data.assignedTo == request.auth.uid ||
+          resource.data.createdBy == request.auth.uid ||
+          isManager()
+        ))
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() ||
+        (resource.data.teamId == userTeamId() &&
+          (resource.data.createdBy == request.auth.uid || isManager()))
+      );
+    }
+
     // ── Call logs ──────────────────────────────────────────────
     // Append-only history. A caller may write their own entries and read
     // their own; managers see the whole team. Nobody edits or deletes,

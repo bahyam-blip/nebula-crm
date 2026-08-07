@@ -12,6 +12,7 @@ import '../../features/contacts/presentation/screens/contacts_list_screen.dart';
 import '../../features/contacts/presentation/screens/contact_detail_screen.dart';
 import '../../features/contacts/presentation/screens/contact_form_screen.dart';
 import '../../features/contacts/presentation/screens/csv_import_screen.dart';
+import '../../features/tasks/presentation/screens/tasks_screen.dart';
 import '../../features/telecalling/presentation/screens/calling_dashboard_screen.dart';
 import '../../features/telecalling/presentation/screens/lead_distribution_screen.dart';
 import '../../features/telecalling/presentation/screens/my_leads_screen.dart';
@@ -130,6 +131,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const CsvImportScreen(),
       ),
       GoRoute(
+        path: '/tasks',
+        name: 'tasks',
+        builder: (_, __) => const TasksScreen(),
+      ),
+      GoRoute(
         path: '/my-leads',
         name: 'myLeads',
         builder: (_, __) => const MyLeadsScreen(),
@@ -215,6 +221,12 @@ class _MoreScreen extends StatelessWidget {
         label: 'Team Members',
         route: '/team',
         color: AppColors.accent,
+      ),
+      _MenuItem(
+        icon: Icons.task_alt,
+        label: 'Tasks & Reminders',
+        route: '/tasks',
+        color: AppColors.warning,
       ),
       _MenuItem(
         icon: Icons.headset_mic,
