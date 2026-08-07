@@ -76,6 +76,19 @@ android {
     // "You can't install this app on this device".
 
     packaging {
+        jniLibs {
+            // Ship native libraries compressed and let the installer extract
+            // them, as debug builds do.
+            //
+            // Release defaults to extractNativeLibs=false, which mmaps .so
+            // files straight out of the APK and therefore requires them to sit
+            // on 16 KB boundaries on Android 15+ devices. Flutter's libapp.so
+            // is not 16 KB aligned here, so those devices reject the install
+            // with a generic "You can't install this app on this device" --
+            // which is exactly the regression that appeared when CI switched
+            // from debug to release builds.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += setOf(
                 "META-INF/*.kotlin_module",
