@@ -160,7 +160,8 @@ jobs:
         run: |
           set -o pipefail
           if flutter build apk --release --split-per-abi --no-tree-shake-icons 2>&1 | tee /tmp/build.log \
-             && flutter build apk --release --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log; then
+             && flutter build apk --release --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log \
+             && flutter build apk --debug --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log; then
             echo "Build succeeded."
           else
             echo "::group::Root-cause lines"
@@ -179,22 +180,50 @@ jobs:
           ls -lh build/app/outputs/flutter-apk/ || true
           find build -name "*.apk" -exec ls -lh {} \;
 
-      - name: Inspect APK compatibility
+      - name: Diagnose install blockers
         run: |
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -r | head -1)
-          echo "aapt2: $AAPT"
-          for f in build/app/outputs/flutter-apk/*.apk; do
-            [ -e "$f" ] || continue
-            B=$(basename "$f")
-            INFO=$("$AAPT" dump badging "$f" 2>/dev/null)
-            PKG=$(echo "$INFO" | grep -o "package: name='[^']*'" | head -1)
-            VC=$(echo "$INFO" | grep -o "versionCode='[^']*'" | head -1)
-            MIN=$(echo "$INFO" | grep -o "sdkVersion:'[^']*'" | head -1)
-            TGT=$(echo "$INFO" | grep -o "targetSdkVersion:'[^']*'" | head -1)
-            ABI=$(echo "$INFO" | grep -o "native-code: .*" | head -1)
-            SPLIT=$(echo "$INFO" | grep -o "split='[^']*'" | head -1)
-            REQ=$(echo "$INFO" | grep -o "requires-split.*" | head -1)
-            echo "::warning::APKINFO $B | $PKG $VC | $MIN $TGT | ${ABI:-native-code: none} | ${SPLIT:-split: none} ${REQ}"
+          SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -r | head -1)
+          DIR=build/app/outputs/flutter-apk
+
+          for APK in "$DIR/app-arm64-v8a-release.apk" "$DIR/app-release.apk" "$DIR/app-debug.apk"; do
+            [ -e "$APK" ] || continue
+            B=$(basename "$APK")
+            echo "::group::$B"
+            "$AAPT" dump badging "$APK" | head -50
+            echo "::endgroup::"
+
+            # Anything here that is required=true and absent on the handset
+            # makes the installer refuse with a generic "can't install".
+            "$AAPT" dump badging "$APK" \
+              | grep -E "^(sdkVersion|targetSdkVersion|native-code|uses-feature|compatible-screens|supports-screens|uses-library)" \
+              | head -20 | while IFS= read -r l; do echo "::warning::[$B] $l"; done
+
+            # Manifest flags that block sideloading outright.
+            "$AAPT" dump xmltree "$APK" --file AndroidManifest.xml > /tmp/m.txt 2>/dev/null || \
+              "$AAPT" dump xmltree "$APK" AndroidManifest.xml > /tmp/m.txt 2>/dev/null || true
+            grep -inE "testOnly|isSplitRequired|requiredSplitTypes|splitTypes|extractNativeLibs|minSdkVersion|debuggable" /tmp/m.txt \
+              | head -15 | while IFS= read -r l; do echo "::warning::[$B] MANIFEST $l"; done
+
+            # Signing scheme + certificate identity.
+            "$SIGNER" verify --print-certs "$APK" 2>&1 \
+              | grep -iE "Signer #1 certificate SHA-256|Verified using v[1-4]|DOES NOT VERIFY|WARNING" \
+              | head -8 | while IFS= read -r l; do echo "::warning::[$B] SIGN $l"; done
+
+            # 16 KB page alignment: Android 15 refuses unaligned native libs.
+            python3 - "$APK" <<'PYEOF'
+          import sys, zipfile
+          apk = sys.argv[1]
+          name = apk.split('/')[-1]
+          with zipfile.ZipFile(apk) as z:
+              libs = [i for i in z.infolist() if i.filename.endswith('.so')]
+              stored = [i for i in libs if i.compress_type == zipfile.ZIP_STORED]
+              bad = [i for i in stored if i.header_offset % 16384 != 0]
+              print(f"::warning::[{name}] native libs={len(libs)} uncompressed={len(stored)} "
+                    f"not-16KB-aligned={len(bad)}")
+              for i in bad[:3]:
+                  print(f"::warning::[{name}] unaligned {i.filename} @ {i.header_offset}")
+          PYEOF
           done
 
       - name: Collect APKs and report sizes
