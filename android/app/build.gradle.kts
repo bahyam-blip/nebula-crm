@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Must be applied AFTER the Android + Flutter plugins.
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -26,6 +28,24 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+    }
+
+    signingConfigs {
+        // A committed debug keystore so every build — local and CI — is signed
+        // with the SAME certificate. Without this, Gradle auto-generates a
+        // throwaway ~/.android/debug.keystore on each CI runner, the SHA-1
+        // changes every build, and Google Sign-In fails with
+        // ApiException: 10 (DEVELOPER_ERROR).
+        //
+        // SHA-1: F1:1C:8F:A4:D3:F2:D3:48:87:DC:B6:65:63:F1:58:C5:15:3C:2E:CF
+        // This is a DEBUG key only — it is not secret and must never sign a
+        // Play Store release.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {

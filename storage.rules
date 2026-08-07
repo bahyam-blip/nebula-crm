@@ -1,0 +1,91 @@
+rules_version = '2';
+
+// Nebula CRM — Cloud Storage security rules.
+// Mirrors the role model in firestore.rules. Storage rules can read Firestore
+// via firestore.get(), so roles stay in one source of truth: users/{uid}.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userRole() {
+      return isSignedIn() ? userDoc().role : 'none';
+    }
+
+    function isSuperAdmin() { return userRole() == 'superAdmin'; }
+    function isAdmin()      { return isSuperAdmin() || userRole() == 'admin'; }
+    function isManager()    { return isAdmin() || userRole() == 'manager'; }
+
+    // Viewers are read-only; every other role may contribute files.
+    function canWriteContent() {
+      return isSignedIn() && userRole() != 'viewer' && userRole() != 'none';
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function underSize(mb) {
+      return request.resource.size < mb * 1024 * 1024;
+    }
+
+    function isAllowedDoc() {
+      return request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('application/pdf')
+          || request.resource.contentType.matches('text/plain')
+          || request.resource.contentType.matches('application/msword')
+          || request.resource.contentType.matches(
+               'application/vnd.openxmlformats-officedocument.*');
+    }
+
+    // Profile photos — owner (or admin) writes, any teammate reads.
+    match /avatars/{userId}/{fileName} {
+      allow read:   if isSignedIn();
+      allow write:  if isSignedIn()
+                    && (request.auth.uid == userId || isAdmin())
+                    && isImage() && underSize(5);
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    match /contacts/{contactId}/{fileName} {
+      allow read:   if isSignedIn();
+      allow write:  if canWriteContent() && isAllowedDoc() && underSize(25);
+      allow delete: if isManager();
+    }
+
+    match /deals/{dealId}/{fileName} {
+      allow read:   if isSignedIn();
+      allow write:  if canWriteContent() && isAllowedDoc() && underSize(25);
+      allow delete: if isManager();
+    }
+
+    match /tickets/{ticketId}/{fileName} {
+      allow read:   if isSignedIn();
+      allow write:  if canWriteContent() && isAllowedDoc() && underSize(25);
+      allow delete: if isManager();
+    }
+
+    match /articles/{articleId}/{fileName} {
+      allow read:   if isSignedIn();
+      allow write:  if isManager() && isAllowedDoc() && underSize(25);
+      allow delete: if isManager();
+    }
+
+    match /teams/{teamId}/branding/{fileName} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin() && isImage() && underSize(10);
+      allow delete: if isAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -12,3 +12,9 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Exception: the DEBUG keystore is intentionally committed so that local and
+# CI builds share one certificate, keeping the SHA-1 registered with Firebase
+# stable (required for Google Sign-In). Debug keys are not secret.
+# Release keystores must still never be committed.
+!app/debug.keystore

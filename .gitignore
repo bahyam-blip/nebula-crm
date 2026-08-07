@@ -47,3 +47,6 @@ app.*.map.json
 
 # Logs
 *.log
+
+# See android/.gitignore — the debug keystore is deliberately tracked.
+!android/app/debug.keystore

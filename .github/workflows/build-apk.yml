@@ -40,16 +40,104 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Restore google-services.json
+      # ── Firebase Android config ────────────────────────────────────
+      # Google Sign-In fails with ApiException: 10 (DEVELOPER_ERROR) unless the
+      # signing certificate's SHA-1 is registered against the Firebase Android
+      # app AND google-services.json contains the resulting oauth_client entry.
+      #
+      # We register the committed debug keystore's SHA-1 and then pull a FRESH
+      # google-services.json straight from Firebase, so the config can never
+      # drift out of sync with the project.
+      - name: Register signing SHA-1 and fetch google-services.json
         env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          FIREBASE_PROJECT: nebula-crm-70f58
+          FIREBASE_ANDROID_APP_ID: "1:972178938095:android:8096a3ac04c2b96ecfa31a"
         run: |
-          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "::error::GOOGLE_SERVICES_JSON secret is not set. APK will fail to build."
+          set -e
+
+          # SHA-1 of android/app/debug.keystore (committed, stable).
+          SHA1=$(keytool -list -v \
+                   -keystore android/app/debug.keystore \
+                   -storepass android -alias androiddebugkey 2>/dev/null \
+                 | grep 'SHA1:' | awk '{print $2}')
+          echo "Debug keystore SHA-1: $SHA1"
+          if [ -z "$SHA1" ]; then
+            echo "::error::Could not read SHA-1 from android/app/debug.keystore"
             exit 1
           fi
-          echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
-          echo "google-services.json restored (size: $(wc -c < android/app/google-services.json) bytes)"
+
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/sa.json"
+            export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+            npm install -g firebase-tools@latest --silent
+
+            # Idempotent: re-registering an existing SHA is a no-op error.
+            echo "Registering SHA-1 with Firebase app $FIREBASE_ANDROID_APP_ID ..."
+            firebase apps:android:sha:create \
+              "$FIREBASE_ANDROID_APP_ID" "$SHA1" \
+              --project "$FIREBASE_PROJECT" 2>&1 | tee /tmp/sha.log || {
+                if grep -qiE "already exists|ALREADY_EXISTS" /tmp/sha.log; then
+                  echo "SHA-1 already registered — continuing."
+                else
+                  echo "::warning::Could not register SHA-1 automatically."
+                  sed 's/^/::warning::SHA /' /tmp/sha.log | head -8
+                fi
+              }
+
+            echo "Fetching fresh google-services.json ..."
+            if firebase apps:sdkconfig ANDROID "$FIREBASE_ANDROID_APP_ID" \
+                 --project "$FIREBASE_PROJECT" \
+                 --out android/app/google-services.json 2>&1 | tee /tmp/cfg.log; then
+              echo "Fetched google-services.json from Firebase."
+            else
+              echo "::warning::sdkconfig fetch failed; falling back to the GOOGLE_SERVICES_JSON secret."
+              sed 's/^/::warning::CFG /' /tmp/cfg.log | head -8
+            fi
+            rm -f "$HOME/sa.json"
+          fi
+
+          # Fallback to the stored secret if we still have no config.
+          if [ ! -s android/app/google-services.json ]; then
+            if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+              echo "::error::No google-services.json available (no service account and no GOOGLE_SERVICES_JSON secret)."
+              exit 1
+            fi
+            echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "Restored google-services.json from secret."
+          fi
+
+          # ── Validate: this is what actually determines Sign-In success ──
+          python3 - <<'PY'
+          import json, sys, os
+          p = 'android/app/google-services.json'
+          cfg = json.load(open(p))
+          pkg = 'com.nebula.nebula_crm'
+          clients = cfg.get('client', [])
+          me = [c for c in clients
+                if c.get('client_info', {}).get('android_client_info', {})
+                     .get('package_name') == pkg]
+          if not me:
+              print(f"::error::google-services.json has no client for package {pkg}.")
+              sys.exit(1)
+          oauth = me[0].get('oauth_client', [])
+          types = sorted({str(o.get('client_type')) for o in oauth})
+          print(f"oauth_client entries: {len(oauth)} (types: {types or 'none'})")
+          # type 1 = Android client (needs SHA-1); type 3 = web client (gives idToken)
+          has_android = any(o.get('client_type') == 1 for o in oauth)
+          has_web     = any(o.get('client_type') == 3 for o in oauth)
+          if not has_android:
+              print("::error::No Android OAuth client (client_type 1) in google-services.json.")
+              print("::error::This is the exact cause of ApiException: 10 (DEVELOPER_ERROR).")
+              print("::error::The SHA-1 is not registered on the Firebase Android app.")
+          if not has_web:
+              print("::error::No web OAuth client (client_type 3). Firebase needs it to mint an idToken.")
+              print("::error::Enable Google as a sign-in provider: Firebase console > Authentication > Sign-in method > Google.")
+          if not (has_android and has_web):
+              sys.exit(1)
+          print("google-services.json looks correct for Google Sign-In.")
+          PY
 
       - name: Show Flutter version
         run: flutter --version

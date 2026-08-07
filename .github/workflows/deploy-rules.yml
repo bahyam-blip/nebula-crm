@@ -1,23 +1,24 @@
-name: Deploy Firestore Rules
+name: Deploy Firebase Rules
 
 on:
   push:
     branches: [main, master]
     paths:
       - 'firestore.rules'
+      - 'storage.rules'
+      - 'firebase.json'
       - '.github/workflows/deploy-rules.yml'
   workflow_dispatch:
 
-# Required to authenticate to Firebase
 permissions:
   contents: read
   id-token: write
 
 jobs:
   deploy:
-    name: Deploy Firestore Security Rules
+    name: Deploy Firestore + Storage Rules
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout source
@@ -36,27 +37,64 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
-            echo "::warning::FIREBASE_SERVICE_ACCOUNT secret is not set. Skipping deployment."
-            exit 0
+            echo "::error::FIREBASE_SERVICE_ACCOUNT secret is not set."
+            exit 1
           fi
-          echo "$FIREBASE_SERVICE_ACCOUNT" > $HOME/service-account.json
-          echo "FIREBASE_SERVICE_ACCOUNT_PATH=$HOME/service-account.json" >> $GITHUB_ENV
+          echo "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/service-account.json"
+          if ! python3 -c "import json;json.load(open('$HOME/service-account.json'))"; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON. Re-paste the whole key file."
+            exit 1
+          fi
+          EMAIL=$(python3 -c "import json;print(json.load(open('$HOME/service-account.json')).get('client_email','?'))")
+          PROJ=$(python3 -c "import json;print(json.load(open('$HOME/service-account.json')).get('project_id','?'))")
+          echo "Service account: $EMAIL (project: $PROJ)"
+          echo "FIREBASE_SERVICE_ACCOUNT_PATH=$HOME/service-account.json" >> "$GITHUB_ENV"
 
+      # Deployed separately so a missing bucket doesn't mask the Firestore result.
       - name: Deploy Firestore rules
-        if: env.FIREBASE_SERVICE_ACCOUNT_PATH != ''
+        id: firestore
+        continue-on-error: true
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
         run: |
-          # .firebaserc + firebase.json in the repo make `firebase deploy`
-          # work without needing `firebase use`.
-          firebase deploy --only firestore:rules --project nebula-crm-70f58 || {
-            echo "::warning::Firestore deploy failed."
-            echo "::warning::This usually means Firestore database hasn't been created yet."
-            echo "::warning::Visit https://console.firebase.google.com/project/nebula-crm-70f58/firestore to create the database, then re-run this workflow."
+          set -o pipefail
+          if firebase deploy --only firestore:rules --project nebula-crm-70f58 \
+               --non-interactive 2>&1 | tee /tmp/fs.log; then
+            echo "Firestore rules deployed."
+          else
+            grep -iE "error|denied|not found|has not been used|PERMISSION|does not exist" /tmp/fs.log \
+              | head -12 | while IFS= read -r l; do echo "::error::FIRESTORE ${l}"; done
             exit 1
-          }
+          fi
+
+      - name: Deploy Storage rules
+        id: storage
+        continue-on-error: true
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
+        run: |
+          set -o pipefail
+          if firebase deploy --only storage --project nebula-crm-70f58 \
+               --non-interactive 2>&1 | tee /tmp/st.log; then
+            echo "Storage rules deployed."
+          else
+            grep -iE "error|denied|not found|has not been used|PERMISSION|does not exist|bucket" /tmp/st.log \
+              | head -12 | while IFS= read -r l; do echo "::error::STORAGE ${l}"; done
+            exit 1
+          fi
+
+      - name: Summarise
+        run: |
+          echo "Firestore: ${{ steps.firestore.outcome }}"
+          echo "Storage:   ${{ steps.storage.outcome }}"
+          if [ "${{ steps.firestore.outcome }}" != "success" ] || [ "${{ steps.storage.outcome }}" != "success" ]; then
+            echo "::error::A rule deployment failed — see the annotations above."
+            echo "::error::If it mentions a missing database or bucket, create it once in the console:"
+            echo "::error::Firestore: https://console.firebase.google.com/project/nebula-crm-70f58/firestore"
+            echo "::error::Storage:   https://console.firebase.google.com/project/nebula-crm-70f58/storage"
+            exit 1
+          fi
 
       - name: Cleanup
         if: always()
-        run: |
-          rm -f $HOME/service-account.json
+        run: rm -f "$HOME/service-account.json"
