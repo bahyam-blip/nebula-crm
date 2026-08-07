@@ -91,7 +91,7 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
         run: |
           set -o pipefail
-          if firebase deploy --only firestore:rules --project nebula-crm-70f58 \
+          if firebase deploy --only firestore:rules,firestore:indexes --project nebula-crm-70f58 \
                --non-interactive 2>&1 | tee /tmp/fs.log; then
             echo "Firestore rules deployed."
           else

@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import 'call_status.dart';
+
 import '../../auth/models/app_user.dart';
 
 /// Contact lifecycle stage.
@@ -42,6 +44,14 @@ class Contact extends Equatable {
     this.customFields = const {},
     this.activityCount = 0,
     this.openDealsCount = 0,
+    this.assignedTo,
+    this.assignedBy,
+    this.assignedAt,
+    this.callStatus = CallStatus.notCalled,
+    this.callAttempts = 0,
+    this.lastCallAt,
+    this.followUpAt,
+    this.source,
   });
 
   final String id;
@@ -69,6 +79,25 @@ class Contact extends Equatable {
   final Map<String, dynamic> customFields;
   final int activityCount;
   final int openDealsCount;
+
+  // ── Telecalling ──────────────────────────────────────────────
+  /// Telecaller currently responsible for working this lead.
+  final String? assignedTo;
+  final String? assignedBy;
+  final DateTime? assignedAt;
+  final CallStatus callStatus;
+  final int callAttempts;
+  final DateTime? lastCallAt;
+
+  /// When the caller promised to ring back.
+  final DateTime? followUpAt;
+
+  /// Where the lead came from (csv_import, manual, web_form...).
+  final String? source;
+
+  /// True when a promised callback is due.
+  bool get isFollowUpDue =>
+      followUpAt != null && followUpAt!.isBefore(DateTime.now());
 
   factory Contact.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -100,6 +129,14 @@ class Contact extends Equatable {
       ),
       activityCount: data['activityCount'] as int? ?? 0,
       openDealsCount: data['openDealsCount'] as int? ?? 0,
+      assignedTo: data['assignedTo'] as String?,
+      assignedBy: data['assignedBy'] as String?,
+      assignedAt: (data['assignedAt'] as Timestamp?)?.toDate(),
+      callStatus: CallStatusX.parse(data['callStatus'] as String?),
+      callAttempts: (data['callAttempts'] as num?)?.toInt() ?? 0,
+      lastCallAt: (data['lastCallAt'] as Timestamp?)?.toDate(),
+      followUpAt: (data['followUpAt'] as Timestamp?)?.toDate(),
+      source: data['source'] as String?,
     );
   }
 
@@ -131,6 +168,17 @@ class Contact extends Equatable {
         'updatedAt': FieldValue.serverTimestamp(),
         'customFields': customFields,
         'activityCount': activityCount,
+        'assignedTo': assignedTo,
+        'assignedBy': assignedBy,
+        'assignedAt':
+            assignedAt != null ? Timestamp.fromDate(assignedAt!) : null,
+        'callStatus': callStatus.name,
+        'callAttempts': callAttempts,
+        'lastCallAt':
+            lastCallAt != null ? Timestamp.fromDate(lastCallAt!) : null,
+        'followUpAt':
+            followUpAt != null ? Timestamp.fromDate(followUpAt!) : null,
+        'source': source,
         'openDealsCount': openDealsCount,
       };
 

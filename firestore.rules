@@ -259,6 +259,28 @@ service cloud.firestore {
     }
 
     // ── Default deny ──────────────────────────────────────────
+    // ── Call logs ──────────────────────────────────────────────
+    // Append-only history. A caller may write their own entries and read
+    // their own; managers see the whole team. Nobody edits or deletes,
+    // because an alterable audit trail is not an audit trail.
+    match /call_logs/{logId} {
+      allow read: if isSignedIn()
+                  && (resource.data.callerId == request.auth.uid
+                      || (isManager() && resource.data.teamId == userTeamId()));
+      allow create: if isSignedIn()
+                    && request.resource.data.callerId == request.auth.uid
+                    && request.resource.data.teamId == userTeamId();
+      allow update, delete: if false;
+    }
+
+    // ── Audit trail ────────────────────────────────────────────
+    // Written by privileged actions, readable only by super admins.
+    match /audit_logs/{entryId} {
+      allow read: if isSuperAdmin();
+      allow create: if isAdmin() || isManager();
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

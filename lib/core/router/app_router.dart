@@ -12,6 +12,10 @@ import '../../features/contacts/presentation/screens/contacts_list_screen.dart';
 import '../../features/contacts/presentation/screens/contact_detail_screen.dart';
 import '../../features/contacts/presentation/screens/contact_form_screen.dart';
 import '../../features/contacts/presentation/screens/csv_import_screen.dart';
+import '../../features/telecalling/presentation/screens/calling_dashboard_screen.dart';
+import '../../features/telecalling/presentation/screens/lead_distribution_screen.dart';
+import '../../features/telecalling/presentation/screens/my_leads_screen.dart';
+import '../../features/telecalling/presentation/screens/super_admin_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/pipeline/presentation/screens/pipeline_board_screen.dart';
 import '../../features/pipeline/presentation/screens/deal_detail_screen.dart';
@@ -126,6 +130,26 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const CsvImportScreen(),
       ),
       GoRoute(
+        path: '/my-leads',
+        name: 'myLeads',
+        builder: (_, __) => const MyLeadsScreen(),
+      ),
+      GoRoute(
+        path: '/leads/distribute',
+        name: 'leadDistribution',
+        builder: (_, __) => const LeadDistributionScreen(),
+      ),
+      GoRoute(
+        path: '/calling-performance',
+        name: 'callingDashboard',
+        builder: (_, __) => const CallingDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/super-admin',
+        name: 'superAdmin',
+        builder: (_, __) => const SuperAdminScreen(),
+      ),
+      GoRoute(
         path: '/deals/new',
         name: 'dealForm',
         builder: (_, __) => const DealFormScreen(),
@@ -191,6 +215,36 @@ class _MoreScreen extends StatelessWidget {
         label: 'Team Members',
         route: '/team',
         color: AppColors.accent,
+      ),
+      _MenuItem(
+        icon: Icons.headset_mic,
+        label: 'My Leads',
+        route: '/my-leads',
+        color: AppColors.primary,
+      ),
+      _MenuItem(
+        icon: Icons.shuffle,
+        label: 'Distribute Leads',
+        route: '/leads/distribute',
+        color: AppColors.stageProposal,
+      ),
+      _MenuItem(
+        icon: Icons.speed,
+        label: 'Calling Performance',
+        route: '/calling-performance',
+        color: AppColors.success,
+      ),
+      _MenuItem(
+        icon: Icons.upload_file,
+        label: 'Import Contacts',
+        route: '/contacts/import',
+        color: AppColors.info,
+      ),
+      _MenuItem(
+        icon: Icons.shield,
+        label: 'Super Admin',
+        route: '/super-admin',
+        color: AppColors.tertiary,
       ),
       _MenuItem(
         icon: Icons.trending_up,
