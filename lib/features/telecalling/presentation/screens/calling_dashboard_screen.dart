@@ -6,6 +6,7 @@ import '../../../../core/services/firebase_boot.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/widgets/common_widgets.dart';
+import '../../../auth/models/app_user.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../models/call_log.dart';
 import '../../providers/telecalling_provider.dart';

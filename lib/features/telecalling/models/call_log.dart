@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
-import '../../contacts/services/csv_import_service.dart' show CallStatus;
+import '../../contacts/models/call_status.dart';
 
 /// A single call attempt made by a telecaller against a contact.
 ///

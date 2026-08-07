@@ -11,6 +11,7 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/common_widgets.dart';
 import '../../../auth/models/app_user.dart';
 import '../../../auth/providers/auth_provider.dart';
+import '../../../contacts/models/call_status.dart';
 import '../../../contacts/models/contact.dart';
 import '../../providers/telecalling_provider.dart';
 

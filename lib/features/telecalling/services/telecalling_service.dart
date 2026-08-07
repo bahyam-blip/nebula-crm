@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../auth/models/app_user.dart';
 import '../../contacts/models/contact.dart';
-import '../../contacts/services/csv_import_service.dart';
+import '../../contacts/models/call_status.dart';
 import '../models/call_log.dart';
 
 /// Firestore collections owned by the telecalling feature.
