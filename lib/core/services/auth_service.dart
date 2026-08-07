@@ -290,6 +290,48 @@ class AuthService {
     } catch (_) {}
   }
 
+  /// Make the workspace creator a super admin.
+  ///
+  /// Accounts created before the bootstrap logic existed were written as
+  /// salesRep, which left nobody able to open Super Admin -- and nobody to
+  /// promote them, since promotion requires a super admin. If system/bootstrap
+  /// has never been claimed, the signed-in user claims it and promotes
+  /// themselves. Create-once semantics mean only one account can ever do this.
+  Future<bool> claimSuperAdminIfUnowned(User user) async {
+    try {
+      final bootstrapRef =
+          _firestore.collection(AppConstants.colSystem).doc('bootstrap');
+      final snap = await bootstrapRef.get();
+
+      if (snap.exists) {
+        final owner = (snap.data() ?? const {})['ownerId'];
+        if (owner != user.uid) return false; // someone else owns it
+      } else {
+        await bootstrapRef.set({
+          'ownerId': user.uid,
+          'claimedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      final userRef =
+          _firestore.collection(AppConstants.colUsers).doc(user.uid);
+      final me = await userRef.get();
+      if (!me.exists) return false;
+      if ((me.data() ?? const {})['role'] == UserRole.superAdmin.name) {
+        return false; // already there
+      }
+
+      await userRef.update({
+        'role': UserRole.superAdmin.name,
+        'teamId': AppConstants.defaultTeamId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Repair an account that authenticated but has no Firestore profile.
   ///
   /// Accounts created before the bootstrap fix are in exactly that state:

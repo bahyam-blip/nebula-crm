@@ -138,6 +138,12 @@ service cloud.firestore {
         (request.auth.uid == userId
           && request.resource.data.role == resource.data.role
           && request.resource.data.teamId == resource.data.teamId)
+        // The workspace creator promotes themselves to superAdmin. Gated on
+        // owning system/bootstrap, which is create-once, so exactly one
+        // account can ever do this and no one can grant it to themselves later.
+        || (request.auth.uid == userId
+            && request.resource.data.role == 'superAdmin'
+            && bootstrapOwner() == request.auth.uid)
         || isSuperAdmin()
         || (isAdmin() && sameTeam(resource)
             && request.resource.data.role in ['salesRep', 'supportAgent', 'viewer', 'manager'])

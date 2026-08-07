@@ -48,6 +48,28 @@ class FirestoreService {
     return {...data, 'teamId': teamId};
   }
 
+  /// Sort documents newest-first on [field] without a composite index.
+  ///
+  /// Firestore needs a composite index for where() + orderBy(). The CI
+  /// service account lacks roles/datastore.indexAdmin, so every such query
+  /// failed with failed-precondition. Page sizes here are small, so sorting
+  /// client-side is both cheaper and one less thing to provision.
+  List<T> _sortDesc<T>(
+    List<QueryDocumentSnapshot> docs,
+    String field,
+    T Function(DocumentSnapshot) parse,
+  ) {
+    final sorted = [...docs]..sort((a, b) {
+        final av = (a.data() as Map<String, dynamic>?)?[field];
+        final bv = (b.data() as Map<String, dynamic>?)?[field];
+        if (av is Timestamp && bv is Timestamp) return bv.compareTo(av);
+        if (bv == null) return -1;
+        if (av == null) return 1;
+        return 0;
+      });
+    return sorted.map(parse).toList();
+  }
+
   Query _scoped(String collection) {
     final Query q = _db.collection(collection);
     return teamId.isEmpty ? q : q.where('teamId', isEqualTo: teamId);
@@ -64,9 +86,9 @@ class FirestoreService {
   }) {
     Query query = _scoped(AppConstants.colContacts);
     if (ownerId != null) query = query.where('ownerId', isEqualTo: ownerId);
-    query = query.orderBy('updatedAt', descending: true).limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Contact.fromFirestore(d)).toList());
+    query = query.limit(limit); // ordering applied client-side
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'updatedAt', Contact.fromFirestore));
   }
 
   Future<Contact?> getContact(String id) async {
@@ -108,9 +130,9 @@ class FirestoreService {
     } else if (dealId != null) {
       query = query.where('dealId', isEqualTo: dealId);
     }
-    query = query.orderBy('timestamp', descending: true).limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Activity.fromFirestore(d)).toList());
+    query = query.limit(limit); // ordering applied client-side
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'timestamp', Activity.fromFirestore));
   }
 
   Future<void> logActivity(Activity activity) async {
@@ -129,9 +151,9 @@ class FirestoreService {
     Query query = _scoped(AppConstants.colDeals);
     if (ownerId != null) query = query.where('ownerId', isEqualTo: ownerId);
     if (stage != null) query = query.where('stage', isEqualTo: stage);
-    query = query.orderBy('updatedAt', descending: true).limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Deal.fromFirestore(d)).toList());
+    query = query.limit(limit); // ordering applied client-side
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'updatedAt', Deal.fromFirestore));
   }
 
   Stream<Deal?> watchDeal(String id) {
@@ -181,9 +203,9 @@ class FirestoreService {
   Stream<List<Campaign>> watchCampaigns({String? ownerId, int limit = 50}) {
     Query query = _scoped(AppConstants.colCampaigns);
     if (ownerId != null) query = query.where('ownerId', isEqualTo: ownerId);
-    query = query.orderBy('updatedAt', descending: true).limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Campaign.fromFirestore(d)).toList());
+    query = query.limit(limit); // ordering applied client-side
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'updatedAt', Campaign.fromFirestore));
   }
 
   Future<String> createCampaign(Campaign c) async {
@@ -215,9 +237,9 @@ class FirestoreService {
     if (status != null) {
       query = query.where('status', isEqualTo: status);
     }
-    query = query.orderBy('createdAt', descending: true).limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Ticket.fromFirestore(d)).toList());
+    query = query.limit(limit); // ordering applied client-side
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'createdAt', Ticket.fromFirestore));
   }
 
   Future<String> createTicket(Ticket t) async {
@@ -248,10 +270,9 @@ class FirestoreService {
     if (category != null) query = query.where('category', isEqualTo: category);
     query = query
         .where('published', isEqualTo: true)
-        .orderBy('updatedAt', descending: true)
         .limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Article.fromFirestore(d)).toList());
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'updatedAt', Article.fromFirestore));
   }
 
   Future<Article?> getArticle(String id) async {
@@ -275,9 +296,9 @@ class FirestoreService {
     if (!includeDismissed) {
       query = query.where('dismissed', isEqualTo: false);
     }
-    query = query.orderBy('generatedAt', descending: true).limit(limit);
-    return query.snapshots().map((snap) =>
-        snap.docs.map((d) => Insight.fromFirestore(d)).toList());
+    query = query.limit(limit); // ordering applied client-side
+    return query.snapshots().map(
+        (snap) => _sortDesc(snap.docs, 'generatedAt', Insight.fromFirestore));
   }
 
   Future<void> dismissInsight(String id) async {

@@ -29,7 +29,16 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
       .doc(user.uid)
       .snapshots()
       .asyncMap((d) async {
-    if (d.exists) return AppUser.fromFirestore(d);
+    if (d.exists) {
+      final me = AppUser.fromFirestore(d);
+      // The workspace creator promotes themselves if nobody holds the
+      // bootstrap claim yet, so there is never a workspace with no admin.
+      if (me.role != UserRole.superAdmin && !repairAttempted) {
+        repairAttempted = true;
+        await ref.read(authServiceProvider).claimSuperAdminIfUnowned(user);
+      }
+      return me;
+    }
 
     // Try once; the stream re-emits when the document appears.
     if (!repairAttempted) {
