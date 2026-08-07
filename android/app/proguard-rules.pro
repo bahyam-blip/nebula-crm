@@ -28,3 +28,19 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# ── Play Core / deferred components ────────────────────────────
+# Flutter's engine references Play Core split-install classes that are not
+# on the classpath for a plain APK build. Without these, R8 aborts with
+# "Missing class com.google.android.play.core...".
+-dontwarn com.google.android.play.core.**
+-keep class com.google.android.play.core.** { *; }
+-dontwarn io.flutter.embedding.engine.deferredcomponents.**
+-keep class io.flutter.embedding.android.FlutterPlayStoreSplitApplication { *; }
+
+# ── Plugins that use reflection / optional deps ────────────────
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.lang.model.**
+-dontwarn org.slf4j.**
+-dontwarn kotlinx.**
+-keep class androidx.lifecycle.** { *; }
