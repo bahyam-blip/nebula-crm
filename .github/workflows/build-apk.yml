@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build Release APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -159,7 +159,7 @@ jobs:
       - name: Build debug APK
         run: |
           set -o pipefail
-          if flutter build apk --debug --no-tree-shake-icons 2>&1 | tee /tmp/build.log; then
+          if flutter build apk --release --split-per-abi --no-tree-shake-icons 2>&1 | tee /tmp/build.log; then
             echo "Build succeeded."
           else
             echo "::group::Root-cause lines"
@@ -178,17 +178,25 @@ jobs:
           ls -lh build/app/outputs/flutter-apk/ || true
           find build -name "*.apk" -exec ls -lh {} \;
 
-      - name: Rename APK for clarity
+      - name: Collect APKs and report sizes
         run: |
           mkdir -p artifacts
-          cp build/app/outputs/flutter-apk/app-debug.apk artifacts/nebula-crm-debug.apk
+          cp build/app/outputs/flutter-apk/*.apk artifacts/ 2>/dev/null || true
+          # Drop the .sha1 companions Gradle emits.
+          rm -f artifacts/*.sha1
+          echo "### APK sizes" >> "$GITHUB_STEP_SUMMARY"
+          for f in artifacts/*.apk; do
+            SZ=$(du -h "$f" | cut -f1)
+            echo "- $(basename "$f") — $SZ" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::APK $(basename "$f") $SZ"
+          done
           ls -lh artifacts/
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nebula-crm-debug-apk
-          path: artifacts/nebula-crm-debug.apk
+          name: nebula-crm-apk
+          path: artifacts/*.apk
           retention-days: 90
           if-no-files-found: error
 
@@ -196,7 +204,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/nebula-crm-debug.apk
+          files: artifacts/*.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

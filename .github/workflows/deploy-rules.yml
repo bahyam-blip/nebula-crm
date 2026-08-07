@@ -50,6 +50,39 @@ jobs:
           echo "Service account: $EMAIL (project: $PROJ)"
           echo "FIREBASE_SERVICE_ACCOUNT_PATH=$HOME/service-account.json" >> "$GITHUB_ENV"
 
+      # Definitive diagnosis: call the Firestore + Storage admin APIs directly,
+      # bypassing the CLI's serviceusage precheck. Results come back as
+      # annotations so they're readable without downloading logs.
+      - name: Diagnose project state
+        continue-on-error: true
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
+        run: |
+          pip install --quiet google-auth requests
+          python3 - <<'PY'
+          import json, google.auth, google.auth.transport.requests as gt, requests
+          sa = json.load(open("/home/runner/service-account.json"))
+          email = sa.get("client_email"); proj = sa.get("project_id")
+          print(f"::warning::SA_EMAIL {email}")
+          print(f"::warning::SA_PROJECT {proj}")
+          creds, _ = google.auth.default(
+              scopes=["https://www.googleapis.com/auth/cloud-platform"])
+          creds.refresh(gt.Request())
+          h = {"Authorization": f"Bearer {creds.token}"}
+          for label, url in [
+              ("FIRESTORE_DB",
+               "https://firestore.googleapis.com/v1/projects/nebula-crm-70f58/databases"),
+              ("STORAGE_BUCKETS",
+               "https://firebasestorage.googleapis.com/v1beta/projects/nebula-crm-70f58/buckets"),
+          ]:
+              try:
+                  r = requests.get(url, headers=h, timeout=30)
+                  body = r.text.replace("\n", " ")[:300]
+                  print(f"::warning::{label} HTTP {r.status_code} {body}")
+              except Exception as e:
+                  print(f"::warning::{label} EXCEPTION {e}")
+          PY
+
       # Deployed separately so a missing bucket doesn't mask the Firestore result.
       - name: Deploy Firestore rules
         id: firestore
