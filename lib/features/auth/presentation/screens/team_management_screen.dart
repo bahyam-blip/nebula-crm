@@ -1,16 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
-import '../../auth/models/app_user.dart';
-import '../../auth/providers/auth_provider.dart';
-import '../../../core/constants/app_constants.dart';
-import '../../../core/services/firestore_service.dart';
-import '../../../core/theme/app_colors.dart';
-import '../../../core/utils/extensions.dart';
-import '../../../core/utils/formatters.dart';
-import '../../../core/widgets/common_widgets.dart';
+import '../../models/app_user.dart';
+import '../../providers/auth_provider.dart';
+import '../../../../core/constants/app_constants.dart';
+import '../../../../core/services/firestore_service.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/extensions.dart';
+import '../../../../core/utils/formatters.dart';
+import '../../../../core/widgets/common_widgets.dart';
 
 /// Stream of all users in the current user's team (admin only).
 final teamMembersProvider = StreamProvider<List<AppUser>>((ref) async* {

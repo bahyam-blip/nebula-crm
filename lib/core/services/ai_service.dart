@@ -5,7 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 
-import '../../features/assistant/models/insight.dart';
+import '../assistant/models/insight.dart';
 
 final logger = Logger(printer: PrettyPrinter(methodCount: 0));
 

@@ -1,11 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/assistant/models/insight.dart';
-import '../../features/contacts/models/contact.dart';
-import '../../features/marketing/models/campaign.dart';
-import '../../features/pipeline/models/deal.dart';
-import '../../features/service/models/ticket.dart';
+import '../assistant/models/insight.dart';
+import '../contacts/models/contact.dart';
+import '../marketing/models/campaign.dart';
+import '../pipeline/models/deal.dart';
+import '../service/models/ticket.dart';
 import '../constants/app_constants.dart';
 
 /// Firestore instance provider.
