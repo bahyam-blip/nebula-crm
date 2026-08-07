@@ -31,6 +31,13 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
             title: const Text('Contacts'),
             pinned: true,
             stretch: true,
+            actions: [
+              IconButton(
+                tooltip: 'Import from CSV',
+                icon: const Icon(Icons.upload_file),
+                onPressed: () => context.push('/contacts/import'),
+              ),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               title: Text('Contacts', style: context.textTheme.titleLarge),
               background: Container(

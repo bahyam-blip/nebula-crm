@@ -11,6 +11,7 @@ import '../../features/auth/presentation/screens/team_management_screen.dart';
 import '../../features/contacts/presentation/screens/contacts_list_screen.dart';
 import '../../features/contacts/presentation/screens/contact_detail_screen.dart';
 import '../../features/contacts/presentation/screens/contact_form_screen.dart';
+import '../../features/contacts/presentation/screens/csv_import_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/pipeline/presentation/screens/pipeline_board_screen.dart';
 import '../../features/pipeline/presentation/screens/deal_detail_screen.dart';
@@ -118,6 +119,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         path: '/contacts/new',
         name: 'contactForm',
         builder: (_, __) => const ContactFormScreen(),
+      ),
+      GoRoute(
+        path: '/contacts/import',
+        name: 'contactImport',
+        builder: (_, __) => const CsvImportScreen(),
       ),
       GoRoute(
         path: '/deals/new',
