@@ -58,13 +58,32 @@ jobs:
         run: flutter pub get
 
       - name: Verify analysis (informational)
-        run: flutter analyze || true
+        run: |
+          flutter analyze 2>&1 | tee /tmp/analyze.log || true
+          # Surface real analyzer errors as annotations so they're visible
+          # in the run summary and via the API without downloading logs.
+          grep -iE "^[[:space:]]*error[[:space:]]" /tmp/analyze.log | head -40 \
+            | while IFS= read -r line; do echo "::error::ANALYZE ${line}"; done || true
 
       - name: Configure Flutter for non-interactive build
         run: flutter config --no-analytics
 
       - name: Build debug APK
-        run: flutter build apk --debug --no-tree-shake-icons
+        run: |
+          set -o pipefail
+          if flutter build apk --debug --no-tree-shake-icons 2>&1 | tee /tmp/build.log; then
+            echo "Build succeeded."
+          else
+            echo "::group::Root-cause lines"
+            # Dart compile errors, Gradle failures and missing-asset errors.
+            grep -nE "\.dart:[0-9]+:[0-9]+:|^[[:space:]]*Error:|FAILURE:|What went wrong|Execution failed|no such file|not found in|Cannot resolve" \
+              /tmp/build.log | head -40 | tee /tmp/root.log
+            echo "::endgroup::"
+            while IFS= read -r line; do
+              echo "::error::BUILD ${line}"
+            done < /tmp/root.log
+            exit 1
+          fi
 
       - name: List built APK
         run: |

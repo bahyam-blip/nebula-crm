@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
 
-import '../auth/models/app_user.dart';
+import '../../features/auth/models/app_user.dart';
 import '../constants/app_constants.dart';
 
 final logger = Logger(printer: PrettyPrinter(methodCount: 0));

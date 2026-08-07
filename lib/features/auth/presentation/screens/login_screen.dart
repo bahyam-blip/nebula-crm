@@ -69,22 +69,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // ── Hero ──────────────────────────────────────
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.4),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                Center(
+                  child: Image.asset(
+                    'assets/images/nebula_logo.png',
+                    height: 132,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
                   ),
-                  child: const Icon(Icons.auto_awesome,
-                      color: Colors.white, size: 32),
                 ),
                 const SizedBox(height: 24),
                 Text('Welcome back', style: context.textTheme.displaySmall),
