@@ -96,9 +96,28 @@ jobs:
             echo "::warning::No workers.dev URL found; the worker may use a custom route."
             exit 0
           fi
-          sleep 5
-          CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" "$URL/v1/health" || echo 000)
+          # A newly registered workers.dev subdomain needs a little time to
+          # resolve, so retry rather than declaring failure on the first miss.
+          CODE=000
+          for i in 1 2 3 4 5 6; do
+            CODE=$(curl -s --max-time 15 -o /tmp/health.txt -w "%{http_code}" "$URL/v1/health") || CODE=000
+            [ "$CODE" = "200" ] && break
+            echo "attempt $i -> $CODE, waiting..."
+            sleep 15
+          done
           echo "::warning::HEALTH $URL/v1/health -> HTTP $CODE $(head -c 120 /tmp/health.txt)"
+
           # An unauthenticated upload must be rejected.
-          AUTHCODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/v1/upload?path=avatars/x/a.png" || echo 000)
+          AUTHCODE=$(curl -s --max-time 15 -o /dev/null -w "%{http_code}" \
+                       -X POST "$URL/v1/upload?path=avatars/x/a.png") || AUTHCODE=000
           echo "::warning::AUTHCHECK unauthenticated upload -> HTTP $AUTHCODE (expect 401)"
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Worker did not respond 200 on /v1/health."
+            exit 1
+          fi
+          if [ "$AUTHCODE" != "401" ]; then
+            echo "::error::Unauthenticated upload returned $AUTHCODE, expected 401."
+            exit 1
+          fi
+          echo "::warning::SMOKE TESTS PASSED"
