@@ -195,15 +195,61 @@ class AuthService {
 
   Future<void> _createUserDoc(User user, String displayName) async {
     final ref = _firestore.collection(AppConstants.colUsers).doc(user.uid);
+
+    // Determine if this is the first user ever — if so, make them superAdmin.
+    // Otherwise default to salesRep (employee role).
+    final usersSnapshot = await _firestore
+        .collection(AppConstants.colUsers)
+        .limit(1)
+        .get();
+    final isFirstUser = usersSnapshot.docs.isEmpty;
+
+    // Each new user gets their own team (so signups are isolated).
+    // The superAdmin can later move users between teams / promote them.
+    final teamId = isFirstUser ? 'default-team' : 'team-${user.uid}';
+    final teamName = isFirstUser ? 'Default Team' : '${displayName}s Team';
+
+    final role = isFirstUser ? UserRole.superAdmin : UserRole.salesRep;
+
+    // Create the team doc (if it doesn't exist)
+    final teamRef = _firestore.collection(AppConstants.colTeams).doc(teamId);
+    final teamSnap = await teamRef.get();
+    if (!teamSnap.exists) {
+      await teamRef.set({
+        'id': teamId,
+        'name': teamName,
+        'ownerId': user.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+        'plan': 'free',
+      });
+    }
+
     final appUser = AppUser(
       id: user.uid,
       email: user.email ?? '',
       displayName: displayName,
       photoUrl: user.photoURL,
+      role: role,
+      teamId: teamId,
       createdAt: DateTime.now(),
       lastActiveAt: DateTime.now(),
     );
     await ref.set(appUser.toFirestore());
+
+    // Log the role assignment for audit
+    await _firestore.collection(AppConstants.colActivities).add({
+      'type': 'user_signed_up',
+      'ownerId': user.uid,
+      'title': 'New user signed up',
+      'description': '$displayName joined as ${role.label}',
+      'metadata': {
+        'role': role.name,
+        'teamId': teamId,
+        'isFirstUser': isFirstUser,
+        'email': user.email,
+      },
+      'timestamp': FieldValue.serverTimestamp(),
+    });
   }
 
   /// Translate Firebase error codes to user-friendly messages.

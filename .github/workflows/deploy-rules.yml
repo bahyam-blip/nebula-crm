@@ -1,0 +1,63 @@
+name: Deploy Firestore Rules
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'firestore.rules'
+      - '.github/workflows/deploy-rules.yml'
+  workflow_dispatch:
+
+# Required to authenticate to Firebase
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy Firestore Security Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@latest
+
+      - name: Write service account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT secret is not set. Skipping deployment."
+            exit 0
+          fi
+          echo "$FIREBASE_SERVICE_ACCOUNT" > $HOME/service-account.json
+          echo "FIREBASE_SERVICE_ACCOUNT_PATH=$HOME/service-account.json" >> $GITHUB_ENV
+
+      - name: Deploy Firestore rules
+        if: env.FIREBASE_SERVICE_ACCOUNT_PATH != ''
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
+        run: |
+          # Set the project
+          firebase use nebula-crm-70f58
+
+          # Deploy only the rules (creates the database if needed)
+          firebase deploy --only firestore:rules --project nebula-crm-70f58 || {
+            echo "::warning::First-time deploy may fail if Firestore database hasn't been created yet."
+            echo "::warning::Visit https://console.firebase.google.com/project/nebula-crm-70f58/firestore to create the database, then re-run this workflow."
+            exit 1
+          }
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f $HOME/service-account.json

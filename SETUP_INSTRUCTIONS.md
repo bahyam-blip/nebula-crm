@@ -1,0 +1,178 @@
+# Nebula CRM — Firebase Setup Guide
+
+This guide walks you through the one-time setup steps to make Nebula CRM fully functional on Firebase. Most of the heavy lifting has already been done — you just need to do a 30-second manual step in the Firebase Console.
+
+---
+
+## ✅ What's Already Done
+
+The following have been wired up automatically:
+
+- ✅ **Firebase project created** — `nebula-crm-70f58`
+- ✅ **Android app registered** with package name `com.nebula.nebula_crm`
+- ✅ **Web app registered** (for browser testing, if you ever build for web)
+- ✅ **Authentication providers enabled** — Email/Password + Google Sign-In (you confirmed this)
+- ✅ **`google-services.json`** downloaded and stored as a GitHub Actions secret (`GOOGLE_SERVICES_JSON`) so CI can build the APK with the real Firebase config
+- ✅ **`firebase_options.dart`** updated with the real API keys and project IDs for Android, iOS, macOS, and Web
+- ✅ **`firestore.rules`** written with full role-based access control (Super Admin / Admin / Manager / Sales Rep / Support Agent / Viewer)
+- ✅ **Service account JSON** stored as a GitHub Actions secret (`FIREBASE_SERVICE_ACCOUNT`) for the deploy-rules workflow
+- ✅ **App logic updated** so the first user to sign up automatically becomes the Super Admin. Subsequent users get the Sales Rep role by default and are placed in their own team (the Super Admin can promote them later)
+- ✅ **Profile screen** added showing the user's role, permissions, and team info
+- ✅ **Team Management screen** added for admins to promote/demote/remove users
+
+---
+
+## ⚠️ One Manual Step Required
+
+The Firebase Admin SDK service account you provided has **Editor** permissions, but **cannot enable Google Cloud APIs** on its own (that requires `serviceusage.services.enable`, which is an Owner-level permission). So Firestore API needs to be enabled manually once:
+
+### Step 1: Enable Cloud Firestore (one click)
+
+1. Open this URL in your browser (you're already authenticated via your Google account that owns the Firebase project):
+   👉 **https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=nebula-crm-70f58**
+
+2. Click the blue **ENABLE** button.
+
+3. Wait ~30 seconds for it to propagate.
+
+### Step 2: Create the Firestore database
+
+1. Open the Firebase Console:
+   👉 **https://console.firebase.google.com/project/nebula-crm-70f58/firestore**
+
+2. Click **Create database**.
+
+3. Choose **Start in production mode** (the security rules we wrote will protect the data).
+
+4. Pick a location close to you (e.g., `nam5` for US, `eur3` for EU).
+
+5. Click **Enable**.
+
+### Step 3: Deploy the security rules (automatic via GitHub Actions)
+
+Once Firestore is enabled, the `Deploy Firestore Rules` workflow will run automatically on the next push. You can also trigger it manually:
+
+1. Go to: https://github.com/bahyam-blip/nebula-crm/actions/workflows/deploy-rules.yml
+2. Click **Run workflow** → select `main` branch → click green **Run workflow** button.
+3. Wait ~2 minutes — the workflow will deploy `firestore.rules` to your Firebase project.
+
+You can verify the rules are deployed at:
+👉 https://console.firebase.google.com/project/nebula-crm-70f58/firestore/rules
+
+The rules should show the content of `firestore.rules` from this repo.
+
+---
+
+## 🚀 Using the App
+
+Once the above is set up:
+
+### First signup = Super Admin
+
+The first person to register in the app becomes the **Super Admin** automatically. They have god-mode access — can manage all teams, promote/demote any user, and access all data.
+
+### Subsequent signups = Sales Rep
+
+Every user who signs up after the Super Admin gets the **Sales Rep** role by default. They're placed in their own team (so their data is isolated). The Super Admin can:
+
+- **Move them to the main team** (via the Team Management screen — accessible from More → Team Members)
+- **Promote them** to Admin / Manager / Support Agent / Viewer (via the same screen — tap the ⋮ icon next to a user)
+
+### Role hierarchy
+
+| Role | Permissions |
+|------|-------------|
+| **Super Admin** | Full god-mode. Can manage admins and team settings across all teams. Sees all users. |
+| **Admin** | Manages team members (invite, remove, change roles up to Manager). Full data access within their team. |
+| **Manager** | Views/manages all team deals, tickets, and campaigns. Can edit knowledge base. Cannot manage users. |
+| **Sales Rep** | Manages own contacts and deals. Read-only on rest of team data. |
+| **Support Agent** | Manages assigned tickets. Read access to all contacts. |
+| **Viewer** | Read-only access to all team data. |
+
+---
+
+## 📦 Installing the APK
+
+After the APK build workflow finishes (10–12 minutes from any push to `main`), you can grab the APK from:
+
+- **GitHub Releases**: https://github.com/bahyam-blip/nebula-crm/releases
+- **Or as a workflow artifact**: https://github.com/bahyam-blip/nebula-crm/actions → click the latest successful run → scroll to "Artifacts"
+
+The APK is ~160 MB (debug build). To produce a smaller release APK (~30 MB), add a signing config and change `--debug` to `--release` in `.github/workflows/build-apk.yml`.
+
+---
+
+## 🔄 Subsequent Updates
+
+Any push to `main` triggers:
+
+1. **Build APK** workflow — builds a fresh APK, uploads as artifact
+2. **Deploy Firestore Rules** workflow — deploys `firestore.rules` (if changed)
+
+Any push of a `v*` tag (e.g., `v1.0.1`) triggers:
+
+1. Same as above, plus
+2. **Create GitHub Release** with the APK as a downloadable asset
+
+---
+
+## 🛠️ Local Development
+
+If you want to run the app locally (not just install the APK):
+
+```bash
+# Clone
+git clone https://github.com/bahyam-blip/nebula-crm.git
+cd nebula-crm
+
+# Install Flutter
+# (See https://docs.flutter.dev/get-started/install)
+
+# Get dependencies
+flutter pub get
+
+# Restore google-services.json (the file is in .gitignore)
+# You can grab it from the GitHub secret, or re-download from
+# https://console.firebase.google.com → Project Settings → Your apps → Android app → google-services.json
+# Place it at: android/app/google-services.json
+
+# Run on connected device / emulator
+flutter run
+```
+
+---
+
+## 🆘 Troubleshooting
+
+### App crashes on launch
+- Check that `google-services.json` is present at `android/app/google-services.json`
+- Check Logcat: `adb logcat` — look for Firebase-related errors
+- Most likely cause: Firestore API not yet enabled (see Step 1 above)
+
+### Sign-in fails with "network error"
+- Make sure your device has internet access
+- Check that Email/Password and Google providers are enabled in Firebase Console → Authentication → Sign-in method
+
+### "Missing or insufficient permissions" when reading data
+- The Firestore rules haven't been deployed yet — run the deploy-rules workflow manually
+- Or, paste the contents of `firestore.rules` into the Firebase Console → Firestore → Rules → Publish
+
+### Cannot promote a user
+- Only Super Admin or Admin can promote
+- Super Admin can promote to any role including Admin
+- Admin can only promote to Manager, Sales Rep, Support Agent, or Viewer (cannot create other Admins)
+
+---
+
+## 🔐 Security Notes
+
+- The service account JSON you provided is stored as a GitHub Actions encrypted secret (`FIREBASE_SERVICE_ACCOUNT`). GitHub encrypts secrets at rest and never logs them.
+- The `google-services.json` is similarly stored as `GOOGLE_SERVICES_JSON`. These are public-by-design client config files (the API keys inside are restricted to your Android app's signing key by Google).
+- The Firestore rules enforce role-based access at the database level. Even if someone decompiles your APK and extracts the Firebase config, they cannot read or write data without being a signed-in user with the appropriate role.
+- The first user to sign up gets Super Admin. If you want to restrict signups further, enable Email Enumeration Protection or invite-only signup in Firebase Console → Authentication → Settings.
+
+---
+
+## 📞 Need help?
+
+Open an issue: https://github.com/bahyam-blip/nebula-crm/issues

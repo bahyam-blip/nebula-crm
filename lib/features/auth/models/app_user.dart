@@ -2,13 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
 /// User role within a team.
-enum UserRole { owner, admin, manager, salesRep, supportAgent, viewer }
+///
+/// Hierarchy:
+///   superAdmin  — full god-mode (manages admins + team settings across all teams)
+///   admin       — manages team members and all team data
+///   manager     — views/manages all team deals/tickets
+///   salesRep    — manages own contacts/deals
+///   supportAgent — manages assigned tickets + reads all contacts
+///   viewer      — read-only access to team data
+enum UserRole { superAdmin, admin, manager, salesRep, supportAgent, viewer }
 
 extension UserRoleX on UserRole {
   String get label {
     switch (this) {
-      case UserRole.owner:
-        return 'Owner';
+      case UserRole.superAdmin:
+        return 'Super Admin';
       case UserRole.admin:
         return 'Admin';
       case UserRole.manager:
@@ -22,14 +30,97 @@ extension UserRoleX on UserRole {
     }
   }
 
+  /// Short label for chips/badges.
+  String get shortLabel {
+    switch (this) {
+      case UserRole.superAdmin:
+        return 'SUPER';
+      case UserRole.admin:
+        return 'ADMIN';
+      case UserRole.manager:
+        return 'MGR';
+      case UserRole.salesRep:
+        return 'SALES';
+      case UserRole.supportAgent:
+        return 'SUPPORT';
+      case UserRole.viewer:
+        return 'VIEWER';
+    }
+  }
+
+  /// True if this role can edit deals (create/update/delete).
   bool get canEditDeals =>
-      this == UserRole.owner ||
+      this == UserRole.superAdmin ||
       this == UserRole.admin ||
       this == UserRole.manager ||
       this == UserRole.salesRep;
 
+  /// True if this role can manage the entire team (invite, remove, assign roles).
   bool get canManageTeam =>
-      this == UserRole.owner || this == UserRole.admin;
+      this == UserRole.superAdmin || this == UserRole.admin;
+
+  /// True if this role can promote/demote other users.
+  bool get canChangeRoles =>
+      this == UserRole.superAdmin || this == UserRole.admin;
+
+  /// True if this role can manage marketing campaigns.
+  bool get canManageCampaigns =>
+      this == UserRole.superAdmin ||
+      this == UserRole.admin ||
+      this == UserRole.manager;
+
+  /// True if this role can manage tickets (assign, change status, etc.).
+  bool get canManageTickets =>
+      this == UserRole.superAdmin ||
+      this == UserRole.admin ||
+      this == UserRole.manager ||
+      this == UserRole.supportAgent;
+
+  /// True if this role can edit knowledge base articles.
+  bool get canEditKnowledgeBase =>
+      this == UserRole.superAdmin ||
+      this == UserRole.admin ||
+      this == UserRole.manager;
+
+  /// Numeric rank for comparison (higher = more privileged).
+  int get rank {
+    switch (this) {
+      case UserRole.superAdmin:
+        return 100;
+      case UserRole.admin:
+        return 80;
+      case UserRole.manager:
+        return 60;
+      case UserRole.salesRep:
+        return 40;
+      case UserRole.supportAgent:
+        return 40;
+      case UserRole.viewer:
+        return 20;
+    }
+  }
+
+  /// True if this user outranks [other] (strictly).
+  bool outranks(UserRole other) => rank > other.rank;
+
+  /// Color for role badges — used in UI.
+  /// (Returns a hex string to avoid coupling this model to Flutter.)
+  String get badgeColorHex {
+    switch (this) {
+      case UserRole.superAdmin:
+        return '#FF5C8A'; // magenta — highest
+      case UserRole.admin:
+        return '#B07CFF'; // purple
+      case UserRole.manager:
+        return '#6C8CFF'; // indigo
+      case UserRole.salesRep:
+        return '#3DD8D8'; // cyan
+      case UserRole.supportAgent:
+        return '#3DD9A0'; // green
+      case UserRole.viewer:
+        return '#9AA3BC'; // gray
+    }
+  }
 }
 
 /// A user document in `users/{uid}`.

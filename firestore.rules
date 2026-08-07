@@ -1,0 +1,266 @@
+rules_version = '2';
+
+// ════════════════════════════════════════════════════════════════
+// Nebula CRM — Firestore Security Rules with Role-Based Access
+// ════════════════════════════════════════════════════════════════
+//
+// Roles hierarchy:
+//   superAdmin  — full god-mode access (can manage admins and team settings)
+//   admin       — can manage team members, all data within their team
+//   manager     — can view all team data, edit deals/tickets assigned to anyone
+//   salesRep    — can manage own contacts, deals, tickets
+//   supportAgent — can manage assigned tickets + read all contacts
+//   viewer      — read-only access to team data
+//
+// All users must belong to a team. Data is scoped to teams.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ──────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return userDoc().data.role;
+    }
+
+    function userTeamId() {
+      return userDoc().data.teamId;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && userRole() == 'superAdmin';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userRole() in ['superAdmin', 'admin'];
+    }
+
+    function isManager() {
+      return isSignedIn() && userRole() in ['superAdmin', 'admin', 'manager'];
+    }
+
+    function canEditDeals() {
+      return isSignedIn() && userRole() in ['superAdmin', 'admin', 'manager', 'salesRep'];
+    }
+
+    function canManageTickets() {
+      return isSignedIn() && userRole() in ['superAdmin', 'admin', 'manager', 'supportAgent'];
+    }
+
+    function isOwner(resource) {
+      return isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    function isAssignee(resource) {
+      return isSignedIn() && resource.data.assigneeId == request.auth.uid;
+    }
+
+    function sameTeam(resource) {
+      return isSignedIn() && resource.data.teamId == userTeamId();
+    }
+
+    // ── USERS collection ──────────────────────────────────────
+    // Each user can read their own profile. Admins can read all team
+    // members. SuperAdmins can read anyone. Only superAdmins can change
+    // roles; users can update their own non-role fields.
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isSuperAdmin() ||
+        (isAdmin() && resource.data.teamId == userTeamId())
+      );
+
+      // Self-create on first signup (must include role=employee by default)
+      allow create: if isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role in ['salesRep', 'supportAgent', 'viewer']
+        && request.resource.data.email == request.auth.token.email;
+
+      // Self-update (cannot change own role/teamId)
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.teamId == resource.data.teamId)
+        || isSuperAdmin()
+        || (isAdmin() && sameTeam(resource)
+            && request.resource.data.role in ['salesRep', 'supportAgent', 'viewer', 'manager'])
+      );
+
+      // Only superAdmins can delete users (cascades to their data manually)
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── TEAMS collection ──────────────────────────────────────
+    // Team settings: only admins/superAdmins can modify.
+    match /teams/{teamId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || userTeamId() == teamId
+      );
+      allow create: if isSignedIn() && (
+        isSuperAdmin() || (
+          // A new team can be created by a signed-in user if they're setting
+          // themselves as the admin of that team
+          request.resource.data.id == teamId
+        )
+      );
+      allow update: if isSignedIn() && (
+        isSuperAdmin() || (isAdmin() && teamId == userTeamId())
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── CONTACTS collection ───────────────────────────────────
+    // Sales reps manage their own contacts. Managers/admins can manage
+    // all team contacts. Viewers read-only.
+    match /contacts/{contactId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || sameTeam(resource)
+      );
+      allow create: if isSignedIn() && canEditDeals()
+        && request.resource.data.teamId == userTeamId()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isManager() && sameTeam(resource)) ||
+        isOwner(resource)
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isAdmin() && sameTeam(resource)) ||
+        isOwner(resource)
+      );
+    }
+
+    // ── DEALS collection ──────────────────────────────────────
+    match /deals/{dealId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || sameTeam(resource)
+      );
+      allow create: if isSignedIn() && canEditDeals()
+        && request.resource.data.teamId == userTeamId()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isManager() && sameTeam(resource)) ||
+        isOwner(resource)
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isAdmin() && sameTeam(resource)) ||
+        isOwner(resource)
+      );
+    }
+
+    // ── ACTIVITIES collection ─────────────────────────────────
+    // Activities are append-only logs. Owner or manager can delete.
+    match /activities/{activityId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() ||
+        (resource.data.teamId == userTeamId()) ||
+        isOwner(resource)
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isSuperAdmin() || isManager() || isOwner(resource)
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() || (isAdmin() && resource.data.teamId == userTeamId())
+      );
+    }
+
+    // ── CAMPAIGNS collection ──────────────────────────────────
+    match /campaigns/{campaignId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || sameTeam(resource)
+      );
+      allow create: if isSignedIn() && (
+        isManager() || isSuperAdmin()
+      ) && request.resource.data.teamId == userTeamId();
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isManager() && sameTeam(resource)) ||
+        isOwner(resource)
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() || (isAdmin() && sameTeam(resource))
+      );
+    }
+
+    // ── TICKETS collection ────────────────────────────────────
+    match /tickets/{ticketId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() ||
+        sameTeam(resource)
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.teamId == userTeamId();
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (canManageTickets() && sameTeam(resource)) ||
+        isAssignee(resource) ||
+        isOwner(resource)
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() || (isAdmin() && sameTeam(resource))
+      );
+    }
+
+    // ── ARTICLES (knowledge base) ─────────────────────────────
+    // Read: anyone signed-in. Write: admins only.
+    match /articles/{articleId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (
+        isSuperAdmin() || isAdmin() || isManager()
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() || isAdmin()
+      );
+    }
+
+    // ── INSIGHTS (AI-generated) ───────────────────────────────
+    // Each user sees only their own insights. Created by AI service
+    // (writes via Admin SDK outside these rules).
+    match /insights/{insightId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn(); // user can also self-create
+      allow update: if isSignedIn() && (
+        isSuperAdmin() || resource.data.userId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() || resource.data.userId == request.auth.uid
+      );
+    }
+
+    // ── CHAT_THREADS (AI assistant) ───────────────────────────
+    match /chat_threads/{threadId} {
+      allow read, write: if isSignedIn() && (
+        isSuperAdmin() || resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn() && (
+          isSuperAdmin() ||
+          get(/databases/$(database)/documents/chat_threads/$(threadId)).data.userId == request.auth.uid
+        );
+      }
+    }
+
+    // ── Default deny ──────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

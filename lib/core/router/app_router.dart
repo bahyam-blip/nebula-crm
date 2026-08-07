@@ -6,6 +6,8 @@ import '../services/auth_service.dart' show isLoggedInProvider;
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
+import '../../features/auth/presentation/screens/profile_screen.dart';
+import '../../features/auth/presentation/screens/team_management_screen.dart';
 import '../../features/contacts/presentation/screens/contacts_list_screen.dart';
 import '../../features/contacts/presentation/screens/contact_detail_screen.dart';
 import '../../features/contacts/presentation/screens/contact_form_screen.dart';
@@ -103,6 +105,16 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
 
       // ── Pushed routes (full-screen) ────────────────────────────
       GoRoute(
+        path: '/profile',
+        name: 'profile',
+        builder: (_, __) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/team',
+        name: 'teamManagement',
+        builder: (_, __) => const TeamManagementScreen(),
+      ),
+      GoRoute(
         path: '/contacts/new',
         name: 'contactForm',
         builder: (_, __) => const ContactFormScreen(),
@@ -162,6 +174,18 @@ class _MoreScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <_MenuItem>[
+      _MenuItem(
+        icon: Icons.person_outline,
+        label: 'Profile',
+        route: '/profile',
+        color: AppColors.primary,
+      ),
+      _MenuItem(
+        icon: Icons.group_outlined,
+        label: 'Team Members',
+        route: '/team',
+        color: AppColors.accent,
+      ),
       _MenuItem(
         icon: Icons.trending_up,
         label: 'Campaigns',
