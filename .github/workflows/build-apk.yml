@@ -159,7 +159,8 @@ jobs:
       - name: Build debug APK
         run: |
           set -o pipefail
-          if flutter build apk --release --split-per-abi --no-tree-shake-icons 2>&1 | tee /tmp/build.log; then
+          if flutter build apk --release --split-per-abi --no-tree-shake-icons 2>&1 | tee /tmp/build.log \
+             && flutter build apk --release --no-tree-shake-icons 2>&1 | tee -a /tmp/build.log; then
             echo "Build succeeded."
           else
             echo "::group::Root-cause lines"
@@ -177,6 +178,24 @@ jobs:
         run: |
           ls -lh build/app/outputs/flutter-apk/ || true
           find build -name "*.apk" -exec ls -lh {} \;
+
+      - name: Inspect APK compatibility
+        run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -r | head -1)
+          echo "aapt2: $AAPT"
+          for f in build/app/outputs/flutter-apk/*.apk; do
+            [ -e "$f" ] || continue
+            B=$(basename "$f")
+            INFO=$("$AAPT" dump badging "$f" 2>/dev/null)
+            PKG=$(echo "$INFO" | grep -o "package: name='[^']*'" | head -1)
+            VC=$(echo "$INFO" | grep -o "versionCode='[^']*'" | head -1)
+            MIN=$(echo "$INFO" | grep -o "sdkVersion:'[^']*'" | head -1)
+            TGT=$(echo "$INFO" | grep -o "targetSdkVersion:'[^']*'" | head -1)
+            ABI=$(echo "$INFO" | grep -o "native-code: .*" | head -1)
+            SPLIT=$(echo "$INFO" | grep -o "split='[^']*'" | head -1)
+            REQ=$(echo "$INFO" | grep -o "requires-split.*" | head -1)
+            echo "::warning::APKINFO $B | $PKG $VC | $MIN $TGT | ${ABI:-native-code: none} | ${SPLIT:-split: none} ${REQ}"
+          done
 
       - name: Collect APKs and report sizes
         run: |

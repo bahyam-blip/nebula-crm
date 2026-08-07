@@ -68,16 +68,12 @@ android {
         }
     }
 
-    // One APK per ABI instead of a single fat binary containing every
-    // architecture. Each split is roughly half the size of the universal APK.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = true
-        }
-    }
+    // NOTE: no `splits { abi { ... } }` block here on purpose.
+    // `flutter build apk --split-per-abi` already configures ABI splitting
+    // through the Flutter Gradle plugin, including the per-ABI versionCode
+    // offsets Play requires. Declaring splits manually as well makes the two
+    // mechanisms fight and can emit APKs the package installer rejects with
+    // "You can't install this app on this device".
 
     packaging {
         resources {
