@@ -359,8 +359,9 @@ jobs:
               adb uninstall com.nebula.nebula_crm >/dev/null 2>&1
               adb install -r "$APK" > /tmp/out.txt 2>&1
               RC=$?
-              RESULT=$(tr '\n' ' ' < /tmp/out.txt)
-              RESULT=${RESULT:0:180}
+              # POSIX sh only: ${VAR:0:n} is a bashism and aborts with
+              # "Bad substitution" under the runner's /bin/sh.
+              RESULT=$(tr '\n' ' ' < /tmp/out.txt | cut -c1-180)
               echo "::warning::INSTALL $(basename "$APK") rc=$RC -> $RESULT"
             done
             exit 0
