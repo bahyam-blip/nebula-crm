@@ -44,8 +44,14 @@ jobs:
               | sort -u | while IFS= read -r u; do echo "::warning::WORKER_URL $u"; done
             echo "Deployed."
           else
-            grep -iE "error|Authentication|permission|not found|binding" /tmp/wrangler.log \
-              | head -15 | while IFS= read -r l; do echo "::error::WRANGLER ${l}"; done
+            echo "::group::wrangler output"
+            cat /tmp/wrangler.log
+            echo "::endgroup::"
+            # Dump the tail verbatim: wrangler's message wording varies, so
+            # grepping for keywords loses the actual cause.
+            tail -40 /tmp/wrangler.log | sed 's/[[:cntrl:]]\[[0-9;]*m//g' \
+              | grep -v '^[[:space:]]*$' \
+              | while IFS= read -r l; do echo "::error::WRANGLER ${l}"; done
             exit 1
           fi
 
