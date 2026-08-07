@@ -1,44 +1,13 @@
 {
+  "_comment": "Only indexes that a real query needs. Firestore creates single-field indexes automatically, and every telecalling query deliberately uses one where() plus client-side sorting so it needs none. Adding speculative indexes just creates deploy work and IAM requirements for nothing.",
   "indexes": [
     {
-      "collectionGroup": "contacts",
+      "collectionGroup": "insights",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "teamId", "order": "ASCENDING" },
-        { "fieldPath": "callStatus", "order": "ASCENDING" },
-        { "fieldPath": "followUpAt", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "contacts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "assignedTo", "order": "ASCENDING" },
-        { "fieldPath": "callStatus", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "call_logs",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "teamId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "call_logs",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "contactId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "call_logs",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "callerId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "dismissed", "order": "ASCENDING" },
+        { "fieldPath": "generatedAt", "order": "DESCENDING" }
       ]
     }
   ],

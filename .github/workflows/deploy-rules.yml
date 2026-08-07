@@ -50,54 +50,6 @@ jobs:
           echo "Service account: $EMAIL (project: $PROJ)"
           echo "FIREBASE_SERVICE_ACCOUNT_PATH=$HOME/service-account.json" >> "$GITHUB_ENV"
 
-      # Turn on the Google APIs this project needs. Doing it here rather than
-      # by hand in the console means it is reproducible and self-documenting.
-      - name: Enable required Google APIs
-        continue-on-error: true
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
-        run: |
-          pip install --quiet google-auth requests
-          python3 - <<'PY'
-          import google.auth, google.auth.transport.requests as gt, requests, time
-
-          PROJECT = "nebula-crm-70f58"
-          # Storage deliberately omitted: media lives in Cloudflare R2.
-          SERVICES = [
-              "firestore.googleapis.com",      # Cloud Firestore
-              "firebaserules.googleapis.com",  # rules + indexes deploys
-              "identitytoolkit.googleapis.com" # Firebase Auth
-          ]
-
-          creds, _ = google.auth.default(
-              scopes=["https://www.googleapis.com/auth/cloud-platform"])
-          creds.refresh(gt.Request())
-          h = {"Authorization": f"Bearer {creds.token}"}
-
-          for svc in SERVICES:
-              base = (f"https://serviceusage.googleapis.com/v1/"
-                      f"projects/{PROJECT}/services/{svc}")
-              state = requests.get(base, headers=h, timeout=30)
-              if state.status_code == 200 and state.json().get("state") == "ENABLED":
-                  print(f"::warning::API {svc} already ENABLED")
-                  continue
-              r = requests.post(base + ":enable", headers=h, json={}, timeout=60)
-              if r.status_code in (200, 201):
-                  print(f"::warning::API {svc} enable requested OK")
-              else:
-                  msg = r.text.replace("\n", " ")[:200]
-                  print(f"::error::API {svc} enable FAILED {r.status_code} {msg}")
-
-          # Enabling is asynchronous; give it a moment before the deploy runs.
-          time.sleep(20)
-          for svc in SERVICES:
-              r = requests.get(
-                  f"https://serviceusage.googleapis.com/v1/"
-                  f"projects/{PROJECT}/services/{svc}", headers=h, timeout=30)
-              st = r.json().get("state") if r.status_code == 200 else r.status_code
-              print(f"::warning::API {svc} state={st}")
-          PY
-
       # Definitive diagnosis: call the Firestore + Storage admin APIs directly,
       # bypassing the CLI's serviceusage precheck. Results come back as
       # annotations so they're readable without downloading logs.

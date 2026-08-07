@@ -150,8 +150,20 @@ def deploy_indexes(headers: dict[str, str]) -> bool:
             existing += 1
             continue
 
-        ok = False
         fields = ",".join(f["fieldPath"] for f in index["fields"])
+        if response.status_code == 403:
+            # Publishing rules and creating indexes need different roles.
+            # Missing the index role must not fail the deploy: rules are
+            # what actually gate the app, and Firestore surfaces a
+            # one-click "create index" link if a query ever needs one.
+            annotate(
+                "warning",
+                f"INDEX {group}({fields}) skipped - service account lacks "
+                "roles/datastore.indexAdmin. Not fatal.",
+            )
+            continue
+
+        ok = False
         annotate(
             "error",
             f"INDEX {group}({fields}) failed {response.status_code} "
