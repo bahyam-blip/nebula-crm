@@ -1,0 +1,73 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Verify analysis (informational)
+        run: flutter analyze || true
+
+      - name: Configure Flutter for non-interactive build
+        run: flutter config --no-analytics
+
+      - name: Build debug APK
+        run: flutter build apk --debug --no-tree-shake-icons
+
+      - name: List built APK
+        run: |
+          ls -lh build/app/outputs/flutter-apk/ || true
+          find build -name "*.apk" -exec ls -lh {} \;
+
+      - name: Rename APK for clarity
+        run: |
+          mkdir -p artifacts
+          cp build/app/outputs/flutter-apk/app-debug.apk artifacts/nebula-crm-debug.apk
+          ls -lh artifacts/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nebula-crm-debug-apk
+          path: artifacts/nebula-crm-debug.apk
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Create release on tag push
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/nebula-crm-debug.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
