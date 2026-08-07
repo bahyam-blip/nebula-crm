@@ -255,25 +255,52 @@ jobs:
           PYEOF
           done
 
-      - name: Collect APKs and report sizes
+      - name: Package APKs unambiguously
         run: |
-          mkdir -p artifacts
-          cp build/app/outputs/flutter-apk/*.apk artifacts/ 2>/dev/null || true
-          # Drop the .sha1 companions Gradle emits.
-          rm -f artifacts/*.sha1
+          mkdir -p artifacts/INSTALL-THIS artifacts/other-abis
+
+          # One obvious file to install. The universal APK carries every ABI,
+          # so it works on any phone -- no choosing required. Shipping five
+          # similarly-named APKs in one zip invites installing the wrong one,
+          # which fails with "You can't install this app on this device".
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             artifacts/INSTALL-THIS/nebula-crm.apk
+
+          # Smaller per-ABI builds, for when you know the target.
+          for f in build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+                   build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+                   build/app/outputs/flutter-apk/app-x86_64-release.apk \
+                   build/app/outputs/flutter-apk/app-debug.apk; do
+            [ -e "$f" ] && cp "$f" artifacts/other-abis/
+          done
+          rm -f artifacts/*/*.sha1
+
+          cat > artifacts/INSTALL-THIS/README.txt <<'TXT'
+          Install nebula-crm.apk from this folder.
+
+          It contains every CPU architecture, so it works on any Android
+          phone. It is larger than the per-ABI builds in ../other-abis/
+          purely because it carries all of them.
+
+          Only use the files in other-abis/ if you know your device's ABI:
+            arm64-v8a    almost every phone from 2018 onward
+            armeabi-v7a  old 32-bit devices; will NOT install on modern ones
+            x86_64       emulators only
+          TXT
+
           echo "### APK sizes" >> "$GITHUB_STEP_SUMMARY"
-          for f in artifacts/*.apk; do
+          for f in artifacts/INSTALL-THIS/*.apk artifacts/other-abis/*.apk; do
             SZ=$(du -h "$f" | cut -f1)
             echo "- $(basename "$f") — $SZ" >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::APK $(basename "$f") $SZ"
           done
-          ls -lh artifacts/
+          ls -lR artifacts/
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: nebula-crm-apk
-          path: artifacts/*.apk
+          path: artifacts/
           retention-days: 90
           if-no-files-found: error
 
@@ -281,7 +308,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.apk
+          files: artifacts/INSTALL-THIS/nebula-crm.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -324,7 +351,7 @@ jobs:
           script: |
             adb wait-for-device
             echo "::warning::DEVICE sdk=$(adb shell getprop ro.build.version.sdk) abi=$(adb shell getprop ro.product.cpu.abi)"
-            for APK in apks/app-x86_64-release.apk apks/app-release.apk apks/app-debug.apk; do
+            for APK in apks/INSTALL-THIS/nebula-crm.apk apks/other-abis/app-x86_64-release.apk; do
               [ -e "$APK" ] || continue
               adb uninstall com.nebula.nebula_crm >/dev/null 2>&1 || true
               OUT=$(adb install -r "$APK" 2>&1) || true
