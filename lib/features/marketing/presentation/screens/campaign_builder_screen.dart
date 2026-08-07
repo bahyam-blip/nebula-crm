@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firestore_service.dart';
@@ -84,7 +83,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.x),
+          icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
         title: const Text('New Campaign'),
@@ -126,7 +125,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
               controller: _name,
               decoration: const InputDecoration(
                 labelText: 'Campaign name *',
-                prefixIcon: Icon(PhosphorIconsRegular.tag, size: 18),
+                prefixIcon: Icon(Icons.label, size: 18),
               ),
               validator: (v) =>
                   v == null || v.trim().isEmpty ? 'Required' : null,
@@ -138,7 +137,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
                 controller: _subject,
                 decoration: const InputDecoration(
                   labelText: 'Subject line *',
-                  prefixIcon: Icon(PhosphorIconsRegular.textAa, size: 18),
+                  prefixIcon: Icon(Icons.text_fields, size: 18),
                 ),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Required' : null,
@@ -230,7 +229,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
                 child: InputDecorator(
                   decoration: const InputDecoration(
                     labelText: 'Scheduled for',
-                    prefixIcon: Icon(PhosphorIconsRegular.calendar, size: 18),
+                    prefixIcon: Icon(Icons.calendar_today, size: 18),
                   ),
                   child: Text(_scheduledAt?.toString() ?? 'Pick date & time'),
                 ),
@@ -245,7 +244,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
                 Text('Drip Sequence', style: context.textTheme.labelMedium),
                 TextButton.icon(
                   onPressed: _addDripStep,
-                  icon: const Icon(PhosphorIconsRegular.plus, size: 16),
+                  icon: const Icon(Icons.add, size: 16),
                   label: const Text('Add step'),
                 ),
               ],
@@ -253,7 +252,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
             if (_dripSteps.isEmpty)
               Card(
                 child: ListTile(
-                  leading: const Icon(PhosphorIconsRegular.info),
+                  leading: const Icon(Icons.info),
                   title: const Text('No drip steps'),
                   subtitle: const Text(
                       'Add automated follow-ups to nurture leads over time.'),
@@ -268,7 +267,7 @@ class _CampaignBuilderScreenState extends ConsumerState<CampaignBuilderScreen> {
                       title: Text(_dripSteps[i].subject),
                       subtitle: Text('+${_dripSteps[i].delayHours}h'),
                       trailing: IconButton(
-                        icon: const Icon(PhosphorIconsRegular.trash, size: 18),
+                        icon: const Icon(Icons.delete, size: 18),
                         onPressed: () => setState(() => _dripSteps.removeAt(i)),
                       ),
                     ),

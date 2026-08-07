@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
@@ -29,7 +28,7 @@ class AiInsightBanner extends ConsumerWidget {
           children: [
             Row(
               children: [
-                const Icon(PhosphorIconsFill.sparkle, color: Colors.white, size: 18),
+                const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
                 const SizedBox(width: 8),
                 Container(
                   padding:
@@ -48,7 +47,7 @@ class AiInsightBanner extends ConsumerWidget {
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(PhosphorIconsRegular.x, color: Colors.white70, size: 18),
+                  icon: const Icon(Icons.close, color: Colors.white70, size: 18),
                   onPressed: () => ref
                       .read(insightActionsProvider.notifier)
                       .dismiss(insight.id),
@@ -76,7 +75,7 @@ class AiInsightBanner extends ConsumerWidget {
             Row(
               children: [
                 Icon(
-                  PhosphorIconsRegular.gauge,
+                  Icons.speed,
                   size: 12,
                   color: Colors.white.withValues(alpha: 0.7),
                 ),

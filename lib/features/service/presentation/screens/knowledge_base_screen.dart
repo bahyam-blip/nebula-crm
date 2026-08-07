@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/services/firestore_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -47,10 +46,10 @@ class KnowledgeBaseScreen extends ConsumerWidget {
               decoration: InputDecoration(
                 hintText: 'Search articles',
                 prefixIcon:
-                    const Icon(PhosphorIconsRegular.magnifyingGlass, size: 18),
+                    const Icon(Icons.search, size: 18),
                 suffixIcon: search.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(PhosphorIconsRegular.x, size: 18),
+                        icon: const Icon(Icons.close, size: 18),
                         onPressed: () => ref
                             .read(articleSearchProvider.notifier)
                             .state = '',
@@ -72,7 +71,7 @@ class KnowledgeBaseScreen extends ConsumerWidget {
                       }).toList();
                 if (list.isEmpty) {
                   return const EmptyState(
-                    icon: PhosphorIconsRegular.books,
+                    icon: Icons.menu_book,
                     title: 'No articles',
                     subtitle:
                         'Knowledge base articles will appear here once published.',
@@ -114,7 +113,7 @@ class _ArticleTile extends StatelessWidget {
           color: AppColors.tertiary.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(PhosphorIconsRegular.fileText,
+        child: Icon(Icons.description,
             color: AppColors.tertiary, size: 18),
       ),
       title: Text(
@@ -147,7 +146,7 @@ class _ArticleTile extends StatelessWidget {
               if (article.category != null && article.views > 0)
                 const Text(' · '),
               if (article.views > 0) ...[
-                Icon(PhosphorIconsRegular.eye,
+                Icon(Icons.visibility,
                     size: 10, color: AppColors.textTertiary),
                 const SizedBox(width: 3),
                 Text(
@@ -157,7 +156,7 @@ class _ArticleTile extends StatelessWidget {
               ],
               if (article.helpfulRate > 0) ...[
                 const Text(' · '),
-                Icon(PhosphorIconsRegular.thumbsUp,
+                Icon(Icons.thumb_up,
                     size: 10, color: AppColors.success),
                 const SizedBox(width: 3),
                 Text(

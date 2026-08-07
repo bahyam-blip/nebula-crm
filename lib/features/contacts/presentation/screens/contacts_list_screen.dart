@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
@@ -55,10 +54,10 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
                       .state = v,
                   decoration: InputDecoration(
                     hintText: 'Search by name, email, company',
-                    prefixIcon: const Icon(PhosphorIconsRegular.magnifyingGlass, size: 18),
+                    prefixIcon: const Icon(Icons.search, size: 18),
                     suffixIcon: search.isNotEmpty
                         ? IconButton(
-                            icon: const Icon(PhosphorIconsRegular.x, size: 18),
+                            icon: const Icon(Icons.close, size: 18),
                             onPressed: () => ref
                                 .read(contactSearchProvider.notifier)
                                 .state = '',
@@ -76,7 +75,7 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
                 return const SliverFillRemaining(
                   hasScrollBody: false,
                   child: EmptyState(
-                    icon: PhosphorIconsRegular.userCircle,
+                    icon: Icons.account_circle,
                     title: 'No contacts yet',
                     subtitle: 'Add your first contact to start building your pipeline.',
                     actionLabel: 'Add contact',
@@ -106,7 +105,7 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/contacts/new'),
-        icon: const Icon(PhosphorIconsRegular.plus, size: 20),
+        icon: const Icon(Icons.add, size: 20),
         label: const Text('Add Contact'),
       ),
     );
@@ -183,7 +182,7 @@ class _ContactTile extends StatelessWidget {
           ),
         ],
       ),
-      trailing: const Icon(PhosphorIconsRegular.caretRight,
+      trailing: const Icon(Icons.chevron_right,
           color: AppColors.textTertiary, size: 18),
     );
   }

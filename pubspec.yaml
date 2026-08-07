@@ -38,7 +38,6 @@ dependencies:
   shimmer: ^3.0.0
   cached_network_image: ^3.4.1
   flutter_svg: ^2.0.10+1
-  phosphor_flutter: ^2.1.0
   flutter_animate: ^4.5.0
   smooth_page_indicator: ^1.2.0+3
 

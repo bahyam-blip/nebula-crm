@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/services/firestore_service.dart';
@@ -26,7 +25,7 @@ class ContactDetailScreen extends ConsumerWidget {
         data: (Contact? c) {
           if (c == null) {
             return const EmptyState(
-              icon: PhosphorIconsRegular.userCircleMinus,
+              icon: Icons.person_remove,
               title: 'Contact not found',
             );
           }
@@ -37,11 +36,11 @@ class ContactDetailScreen extends ConsumerWidget {
                 pinned: true,
                 actions: [
                   IconButton(
-                    icon: const Icon(PhosphorIconsRegular.pencilSimple),
+                    icon: const Icon(Icons.edit),
                     onPressed: () => context.push('/contacts/new?id=$id'),
                   ),
                   PopupMenuButton<String>(
-                    icon: const Icon(PhosphorIconsRegular.dotsThreeVertical),
+                    icon: const Icon(Icons.more_vert),
                     onSelected: (v) {
                       if (v == 'delete') {
                         _confirmDelete(context, ref);
@@ -111,25 +110,25 @@ class ContactDetailScreen extends ConsumerWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _QuickAction(
-                            icon: PhosphorIconsRegular.phone,
+                            icon: Icons.phone,
                             label: 'Call',
                             color: AppColors.success,
                             onTap: () => _launchUrl(context, 'tel:${c.phone}'),
                           ),
                           _QuickAction(
-                            icon: PhosphorIconsRegular.envelope,
+                            icon: Icons.email,
                             label: 'Email',
                             color: AppColors.info,
                             onTap: () => _launchUrl(context, 'mailto:${c.email}'),
                           ),
                           _QuickAction(
-                            icon: PhosphorIconsRegular.kanban,
+                            icon: Icons.view_kanban,
                             label: 'Deal',
                             color: AppColors.primary,
                             onTap: () => context.push('/deals/new?contactId=$id'),
                           ),
                           _QuickAction(
-                            icon: PhosphorIconsRegular.notePencil,
+                            icon: Icons.edit_note,
                             label: 'Note',
                             color: AppColors.tertiary,
                             onTap: () => _showNoteSheet(context, ref, id),
@@ -347,37 +346,37 @@ class _DetailsCard extends StatelessWidget {
         children: [
           if (contact.email != null)
             _DetailRow(
-              icon: PhosphorIconsRegular.envelope,
+              icon: Icons.email,
               label: 'Email',
               value: contact.email!,
             ),
           if (contact.phone != null)
             _DetailRow(
-              icon: PhosphorIconsRegular.phone,
+              icon: Icons.phone,
               label: 'Phone',
               value: contact.phone!,
             ),
           if (contact.company != null)
             _DetailRow(
-              icon: PhosphorIconsRegular.building,
+              icon: Icons.apartment,
               label: 'Company',
               value: contact.company!,
             ),
           if (contact.address != null)
             _DetailRow(
-              icon: PhosphorIconsRegular.mapPin,
+              icon: Icons.location_on,
               label: 'Address',
               value: contact.address!,
             ),
           if (contact.website != null)
             _DetailRow(
-              icon: PhosphorIconsRegular.globe,
+              icon: Icons.language,
               label: 'Website',
               value: contact.website!,
             ),
           if (contact.linkedin != null)
             _DetailRow(
-              icon: PhosphorIconsRegular.linkedinLogo,
+              icon: Icons.business,
               label: 'LinkedIn',
               value: contact.linkedin!,
             ),

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
@@ -63,8 +62,8 @@ class KpiCard extends StatelessWidget {
                       children: [
                         Icon(
                           isPositive
-                              ? PhosphorIconsRegular.arrowUpRight
-                              : PhosphorIconsRegular.arrowDownRight,
+                              ? Icons.north_east
+                              : Icons.south_east,
                           color: isPositive
                               ? AppColors.success
                               : AppColors.danger,

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/auth_service.dart';
@@ -84,7 +83,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ],
                   ),
-                  child: const Icon(PhosphorIconsFill.sparkle,
+                  child: const Icon(Icons.auto_awesome,
                       color: Colors.white, size: 32),
                 ),
                 const SizedBox(height: 24),
@@ -103,7 +102,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     hintText: 'you@company.com',
-                    prefixIcon: Icon(PhosphorIconsRegular.envelope, size: 18),
+                    prefixIcon: Icon(Icons.email, size: 18),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
@@ -122,12 +121,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     labelText: 'Password',
                     hintText: 'At least 8 characters',
                     prefixIcon:
-                        const Icon(PhosphorIconsRegular.lock, size: 18),
+                        const Icon(Icons.lock, size: 18),
                     suffixIcon: IconButton(
                       icon: Icon(
                         _obscurePassword
-                            ? PhosphorIconsRegular.eye
-                            : PhosphorIconsRegular.eyeSlash,
+                            ? Icons.visibility
+                            : Icons.visibility_off,
                         size: 18,
                       ),
                       onPressed: () => setState(

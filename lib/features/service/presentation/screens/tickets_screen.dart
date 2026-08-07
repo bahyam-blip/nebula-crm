@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/services/firestore_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -51,7 +50,7 @@ class TicketsScreen extends ConsumerWidget {
                 : all.where((t) => t.status.name == statusFilter).toList();
             if (list.isEmpty) {
               return const EmptyState(
-                icon: PhosphorIconsRegular.headset,
+                icon: Icons.headset_mic,
                 title: 'No tickets',
                 subtitle: 'Support tickets assigned to you will appear here.',
               );
@@ -74,7 +73,7 @@ class TicketsScreen extends ConsumerWidget {
         ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: () => _showNewTicketSheet(context, ref),
-          icon: const Icon(PhosphorIconsRegular.plus, size: 20),
+          icon: const Icon(Icons.add, size: 20),
           label: const Text('New Ticket'),
         ),
       ),
@@ -225,7 +224,7 @@ class _TicketTile extends StatelessWidget {
                         if (ticket.messageCount > 0)
                           Row(
                             children: [
-                              Icon(PhosphorIconsRegular.chatCircle,
+                              Icon(Icons.chat_bubble,
                                   size: 12, color: AppColors.textTertiary),
                               const SizedBox(width: 4),
                               Text('${ticket.messageCount}',

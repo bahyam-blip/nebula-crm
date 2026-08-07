@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
@@ -19,12 +18,12 @@ class CampaignDetailScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.arrowLeft),
+          icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
         actions: [
           IconButton(
-            icon: const Icon(PhosphorIconsRegular.pencilSimple),
+            icon: const Icon(Icons.edit),
             onPressed: () => context.push('/campaigns/new?id=$id'),
           ),
         ],
@@ -33,7 +32,7 @@ class CampaignDetailScreen extends ConsumerWidget {
         data: (c) {
           if (c == null) {
             return const EmptyState(
-              icon: PhosphorIconsRegular.paperPlaneTilt,
+              icon: Icons.send,
               title: 'Campaign not found',
             );
           }
@@ -60,7 +59,7 @@ class CampaignDetailScreen extends ConsumerWidget {
                 child: Column(
                   children: [
                     ListTile(
-                      leading: const Icon(PhosphorIconsRegular.users),
+                      leading: const Icon(Icons.group),
                       title: Text('${c.audienceCount} recipients'),
                       subtitle: Text(
                           '${c.audienceSegmentIds.length} segment(s) selected'),
@@ -74,7 +73,7 @@ class CampaignDetailScreen extends ConsumerWidget {
               const _SectionLabel('Schedule'),
               Card(
                 child: ListTile(
-                  leading: const Icon(PhosphorIconsRegular.calendar),
+                  leading: const Icon(Icons.calendar_today),
                   title: Text(c.scheduleType.titleCase()),
                   subtitle: Text(c.scheduledAt != null
                       ? c.scheduledAt.toString()

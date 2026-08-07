@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
@@ -36,7 +35,7 @@ class RecentActivity extends ConsumerWidget {
       data: (list) {
         if (list.isEmpty) {
           return const EmptyState(
-            icon: PhosphorIconsRegular.clock,
+            icon: Icons.schedule,
             title: 'No recent activity',
             subtitle: 'Log a call, email, or note to see it here.',
           );
@@ -132,17 +131,17 @@ class _ActivityTile extends StatelessWidget {
 
   (IconData, Color) _iconForType(String type) {
     return switch (type) {
-      'call' => (PhosphorIconsRegular.phone, AppColors.success),
-      'email' => (PhosphorIconsRegular.envelope, AppColors.info),
-      'meeting' => (PhosphorIconsRegular.users, AppColors.accent),
-      'note' => (PhosphorIconsRegular.notepad, AppColors.tertiary),
-      'task' => (PhosphorIconsRegular.checkSquare, AppColors.warning),
-      'deal_created' => (PhosphorIconsRegular.kanban, AppColors.primary),
+      'call' => (Icons.phone, AppColors.success),
+      'email' => (Icons.email, AppColors.info),
+      'meeting' => (Icons.group, AppColors.accent),
+      'note' => (Icons.note_alt, AppColors.tertiary),
+      'task' => (Icons.check_box, AppColors.warning),
+      'deal_created' => (Icons.view_kanban, AppColors.primary),
       'deal_stage_changed' =>
-        (PhosphorIconsRegular.arrowsLeftRight, AppColors.primary),
+        (Icons.swap_horiz, AppColors.primary),
       'ticket_created' =>
-        (PhosphorIconsRegular.headset, AppColors.tertiary),
-      _ => (PhosphorIconsRegular.circle, AppColors.textTertiary),
+        (Icons.headset_mic, AppColors.tertiary),
+      _ => (Icons.circle, AppColors.textTertiary),
     };
   }
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firestore_service.dart';
@@ -27,7 +26,7 @@ class DealDetailScreen extends ConsumerWidget {
         data: (d) {
           if (d == null) {
             return const EmptyState(
-              icon: PhosphorIconsRegular.kanban,
+              icon: Icons.view_kanban,
               title: 'Deal not found',
             );
           }
@@ -37,12 +36,12 @@ class DealDetailScreen extends ConsumerWidget {
                 expandedHeight: 200,
                 pinned: true,
                 leading: IconButton(
-                  icon: const Icon(PhosphorIconsRegular.arrowLeft),
+                  icon: const Icon(Icons.arrow_back),
                   onPressed: () => context.pop(),
                 ),
                 actions: [
                   IconButton(
-                    icon: const Icon(PhosphorIconsRegular.pencilSimple),
+                    icon: const Icon(Icons.edit),
                     onPressed: () => context.push('/deals/new?id=$id'),
                   ),
                 ],
@@ -130,7 +129,7 @@ class DealDetailScreen extends ConsumerWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(PhosphorIconsFill.sparkle,
+                              const Icon(Icons.auto_awesome,
                                   color: Colors.white, size: 20),
                               const SizedBox(width: 12),
                               Expanded(
@@ -172,17 +171,17 @@ class DealDetailScreen extends ConsumerWidget {
                       child: Column(
                         children: [
                           _FactRow(
-                            icon: PhosphorIconsRegular.currencyDollar,
+                            icon: Icons.attach_money,
                             label: 'Value',
                             value: Formatters.currency(d.value),
                           ),
                           _FactRow(
-                            icon: PhosphorIconsRegular.scales,
+                            icon: Icons.balance,
                             label: 'Weighted',
                             value: Formatters.currency(d.effectiveWeighted),
                           ),
                           _FactRow(
-                            icon: PhosphorIconsRegular.percent,
+                            icon: Icons.percent,
                             label: 'Probability',
                             value: d.probability != null
                                 ? Formatters.percent(d.probability! * 100)
@@ -190,19 +189,19 @@ class DealDetailScreen extends ConsumerWidget {
                           ),
                           if (d.expectedCloseDate != null)
                             _FactRow(
-                              icon: PhosphorIconsRegular.calendar,
+                              icon: Icons.calendar_today,
                               label: 'Expected Close',
                               value: Formatters.date(d.expectedCloseDate!),
                             ),
                           if (d.actualCloseDate != null)
                             _FactRow(
-                              icon: PhosphorIconsRegular.checkCircle,
+                              icon: Icons.check_circle,
                               label: 'Closed On',
                               value: Formatters.date(d.actualCloseDate!),
                             ),
                           if (d.nextStep != null)
                             _FactRow(
-                              icon: PhosphorIconsRegular.footprints,
+                              icon: Icons.directions_walk,
                               label: 'Next Step',
                               value: d.nextStep!,
                             ),
@@ -216,7 +215,7 @@ class DealDetailScreen extends ConsumerWidget {
                         margin: const EdgeInsets.all(20),
                         child: ListTile(
                           leading: const CircleAvatar(
-                            child: Icon(PhosphorIconsRegular.user),
+                            child: Icon(Icons.person),
                           ),
                           title: Text(d.contactName ?? 'Contact'),
                           subtitle: const Text('Tap to view contact'),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
@@ -93,7 +92,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(PhosphorIconsRegular.arrowsClockwise, size: 20),
+            icon: const Icon(Icons.autorenew, size: 20),
             onPressed: () =>
                 ref.read(chatControllerProvider.notifier).newThread(),
             tooltip: 'New thread',
@@ -158,10 +157,10 @@ class _EmptyConversation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final prompts = [
-      ('What deals are at risk this week?', PhosphorIconsRegular.warning),
-      ('Summarize my last call with Acme Corp', PhosphorIconsRegular.phone),
-      ('Suggest follow-ups for stalled deals', PhosphorIconsRegular.footprints),
-      ('Forecast my pipeline for next quarter', PhosphorIconsRegular.chartLineUp),
+      ('What deals are at risk this week?', Icons.warning),
+      ('Summarize my last call with Acme Corp', Icons.phone),
+      ('Suggest follow-ups for stalled deals', Icons.directions_walk),
+      ('Forecast my pipeline for next quarter', Icons.trending_up),
     ];
     return Center(
       child: Padding(
@@ -175,7 +174,7 @@ class _EmptyConversation extends StatelessWidget {
                 gradient: AppColors.primaryGradient,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(PhosphorIconsFill.sparkle,
+              child: const Icon(Icons.auto_awesome,
                   color: Colors.white, size: 32),
             ),
             const SizedBox(height: 20),
@@ -230,7 +229,7 @@ class _InsightChip extends ConsumerWidget {
           children: [
             Row(
               children: [
-                Icon(PhosphorIconsRegular.sparkle, size: 12, color: color),
+                Icon(Icons.auto_awesome, size: 12, color: color),
                 const SizedBox(width: 4),
                 Text(
                   insight.type.label,
@@ -326,7 +325,7 @@ class _ChatBubble extends StatelessWidget {
                 gradient: AppColors.primaryGradient,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(PhosphorIconsFill.sparkle,
+              child: const Icon(Icons.auto_awesome,
                   color: Colors.white, size: 14),
             ),
             const SizedBox(width: 8),
@@ -412,7 +411,7 @@ class _Composer extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              icon: const Icon(PhosphorIconsRegular.paperclip, size: 20),
+              icon: const Icon(Icons.attach_file, size: 20),
               onPressed: () {},
             ),
             Expanded(
@@ -443,7 +442,7 @@ class _Composer extends StatelessWidget {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white),
                     )
-                  : const Icon(PhosphorIconsFill.paperPlaneTilt, size: 18),
+                  : const Icon(Icons.send, size: 18),
               onPressed: isSending ? null : onSend,
             ),
           ],

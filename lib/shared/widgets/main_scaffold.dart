@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/extensions.dart';
@@ -18,32 +17,32 @@ class MainScaffold extends ConsumerWidget {
 
   static const _destinations = [
     _NavDestination(
-      icon: PhosphorIconsRegular.squaresFour,
-      selectedIcon: PhosphorIconsFill.squaresFour,
+      icon: Icons.dashboard,
+      selectedIcon: Icons.dashboard,
       label: 'Dashboard',
       route: '/dashboard',
     ),
     _NavDestination(
-      icon: PhosphorIconsRegular.users,
-      selectedIcon: PhosphorIconsFill.users,
+      icon: Icons.group,
+      selectedIcon: Icons.group,
       label: 'Contacts',
       route: '/contacts',
     ),
     _NavDestination(
-      icon: PhosphorIconsRegular.kanban,
-      selectedIcon: PhosphorIconsFill.kanban,
+      icon: Icons.view_kanban,
+      selectedIcon: Icons.view_kanban,
       label: 'Pipeline',
       route: '/pipeline',
     ),
     _NavDestination(
-      icon: PhosphorIconsRegular.sparkle,
-      selectedIcon: PhosphorIconsFill.sparkle,
+      icon: Icons.auto_awesome,
+      selectedIcon: Icons.auto_awesome,
       label: 'Assistant',
       route: '/assistant',
     ),
     _NavDestination(
-      icon: PhosphorIconsRegular.dotsThreeOutline,
-      selectedIcon: PhosphorIconsFill.dotsThreeOutline,
+      icon: Icons.more_horiz,
+      selectedIcon: Icons.more_horiz,
       label: 'More',
       route: '/more',
     ),

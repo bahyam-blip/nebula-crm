@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firestore_service.dart';
@@ -144,7 +143,7 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.x),
+          icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
         title: Text(_editingId != null ? 'Edit Deal' : 'New Deal'),
@@ -165,7 +164,7 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
               controller: _title,
               decoration: const InputDecoration(
                 labelText: 'Deal title *',
-                prefixIcon: Icon(PhosphorIconsRegular.textAa, size: 18),
+                prefixIcon: Icon(Icons.text_fields, size: 18),
               ),
               validator: (v) =>
                   v == null || v.trim().isEmpty ? 'Required' : null,
@@ -178,7 +177,7 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
               decoration: const InputDecoration(
                 labelText: 'Deal value *',
                 prefixText: '\$ ',
-                prefixIcon: Icon(PhosphorIconsRegular.currencyDollar, size: 18),
+                prefixIcon: Icon(Icons.attach_money, size: 18),
               ),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
@@ -211,7 +210,7 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Expected close date',
                   prefixIcon:
-                      Icon(PhosphorIconsRegular.calendar, size: 18),
+                      Icon(Icons.calendar_today, size: 18),
                 ),
                 child: Text(
                   _expectedCloseDate != null
@@ -232,12 +231,12 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(PhosphorIconsRegular.user, size: 18),
+                    child: Icon(Icons.person, size: 18),
                   ),
                   title: Text(_contactName!),
                   subtitle: const Text('Linked contact'),
                   trailing: IconButton(
-                    icon: const Icon(PhosphorIconsRegular.x, size: 18),
+                    icon: const Icon(Icons.close, size: 18),
                     onPressed: () => setState(() {
                       _contactId = null;
                       _contactName = null;
@@ -251,7 +250,7 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
               controller: _nextStep,
               decoration: const InputDecoration(
                 labelText: 'Next step',
-                prefixIcon: Icon(PhosphorIconsRegular.footprints, size: 18),
+                prefixIcon: Icon(Icons.directions_walk, size: 18),
               ),
             ),
             const SizedBox(height: 12),

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -152,28 +151,28 @@ class _DashboardBody extends StatelessWidget {
               KpiCard(
                 label: 'Open Pipeline',
                 value: Formatters.currencyCompact(data.openPipelineValue),
-                icon: PhosphorIconsRegular.kanban,
+                icon: Icons.view_kanban,
                 delta: 12.4,
                 accentColor: AppColors.primary,
               ),
               KpiCard(
                 label: 'Weighted Forecast',
                 value: Formatters.currencyCompact(data.weightedForecast),
-                icon: PhosphorIconsRegular.trendUp,
+                icon: Icons.trending_up,
                 delta: 8.2,
                 accentColor: AppColors.accent,
               ),
               KpiCard(
                 label: 'Won This Month',
                 value: Formatters.currencyCompact(data.wonThisMonth),
-                icon: PhosphorIconsRegular.trophy,
+                icon: Icons.emoji_events,
                 delta: 22.1,
                 accentColor: AppColors.success,
               ),
               KpiCard(
                 label: 'Win Rate',
                 value: Formatters.percent(data.winRate, decimals: 1),
-                icon: PhosphorIconsRegular.target,
+                icon: Icons.gps_fixed,
                 delta: -1.5,
                 accentColor: AppColors.tertiary,
               ),

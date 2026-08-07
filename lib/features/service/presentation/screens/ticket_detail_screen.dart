@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/services/firestore_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -25,7 +24,7 @@ class _TicketDetailScreenState extends ConsumerState<TicketDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.arrowLeft),
+          icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
       ),
@@ -39,7 +38,7 @@ class _TicketDetailScreenState extends ConsumerState<TicketDetailScreen> {
           final t = snap.data;
           if (t == null) {
             return const EmptyState(
-              icon: PhosphorIconsRegular.headset,
+              icon: Icons.headset_mic,
               title: 'Ticket not found',
             );
           }
@@ -92,7 +91,7 @@ class _TicketDetailScreenState extends ConsumerState<TicketDetailScreen> {
                 Card(
                   child: ListTile(
                     leading: const CircleAvatar(
-                      child: Icon(PhosphorIconsRegular.user, size: 18),
+                      child: Icon(Icons.person, size: 18),
                     ),
                     title: Text(t.contactName ?? 'Contact'),
                     trailing: const Icon(Icons.chevron_right, size: 20),
@@ -193,7 +192,7 @@ class _SlaCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(PhosphorIconsRegular.timer, color: color, size: 20),
+          Icon(Icons.timer, color: color, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

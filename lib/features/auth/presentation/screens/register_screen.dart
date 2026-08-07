@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/auth_service.dart';
@@ -69,7 +68,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.arrowLeft),
+          icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go(AppRoutes.login),
         ),
       ),
@@ -95,7 +94,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   controller: _nameController,
                   decoration: const InputDecoration(
                     labelText: 'Full name',
-                    prefixIcon: Icon(PhosphorIconsRegular.user, size: 18),
+                    prefixIcon: Icon(Icons.person, size: 18),
                   ),
                   textCapitalization: TextCapitalization.words,
                   textInputAction: TextInputAction.next,
@@ -111,7 +110,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   controller: _emailController,
                   decoration: const InputDecoration(
                     labelText: 'Work email',
-                    prefixIcon: Icon(PhosphorIconsRegular.envelope, size: 18),
+                    prefixIcon: Icon(Icons.email, size: 18),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   autocorrect: false,
@@ -128,12 +127,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon:
-                        const Icon(PhosphorIconsRegular.lock, size: 18),
+                        const Icon(Icons.lock, size: 18),
                     suffixIcon: IconButton(
                       icon: Icon(
                         _obscurePassword
-                            ? PhosphorIconsRegular.eye
-                            : PhosphorIconsRegular.eyeSlash,
+                            ? Icons.visibility
+                            : Icons.visibility_off,
                         size: 18,
                       ),
                       onPressed: () => setState(
@@ -218,7 +217,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
                 OutlinedButton.icon(
                   onPressed: _isLoading ? null : _googleSignIn,
-                  icon: const Icon(PhosphorIconsRegular.googleLogo, size: 18),
+                  icon: const Icon(Icons.g_mobiledata, size: 18),
                   label: const Text('Sign up with Google'),
                 ),
                 const SizedBox(height: 24),
@@ -255,7 +254,7 @@ class _StrengthHint extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(PhosphorIconsRegular.check, size: 12, color: AppColors.textTertiary),
+        Icon(Icons.check, size: 12, color: AppColors.textTertiary),
         const SizedBox(width: 4),
         Text(label,
             style: context.textTheme.labelSmall

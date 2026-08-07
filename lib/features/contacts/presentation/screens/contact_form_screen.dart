@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/services/firestore_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -136,7 +135,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.x),
+          icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
         title: Text(_editingId != null ? 'Edit Contact' : 'New Contact'),
@@ -173,7 +172,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _name,
               decoration: const InputDecoration(
                 labelText: 'Full name *',
-                prefixIcon: Icon(PhosphorIconsRegular.user, size: 18),
+                prefixIcon: Icon(Icons.person, size: 18),
               ),
               textCapitalization: TextCapitalization.words,
               validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
@@ -183,7 +182,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _email,
               decoration: const InputDecoration(
                 labelText: 'Email',
-                prefixIcon: Icon(PhosphorIconsRegular.envelope, size: 18),
+                prefixIcon: Icon(Icons.email, size: 18),
               ),
               keyboardType: TextInputType.emailAddress,
               validator: (v) =>
@@ -194,7 +193,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _phone,
               decoration: const InputDecoration(
                 labelText: 'Phone',
-                prefixIcon: Icon(PhosphorIconsRegular.phone, size: 18),
+                prefixIcon: Icon(Icons.phone, size: 18),
               ),
               keyboardType: TextInputType.phone,
               validator: (v) =>
@@ -207,7 +206,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _company,
               decoration: const InputDecoration(
                 labelText: 'Company',
-                prefixIcon: Icon(PhosphorIconsRegular.building, size: 18),
+                prefixIcon: Icon(Icons.apartment, size: 18),
               ),
               textCapitalization: TextCapitalization.words,
             ),
@@ -216,7 +215,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _jobTitle,
               decoration: const InputDecoration(
                 labelText: 'Job title',
-                prefixIcon: Icon(PhosphorIconsRegular.briefcase, size: 18),
+                prefixIcon: Icon(Icons.work, size: 18),
               ),
               textCapitalization: TextCapitalization.words,
             ),
@@ -227,7 +226,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _linkedin,
               decoration: const InputDecoration(
                 labelText: 'LinkedIn URL',
-                prefixIcon: Icon(PhosphorIconsRegular.linkedinLogo, size: 18),
+                prefixIcon: Icon(Icons.business, size: 18),
               ),
               keyboardType: TextInputType.url,
             ),
@@ -236,7 +235,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               controller: _website,
               decoration: const InputDecoration(
                 labelText: 'Website',
-                prefixIcon: Icon(PhosphorIconsRegular.globe, size: 18),
+                prefixIcon: Icon(Icons.language, size: 18),
               ),
               keyboardType: TextInputType.url,
             ),
@@ -248,7 +247,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
               decoration: const InputDecoration(
                 labelText: 'Tags (comma-separated)',
                 hintText: 'vip, enterprise, partner',
-                prefixIcon: Icon(PhosphorIconsRegular.tag, size: 18),
+                prefixIcon: Icon(Icons.label, size: 18),
               ),
             ),
             const SizedBox(height: 12),

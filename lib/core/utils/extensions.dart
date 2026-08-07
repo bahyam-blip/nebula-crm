@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../theme/app_colors.dart';
 
@@ -40,7 +39,7 @@ extension BuildContextX on BuildContext {
       SnackBar(
         content: Row(
           children: [
-            const Icon(PhosphorIconsRegular.checkCircle, color: AppColors.success, size: 18),
+            const Icon(Icons.check_circle, color: AppColors.success, size: 18),
             const SizedBox(width: 8),
             Expanded(child: Text(message)),
           ],

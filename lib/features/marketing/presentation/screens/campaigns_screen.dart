@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -25,7 +24,7 @@ class CampaignsScreen extends ConsumerWidget {
         data: (list) {
           if (list.isEmpty) {
             return const EmptyState(
-              icon: PhosphorIconsRegular.paperPlaneTilt,
+              icon: Icons.send,
               title: 'No campaigns yet',
               subtitle: 'Launch your first email or SMS campaign.',
               actionLabel: 'New campaign',
@@ -49,7 +48,7 @@ class CampaignsScreen extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/campaigns/new'),
-        icon: const Icon(PhosphorIconsRegular.plus, size: 20),
+        icon: const Icon(Icons.add, size: 20),
         label: const Text('New Campaign'),
       ),
     );
@@ -154,11 +153,11 @@ class _CampaignCard extends StatelessWidget {
 
   IconData _channelIcon(CampaignChannel c) {
     return switch (c) {
-      CampaignChannel.email => PhosphorIconsRegular.envelope,
-      CampaignChannel.sms => PhosphorIconsRegular.chatCircle,
-      CampaignChannel.push => PhosphorIconsRegular.bell,
-      CampaignChannel.inApp => PhosphorIconsRegular.squaresFour,
-      CampaignChannel.whatsapp => PhosphorIconsRegular.whatsappLogo,
+      CampaignChannel.email => Icons.email,
+      CampaignChannel.sms => Icons.chat_bubble,
+      CampaignChannel.push => Icons.notifications,
+      CampaignChannel.inApp => Icons.dashboard,
+      CampaignChannel.whatsapp => Icons.chat,
     };
   }
 }

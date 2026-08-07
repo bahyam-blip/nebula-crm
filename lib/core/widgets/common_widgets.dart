@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../theme/app_colors.dart';
 import '../utils/extensions.dart';
@@ -9,7 +8,7 @@ import '../utils/extensions.dart';
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
-    this.icon = PhosphorIconsRegular.empty,
+    this.icon = Icons.inbox_outlined,
     required this.title,
     this.subtitle,
     this.actionLabel,
@@ -59,7 +58,7 @@ class EmptyState extends StatelessWidget {
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: onAction,
-              icon: const Icon(PhosphorIconsRegular.plus, size: 18),
+              icon: const Icon(Icons.add, size: 18),
               label: Text(actionLabel!),
             ),
           ],
@@ -159,7 +158,7 @@ class ErrorState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Icon(
-            PhosphorIconsRegular.warningCircle,
+            Icons.warning,
             color: AppColors.danger,
             size: 40,
           ),
@@ -173,7 +172,7 @@ class ErrorState extends StatelessWidget {
             const SizedBox(height: 20),
             OutlinedButton.icon(
               onPressed: onRetry,
-              icon: const Icon(PhosphorIconsRegular.arrowClockwise, size: 18),
+              icon: const Icon(Icons.refresh, size: 18),
               label: const Text('Retry'),
             ),
           ],

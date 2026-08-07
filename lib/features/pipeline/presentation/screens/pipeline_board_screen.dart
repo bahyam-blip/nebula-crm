@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firestore_service.dart';
@@ -71,7 +70,7 @@ class _PipelineBoardScreenState extends ConsumerState<PipelineBoardScreen> {
         ],
         body: dealsByStage.isEmpty
             ? const EmptyState(
-                icon: PhosphorIconsRegular.kanban,
+                icon: Icons.view_kanban,
                 title: 'No deals yet',
                 subtitle: 'Create your first deal to start tracking your pipeline.',
                 actionLabel: 'Add deal',
@@ -96,7 +95,7 @@ class _PipelineBoardScreenState extends ConsumerState<PipelineBoardScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/deals/new'),
-        icon: const Icon(PhosphorIconsRegular.plus, size: 20),
+        icon: const Icon(Icons.add, size: 20),
         label: const Text('Add Deal'),
       ),
     );
@@ -228,8 +227,8 @@ class _DealCard extends ConsumerWidget {
                       padding: const EdgeInsets.only(right: 6),
                       child: Icon(
                         deal.priority == 2
-                            ? PhosphorIconsFill.star
-                            : PhosphorIconsRegular.star,
+                            ? Icons.star
+                            : Icons.star,
                         size: 14,
                         color: AppColors.warning,
                       ),
@@ -248,7 +247,7 @@ class _DealCard extends ConsumerWidget {
               if (deal.company != null || deal.contactName != null)
                 Row(
                   children: [
-                    Icon(PhosphorIconsRegular.building,
+                    Icon(Icons.apartment,
                         size: 12, color: AppColors.textTertiary),
                     const SizedBox(width: 4),
                     Expanded(
@@ -273,7 +272,7 @@ class _DealCard extends ConsumerWidget {
                   ),
                   const Spacer(),
                   if (deal.expectedCloseDate != null) ...[
-                    Icon(PhosphorIconsRegular.calendar,
+                    Icon(Icons.calendar_today,
                         size: 12, color: AppColors.textTertiary),
                     const SizedBox(width: 4),
                     Text(
@@ -294,7 +293,7 @@ class _DealCard extends ConsumerWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(PhosphorIconsRegular.sparkle,
+                      Icon(Icons.auto_awesome,
                           size: 10, color: AppColors.tertiary),
                       const SizedBox(width: 4),
                       Expanded(

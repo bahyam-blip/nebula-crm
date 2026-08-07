@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/auth_service.dart';
@@ -53,7 +52,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(PhosphorIconsRegular.arrowLeft),
+          icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go(AppRoutes.login),
         ),
       ),
@@ -74,7 +73,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                           color: AppColors.primary.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: const Icon(PhosphorIconsRegular.key,
+                        child: const Icon(Icons.key,
                             color: AppColors.primary, size: 28),
                       ),
                       const SizedBox(height: 20),
@@ -92,7 +91,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Email',
                           prefixIcon:
-                              Icon(PhosphorIconsRegular.envelope, size: 18),
+                              Icon(Icons.email, size: 18),
                         ),
                         keyboardType: TextInputType.emailAddress,
                         autocorrect: false,
@@ -140,7 +139,7 @@ class _SuccessView extends StatelessWidget {
             color: AppColors.success.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
-          child: const Icon(PhosphorIconsFill.checkCircle,
+          child: const Icon(Icons.check_circle,
               color: AppColors.success, size: 40),
         ),
         const SizedBox(height: 24),

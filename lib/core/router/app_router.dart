@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../services/auth_service.dart' show isLoggedInProvider;
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -164,19 +163,19 @@ class _MoreScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = <_MenuItem>[
       _MenuItem(
-        icon: PhosphorIconsRegular.chartLineUp,
+        icon: Icons.trending_up,
         label: 'Campaigns',
         route: '/campaigns',
         color: AppColors.accent,
       ),
       _MenuItem(
-        icon: PhosphorIconsRegular.headset,
+        icon: Icons.headset_mic,
         label: 'Tickets',
         route: '/tickets',
         color: AppColors.info,
       ),
       _MenuItem(
-        icon: PhosphorIconsRegular.books,
+        icon: Icons.menu_book,
         label: 'Knowledge Base',
         route: '/knowledge-base',
         color: AppColors.tertiary,
