@@ -47,12 +47,11 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
         run: |
-          # Set the project
-          firebase use nebula-crm-70f58
-
-          # Deploy only the rules (creates the database if needed)
+          # .firebaserc + firebase.json in the repo make `firebase deploy`
+          # work without needing `firebase use`.
           firebase deploy --only firestore:rules --project nebula-crm-70f58 || {
-            echo "::warning::First-time deploy may fail if Firestore database hasn't been created yet."
+            echo "::warning::Firestore deploy failed."
+            echo "::warning::This usually means Firestore database hasn't been created yet."
             echo "::warning::Visit https://console.firebase.google.com/project/nebula-crm-70f58/firestore to create the database, then re-run this workflow."
             exit 1
           }
