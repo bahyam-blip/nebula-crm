@@ -12,14 +12,32 @@ final currentFirebaseUserProvider = StreamProvider<User?>((ref) {
 });
 
 /// Current [AppUser] (Firestore doc) for the signed-in user.
+///
+/// If the account is authenticated but has no profile document, repair it
+/// rather than leaving the app in a state where every read is denied.
+/// Accounts created before the signup bootstrap fix are exactly that: the
+/// profile write failed, so no role or teamId existed for the rules to
+/// resolve, and every screen showed permission-denied or span forever.
 final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
   final user = ref.watch(currentFirebaseUserProvider).valueOrNull;
   if (user == null) return Stream.value(null);
+
+  var repairAttempted = false;
+
   return FirebaseFirestore.instance
       .collection(AppConstants.colUsers)
       .doc(user.uid)
       .snapshots()
-      .map((d) => d.exists ? AppUser.fromFirestore(d) : null);
+      .asyncMap((d) async {
+    if (d.exists) return AppUser.fromFirestore(d);
+
+    // Try once; the stream re-emits when the document appears.
+    if (!repairAttempted) {
+      repairAttempted = true;
+      await ref.read(authServiceProvider).ensureUserDoc(user);
+    }
+    return null;
+  });
 });
 
 /// Convenience: synchronous access to the current [AppUser] (or null).

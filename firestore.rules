@@ -27,12 +27,29 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    // A signed-in user with no profile yet (mid-signup, or an account
+    // created before the bootstrap fix) must fall through to a clean deny
+    // rather than erroring on a null document.
+    function hasProfile() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function userRole() {
-      return userDoc().data.role;
+      return hasProfile() ? userDoc().data.role : 'none';
     }
 
     function userTeamId() {
-      return userDoc().data.teamId;
+      return hasProfile() ? userDoc().data.teamId : '__none__';
+    }
+
+    // Exactly one account can create system/bootstrap, and only that
+    // account may hold superAdmin. This replaces the old approach of
+    // counting the users collection, which rules can never permit.
+    function bootstrapOwner() {
+      return exists(/databases/$(database)/documents/system/bootstrap)
+        ? get(/databases/$(database)/documents/system/bootstrap).data.ownerId
+        : '';
     }
 
     function isSuperAdmin() {
@@ -67,6 +84,16 @@ service cloud.firestore {
       return isSignedIn() && resource.data.teamId == userTeamId();
     }
 
+    // ── Bootstrap marker ──────────────────────────────────────
+    // Create-once. Firestore rejects a create on an existing document, so
+    // the first account to write this wins and no one can take it later.
+    match /system/bootstrap {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // ── USERS collection ──────────────────────────────────────
     // Each user can read their own profile. Admins can read all team
     // members. SuperAdmins can read anyone. Only superAdmins can change
@@ -80,8 +107,13 @@ service cloud.firestore {
 
       // Self-create on first signup (must include role=employee by default)
       allow create: if isSignedIn() && request.auth.uid == userId
-        && request.resource.data.role in ['salesRep', 'supportAgent', 'viewer']
-        && request.resource.data.email == request.auth.token.email;
+        && request.resource.data.email == request.auth.token.email
+        && (
+          request.resource.data.role in ['salesRep', 'supportAgent', 'viewer']
+          // Only the account that claimed system/bootstrap may be superAdmin.
+          || (request.resource.data.role == 'superAdmin'
+              && bootstrapOwner() == request.auth.uid)
+        );
 
       // Self-update (cannot change own role/teamId)
       allow update: if isSignedIn() && (
@@ -103,13 +135,9 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isSuperAdmin() || userTeamId() == teamId
       );
-      allow create: if isSignedIn() && (
-        isSuperAdmin() || (
-          // A new team can be created by a signed-in user if they're setting
-          // themselves as the admin of that team
-          request.resource.data.id == teamId
-        )
-      );
+      allow create: if isSignedIn()
+        && request.resource.data.id == teamId
+        && request.resource.data.ownerId == request.auth.uid;
       allow update: if isSignedIn() && (
         isSuperAdmin() || (isAdmin() && teamId == userTeamId())
       );
@@ -125,7 +153,11 @@ service cloud.firestore {
       );
       allow create: if isSignedIn() && canEditDeals()
         && request.resource.data.teamId == userTeamId()
-        && request.resource.data.ownerId == request.auth.uid;
+        && (
+          request.resource.data.ownerId == request.auth.uid
+          // Bulk import and lead distribution assign leads to teammates.
+          || isManager()
+        );
       allow update: if isSignedIn() && (
         isSuperAdmin() ||
         (isManager() && sameTeam(resource)) ||
@@ -145,7 +177,11 @@ service cloud.firestore {
       );
       allow create: if isSignedIn() && canEditDeals()
         && request.resource.data.teamId == userTeamId()
-        && request.resource.data.ownerId == request.auth.uid;
+        && (
+          request.resource.data.ownerId == request.auth.uid
+          // Bulk import and lead distribution assign leads to teammates.
+          || isManager()
+        );
       allow update: if isSignedIn() && (
         isSuperAdmin() ||
         (isManager() && sameTeam(resource)) ||

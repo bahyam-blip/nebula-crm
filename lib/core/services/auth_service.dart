@@ -193,35 +193,60 @@ class AuthService {
     }
   }
 
+  /// Create the Firestore profile for a newly authenticated user.
+  ///
+  /// This used to query the whole `users` collection to decide whether the
+  /// signup was the first one. Security rules only ever permit reading your
+  /// OWN user document, so that query was always denied -- and because it
+  /// threw before the write, the profile was never created at all. Every
+  /// later read then failed with permission-denied, since every rule
+  /// resolves the caller's role through their (missing) user document.
+  ///
+  /// Instead we claim a single `system/bootstrap` document. Firestore
+  /// `create` fails if the document already exists, so exactly one account
+  /// can ever win the race and become superAdmin.
   Future<void> _createUserDoc(User user, String displayName) async {
-    final ref = _firestore.collection(AppConstants.colUsers).doc(user.uid);
+    final userRef = _firestore.collection(AppConstants.colUsers).doc(user.uid);
 
-    // Determine if this is the first user ever — if so, make them superAdmin.
-    // Otherwise default to salesRep (employee role).
-    final usersSnapshot = await _firestore
-        .collection(AppConstants.colUsers)
-        .limit(1)
-        .get();
-    final isFirstUser = usersSnapshot.docs.isEmpty;
+    // Don't clobber an existing profile (e.g. a repaired or invited user).
+    final existing = await userRef.get();
+    if (existing.exists) return;
 
-    // Each new user gets their own team (so signups are isolated).
-    // The superAdmin can later move users between teams / promote them.
-    final teamId = isFirstUser ? 'default-team' : 'team-${user.uid}';
-    final teamName = isFirstUser ? 'Default Team' : '${displayName}s Team';
+    final bootstrapRef =
+        _firestore.collection(AppConstants.colSystem).doc('bootstrap');
 
+    var isFirstUser = false;
+    try {
+      await bootstrapRef.set({
+        'ownerId': user.uid,
+        'claimedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: false));
+      isFirstUser = true;
+    } catch (_) {
+      // Already claimed by someone else: this is a normal, later signup.
+      isFirstUser = false;
+    }
+
+    // Everyone lands in one shared workspace so a team can actually see the
+    // same pipeline. A super admin can move people between teams later.
+    const teamId = AppConstants.defaultTeamId;
     final role = isFirstUser ? UserRole.superAdmin : UserRole.salesRep;
 
-    // Create the team doc (if it doesn't exist)
     final teamRef = _firestore.collection(AppConstants.colTeams).doc(teamId);
-    final teamSnap = await teamRef.get();
-    if (!teamSnap.exists) {
-      await teamRef.set({
-        'id': teamId,
-        'name': teamName,
-        'ownerId': user.uid,
-        'createdAt': FieldValue.serverTimestamp(),
-        'plan': 'free',
-      });
+    try {
+      final teamSnap = await teamRef.get();
+      if (!teamSnap.exists) {
+        await teamRef.set({
+          'id': teamId,
+          'name': 'Default Team',
+          'ownerId': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+          'plan': 'free',
+        });
+      }
+    } catch (_) {
+      // A non-admin may not be allowed to touch the team doc. Not fatal:
+      // the profile below is what actually matters.
     }
 
     final appUser = AppUser(
@@ -234,22 +259,39 @@ class AuthService {
       createdAt: DateTime.now(),
       lastActiveAt: DateTime.now(),
     );
-    await ref.set(appUser.toFirestore());
+    await userRef.set(appUser.toFirestore());
 
-    // Log the role assignment for audit
-    await _firestore.collection(AppConstants.colActivities).add({
-      'type': 'user_signed_up',
-      'ownerId': user.uid,
-      'title': 'New user signed up',
-      'description': '$displayName joined as ${role.label}',
-      'metadata': {
-        'role': role.name,
+    // Audit entry is best-effort; never block signup on it.
+    try {
+      await _firestore.collection(AppConstants.colActivities).add({
+        'type': 'user_signed_up',
+        'ownerId': user.uid,
         'teamId': teamId,
-        'isFirstUser': isFirstUser,
-        'email': user.email,
-      },
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+        'title': 'New user signed up',
+        'description': '$displayName joined as ${role.label}',
+        'metadata': {'role': role.name, 'isFirstUser': isFirstUser},
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+  }
+
+  /// Repair an account that authenticated but has no Firestore profile.
+  ///
+  /// Accounts created before the bootstrap fix are in exactly that state:
+  /// signed in, but every read denied. Called on startup so they heal
+  /// themselves instead of needing to be deleted and recreated.
+  Future<void> ensureUserDoc(User user) async {
+    try {
+      final ref = _firestore.collection(AppConstants.colUsers).doc(user.uid);
+      final snap = await ref.get();
+      if (snap.exists) return;
+      await _createUserDoc(
+        user,
+        user.displayName ?? user.email?.split('@').first ?? 'User',
+      );
+    } catch (_) {
+      // Surfaced to the user by whichever screen needs the profile.
+    }
   }
 
   /// Translate Firebase error codes to user-friendly messages.
