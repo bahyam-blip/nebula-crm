@@ -349,11 +349,18 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: |
+            set +e
             adb wait-for-device
             echo "::warning::DEVICE sdk=$(adb shell getprop ro.build.version.sdk) abi=$(adb shell getprop ro.product.cpu.abi)"
-            for APK in apks/INSTALL-THIS/nebula-crm.apk apks/other-abis/app-x86_64-release.apk; do
-              [ -e "$APK" ] || continue
-              adb uninstall com.nebula.nebula_crm >/dev/null 2>&1 || true
-              OUT=$(adb install -r "$APK" 2>&1) || true
-              echo "::warning::INSTALL $(basename $APK) -> $(echo "$OUT" | tr '\n' ' ' | head -c 200)"
+            echo "::group::downloaded files"
+            find apks -type f | head -40
+            echo "::endgroup::"
+            find apks -name '*.apk' | while IFS= read -r APK; do
+              adb uninstall com.nebula.nebula_crm >/dev/null 2>&1
+              adb install -r "$APK" > /tmp/out.txt 2>&1
+              RC=$?
+              RESULT=$(tr '\n' ' ' < /tmp/out.txt)
+              RESULT=${RESULT:0:180}
+              echo "::warning::INSTALL $(basename "$APK") rc=$RC -> $RESULT"
             done
+            exit 0
