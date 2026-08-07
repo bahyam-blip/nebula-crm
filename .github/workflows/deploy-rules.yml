@@ -132,21 +132,18 @@ jobs:
           PY
 
       # Deployed separately so a missing bucket doesn't mask the Firestore result.
-      - name: Deploy Firestore rules
+      # Deploy over REST rather than `firebase deploy`. The CLI runs a
+      # Service Usage precheck that needs serviceusage.services.get, which
+      # this service account lacks, so it 403s even though the Firestore and
+      # Rules APIs are enabled and working.
+      - name: Deploy Firestore rules and indexes
         id: firestore
         continue-on-error: true
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ env.FIREBASE_SERVICE_ACCOUNT_PATH }}
         run: |
-          set -o pipefail
-          if firebase deploy --only firestore:rules,firestore:indexes --project nebula-crm-70f58 \
-               --non-interactive 2>&1 | tee /tmp/fs.log; then
-            echo "Firestore rules deployed."
-          else
-            grep -iE "error|denied|not found|has not been used|PERMISSION|does not exist" /tmp/fs.log \
-              | head -12 | while IFS= read -r l; do echo "::error::FIRESTORE ${l}"; done
-            exit 1
-          fi
+          pip install --quiet google-auth requests
+          python3 scripts/deploy_firestore.py
 
       # Kept for reference only. Media is stored in Cloudflare R2, so this is
       # expected to be skipped and never gates the workflow.
