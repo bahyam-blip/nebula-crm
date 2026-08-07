@@ -89,7 +89,12 @@ jobs:
           echo "Storage:   ${{ steps.storage.outcome }}"
           if [ "${{ steps.firestore.outcome }}" != "success" ] || [ "${{ steps.storage.outcome }}" != "success" ]; then
             echo "::error::A rule deployment failed — see the annotations above."
-            echo "::error::If it mentions a missing database or bucket, create it once in the console:"
+            echo "::error::If the error is HTTP 403 from serviceusage.googleapis.com, the"
+            echo "::error::service account is missing IAM roles. Grant it, on project nebula-crm-70f58:"
+            echo "::error::  - roles/serviceusage.serviceUsageConsumer  (Service Usage Consumer)"
+            echo "::error::  - roles/firebaserules.admin                (Firebase Rules Admin)"
+            echo "::error::IAM console: https://console.cloud.google.com/iam-admin/iam?project=nebula-crm-70f58"
+            echo "::error::If instead it says the database or bucket does not exist, create it once:"
             echo "::error::Firestore: https://console.firebase.google.com/project/nebula-crm-70f58/firestore"
             echo "::error::Storage:   https://console.firebase.google.com/project/nebula-crm-70f58/storage"
             exit 1
