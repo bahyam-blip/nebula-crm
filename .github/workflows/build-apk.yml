@@ -3,9 +3,15 @@ name: Build Android APK
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+
+# Required for softprops/action-gh-release to create releases
+permissions:
+  contents: write
+  actions: read
 
 jobs:
   build:
