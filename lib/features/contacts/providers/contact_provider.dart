@@ -9,11 +9,34 @@ import '../../pipeline/models/deal.dart';
 // CONTACTS
 // ────────────────────────────────────────────────────────────────
 
-/// Stream of contacts owned by the current user.
+/// Which slice of the team's contacts the list shows.
+enum ContactScope { all, mine, unassigned }
+
+extension ContactScopeX on ContactScope {
+  String get label {
+    switch (this) {
+      case ContactScope.all:
+        return 'All';
+      case ContactScope.mine:
+        return 'Mine';
+      case ContactScope.unassigned:
+        return 'Unassigned';
+    }
+  }
+}
+
+final contactScopeProvider =
+    StateProvider<ContactScope>((ref) => ContactScope.all);
+
+/// Every contact on the team.
+///
+/// This used to filter on ownerId == me, so anything imported and handed to
+/// a teammate - or left unassigned - was invisible to everyone including
+/// the super admin who imported it. Scoping is now a user-facing filter
+/// rather than a hidden query condition.
 final contactsProvider = StreamProvider<List<Contact>>((ref) {
-  final ownerId = ref.watch(currentUserIdProvider);
   final db = ref.watch(firestoreServiceProvider);
-  return db.watchContacts(ownerId: ownerId);
+  return db.watchContacts(limit: 500);
 });
 
 /// Search query for the contacts list.
@@ -21,7 +44,21 @@ final contactSearchProvider = StateProvider<String>((ref) => '');
 
 /// Filtered contacts (search query applied client-side for snappy UX).
 final filteredContactsProvider = Provider<List<Contact>>((ref) {
-  final contacts = ref.watch(contactsProvider).valueOrNull ?? [];
+  final all = ref.watch(contactsProvider).valueOrNull ?? [];
+  final scope = ref.watch(contactScopeProvider);
+  final me = ref.watch(currentUserIdProvider);
+
+  final contacts = all.where((c) {
+    switch (scope) {
+      case ContactScope.all:
+        return true;
+      case ContactScope.mine:
+        return c.assignedTo == me || c.ownerId == me;
+      case ContactScope.unassigned:
+        return c.assignedTo == null;
+    }
+  }).toList();
+
   final query = ref.watch(contactSearchProvider).trim().toLowerCase();
   if (query.isEmpty) return contacts;
   return contacts.where((c) {

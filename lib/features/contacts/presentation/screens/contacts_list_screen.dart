@@ -41,11 +41,35 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
               ),
             ],
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(56),
+              preferredSize: const Size.fromHeight(100),
               child: Padding(
                 padding:
                     const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: TextField(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      height: 34,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: ContactScope.values.map((sc) {
+                          final on = ref.watch(contactScopeProvider) == sc;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(sc.label),
+                              selected: on,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (_) => ref
+                                  .read(contactScopeProvider.notifier)
+                                  .state = sc,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
                   onChanged: (v) => ref
                       .read(contactSearchProvider.notifier)
                       .state = v,
@@ -62,6 +86,8 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
                         : null,
                     isDense: true,
                   ),
+                    ),
+                  ],
                 ),
               ),
             ),

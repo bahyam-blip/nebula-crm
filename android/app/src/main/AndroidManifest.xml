@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Android 13+ requires an explicit opt-in before any notification
+         can be shown. Exact-alarm permission is deliberately NOT requested:
+         it needs a system settings trip, and a callback reminder is fine
+         arriving a few minutes late. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="Nebula CRM"
         android:name="${applicationName}"

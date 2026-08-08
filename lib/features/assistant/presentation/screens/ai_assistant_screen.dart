@@ -63,7 +63,19 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     }
 
     return {
-      'me': {'name': me?.displayName, 'role': me?.role.name},
+      'me': {
+        'name': me?.displayName,
+        'role': me?.role.name,
+        // Stated explicitly so the model does not have to infer authority
+        // from a role name it may not recognise. The executor enforces this
+        // regardless; this only makes the refusal polite instead of a
+        // permission error after the fact.
+        'can': {
+          'distributeLeads': me?.role.canManageTeam ?? false,
+          'assignTasksToOthers': me?.role.canManageTeam ?? false,
+          'seeTeamPerformance': me?.role.canManageCampaigns ?? false,
+        },
+      },
       'team':
           team.map((u) => {'name': u.displayName, 'role': u.role.name}).toList(),
       'leads': {

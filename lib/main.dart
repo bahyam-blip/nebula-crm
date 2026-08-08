@@ -6,6 +6,7 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import 'app.dart';
 import 'core/services/firebase_boot.dart';
+import 'core/services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +15,10 @@ Future<void> main() async {
   // Failures are recorded rather than swallowed, so a broken init shows a
   // real message instead of leaking out later as `unavailable`.
   await bootFirebase();
+
+  // Reminders are scheduled on-device, so the plugin has to be ready
+  // before any screen tries to book one.
+  await NotificationService().init();
 
   // ── Hive (offline cache) ────────────────────────────────────
   try {

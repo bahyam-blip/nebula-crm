@@ -26,12 +26,21 @@ class _LeadDistributionScreenState
   final Set<String> _selectedLeads = {};
   final Set<String> _targetCallers = {};
   String _ownerFilter = 'all'; // all | unassigned | <userId>
+  String _search = '';
   bool _openOnly = true;
   bool _busy = false;
 
   List<Contact> _visible(List<Contact> all) {
+    final q = _search.trim().toLowerCase();
     return all.where((c) {
       if (_openOnly && !c.callStatus.isOpen) return false;
+      if (q.isNotEmpty) {
+        final hit = c.name.toLowerCase().contains(q) ||
+            (c.phone ?? '').toLowerCase().contains(q) ||
+            (c.email ?? '').toLowerCase().contains(q) ||
+            (c.company ?? '').toLowerCase().contains(q);
+        if (!hit) return false;
+      }
       switch (_ownerFilter) {
         case 'all':
           return true;
@@ -367,6 +376,18 @@ class _LeadDistributionScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            TextField(
+              onChanged: (v) => setState(() {
+                _search = v;
+                _selectedLeads.clear();
+              }),
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search, size: 18),
+                hintText: 'Search name, phone, email, company',
+              ),
+            ),
+            const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: _ownerFilter,
               decoration: const InputDecoration(labelText: 'Owner'),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/services/firebase_boot.dart';
+import '../../../../core/services/notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/formatters.dart';
@@ -357,6 +358,20 @@ class _DispositionSheetState extends ConsumerState<_DispositionSheet> {
               contactName: widget.contact.name,
               note: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
             );
+      }
+
+      // The whole point of writing "call back at 4" is being reminded at 4.
+      if (_followUp != null) {
+        await ref.read(notificationServiceProvider).scheduleCallback(
+              contactId: widget.contact.id,
+              contactName: widget.contact.name,
+              at: _followUp!,
+              note: _notes.text.trim(),
+            );
+      } else {
+        await ref
+            .read(notificationServiceProvider)
+            .cancel('callback:${widget.contact.id}');
       }
 
       if (!mounted) return;
