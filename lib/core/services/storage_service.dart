@@ -11,8 +11,26 @@ import 'package:http/http.dart' as http;
 ///   flutter build apk --dart-define=STORAGE_BASE_URL=https://...workers.dev
 const String kStorageBaseUrl = String.fromEnvironment(
   'STORAGE_BASE_URL',
-  defaultValue: 'https://nebula-crm-storage.workers.dev',
+  // Must be the real deployed host. The previous default omitted the
+  // account subdomain, so any avatar uploaded from a build without the
+  // STORAGE_BASE_URL variable was saved pointing at a host that does not
+  // exist - the image then failed silently and fell back to initials,
+  // which looked like the photo had been wiped.
+  defaultValue: 'https://nebula-crm-storage.nebula-crm.workers.dev',
 );
+
+/// Rewrite a stored media URL against the current storage host.
+///
+/// Existing records may hold a URL built with an older or wrong host. The
+/// object key is the durable part, so re-point the URL at render time
+/// rather than migrating every document.
+String resolveMediaUrl(String? url) {
+  if (url == null || url.isEmpty) return '';
+  const marker = '/v1/file/';
+  final i = url.indexOf(marker);
+  if (i == -1) return url;
+  return '$kStorageBaseUrl$marker${url.substring(i + marker.length)}';
+}
 
 class StorageException implements Exception {
   StorageException(this.message);

@@ -190,7 +190,7 @@ class AiComposeService {
       throw AiComposeException('AI is not configured on the server yet.');
     }
     if (res.statusCode != 200) {
-      throw AiComposeException('Assistant error (${res.statusCode}).');
+      throw AiComposeException(_detail(res.statusCode, res.body));
     }
 
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -205,6 +205,20 @@ class AiComposeService {
     }
     return text.trim();
   }
+  /// Pull the provider's own message out of an error response.
+  String _detail(int status, String body) {
+    try {
+      final map = jsonDecode(body) as Map<String, dynamic>;
+      final detail = map['detail'] ?? map['error'] ?? map['message'];
+      if (detail != null) {
+        final text = detail.toString();
+        return 'Assistant error ($status): '
+            '${text.length > 200 ? text.substring(0, 200) : text}';
+      }
+    } catch (_) {}
+    return 'Assistant error ($status).';
+  }
+
 }
 
 final aiComposeServiceProvider = Provider<AiComposeService>((ref) {

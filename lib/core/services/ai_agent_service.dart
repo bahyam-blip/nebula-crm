@@ -119,7 +119,7 @@ ${jsonEncode(context)}
       throw AiException('The assistant is not configured yet.');
     }
     if (res.statusCode != 200) {
-      throw AiException('Assistant error (${res.statusCode}).');
+      throw AiException(_detail(res.statusCode, res.body));
     }
 
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -158,6 +158,20 @@ ${jsonEncode(context)}
       return AiAction(name: 'reply', args: const {}, reply: text);
     }
   }
+  /// Pull the provider's own message out of an error response.
+  String _detail(int status, String body) {
+    try {
+      final map = jsonDecode(body) as Map<String, dynamic>;
+      final detail = map['detail'] ?? map['error'] ?? map['message'];
+      if (detail != null) {
+        final text = detail.toString();
+        return 'Assistant error ($status): '
+            '${text.length > 200 ? text.substring(0, 200) : text}';
+      }
+    } catch (_) {}
+    return 'Assistant error ($status).';
+  }
+
 }
 
 final aiAgentServiceProvider = Provider<AiAgentService>((ref) {

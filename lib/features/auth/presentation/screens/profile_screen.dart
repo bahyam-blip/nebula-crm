@@ -53,7 +53,7 @@ class ProfileScreen extends ConsumerWidget {
                                   _hexToColor(user.role.badgeColorHex)
                                       .withValues(alpha: 0.2),
                               backgroundImage: user.photoUrl != null
-                                  ? NetworkImage(user.photoUrl!)
+                                  ? NetworkImage(resolveMediaUrl(user.photoUrl))
                                   : null,
                               child: user.photoUrl == null
                                   ? Text(

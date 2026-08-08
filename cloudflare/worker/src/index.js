@@ -216,17 +216,30 @@ export default {
           'Content-Type': 'application/json',
           'api-subscription-key': env.SARVAM_API_KEY,
         },
+        // Keep the payload minimal. Extra parameters are the usual cause of
+        // a 400 from providers that only accept a subset of the OpenAI shape.
         body: JSON.stringify({
           model: body.model || 'sarvam-m',
           messages: body.messages || [],
           temperature: body.temperature ?? 0.2,
-          max_tokens: body.max_tokens ?? 1200,
         }),
       });
 
       const text = await upstream.text();
+      if (!upstream.ok) {
+        // Surface what the provider actually said; "error (400)" is useless
+        // for diagnosis.
+        return json(
+          {
+            error: 'upstream',
+            status: upstream.status,
+            detail: text.slice(0, 600),
+          },
+          upstream.status
+        );
+      }
       return new Response(text, {
-        status: upstream.status,
+        status: 200,
         headers: { 'Content-Type': 'application/json', ...CORS },
       });
     }

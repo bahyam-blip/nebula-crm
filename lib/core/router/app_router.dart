@@ -79,6 +79,18 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
             name: 'contacts',
             builder: (_, __) => const ContactsListScreen(),
             routes: [
+              // Static segments MUST be declared before ':id', otherwise
+              // they are captured as an id and routed to the detail screen.
+              GoRoute(
+                path: 'new',
+                name: 'contactForm',
+                builder: (_, __) => const ContactFormScreen(),
+              ),
+              GoRoute(
+                path: 'import',
+                name: 'contactImport',
+                builder: (_, __) => const CsvImportScreen(),
+              ),
               GoRoute(
                 path: ':id',
                 name: 'contactDetail',
@@ -123,16 +135,6 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         path: '/team',
         name: 'teamManagement',
         builder: (_, __) => const TeamManagementScreen(),
-      ),
-      GoRoute(
-        path: '/contacts/new',
-        name: 'contactForm',
-        builder: (_, __) => const ContactFormScreen(),
-      ),
-      GoRoute(
-        path: '/contacts/import',
-        name: 'contactImport',
-        builder: (_, __) => const CsvImportScreen(),
       ),
       GoRoute(
         path: '/tasks',
@@ -305,24 +307,6 @@ class _MoreScreen extends StatelessWidget {
         label: 'Campaigns',
         route: '/campaigns',
         color: AppColors.accent,
-      ),
-      _MenuItem(
-        icon: Icons.business,
-        label: 'Companies',
-        route: '/companies',
-        color: AppColors.info,
-      ),
-      _MenuItem(
-        icon: Icons.calendar_month,
-        label: 'Calendar',
-        route: '/calendar',
-        color: AppColors.stageNegotiation,
-      ),
-      _MenuItem(
-        icon: Icons.auto_awesome,
-        label: 'AI Tools',
-        route: '/ai-tools',
-        color: AppColors.tertiary,
       ),
       _MenuItem(
         icon: Icons.headset_mic,
