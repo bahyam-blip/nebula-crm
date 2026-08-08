@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/auth/capabilities.dart';
+import '../../../auth/providers/capability_provider.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
@@ -34,11 +37,15 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
             title: const Text('Contacts'),
             pinned: true,
             actions: [
-              IconButton(
-                tooltip: 'Import from CSV',
-                icon: const Icon(Icons.upload_file),
-                onPressed: () => context.push('/contacts/import'),
-              ),
+              // Bulk import is one of the riskiest actions in the app, so
+              // the entry point disappears unless it is granted.
+              if (ref.watch(myCapabilitiesProvider)
+                  .can(Capability.contactsImport))
+                IconButton(
+                  tooltip: 'Import from CSV',
+                  icon: const Icon(Icons.upload_file),
+                  onPressed: () => context.push('/contacts/import'),
+                ),
             ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(100),

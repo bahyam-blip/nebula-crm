@@ -14,7 +14,8 @@ import '../../../auth/providers/auth_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../contacts/models/contact.dart';
 import '../../../../core/services/data_migration.dart';
-import '../../../admin/providers/permissions_provider.dart';
+import '../../../../core/auth/capabilities.dart';
+import '../../../auth/providers/capability_provider.dart';
 import '../../../auth/services/invite_service.dart';
 import '../../providers/telecalling_provider.dart';
 
@@ -202,6 +203,10 @@ class _PeopleTab extends ConsumerWidget {
             .doc(target.id)
             .update({
           'role': picked.name,
+          // Reset to the new role's baseline. Carrying old grants across a
+          // demotion is exactly how someone keeps powers they should have
+          // just lost.
+          'capabilities': defaultCapabilityIdsFor(picked),
           'updatedAt': FieldValue.serverTimestamp(),
         });
         await ref.read(telecallingServiceProvider).recordAudit(
@@ -483,99 +488,150 @@ class _InvitesTabState extends ConsumerState<_InvitesTab> {
   }
 }
 
-/// Choose what each admin is allowed to monitor.
+/// Per-person permission editor.
+///
+/// Mirrors how Salesforce and Zoho work: the role sets a baseline, and
+/// individual capabilities are then granted or revoked without inventing a
+/// new role for every exception.
 class _AccessTab extends ConsumerWidget {
   const _AccessTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final users = ref.watch(allUsersGlobalProvider).valueOrNull ?? const [];
-    final granted =
-        ref.watch(grantedPermissionsProvider).valueOrNull ?? const {};
     final me = ref.watch(currentAppUserValueProvider);
+    final editable =
+        users.where((u) => u.role != UserRole.superAdmin).toList()
+          ..sort((a, b) => b.role.rank.compareTo(a.role.rank));
 
-    final admins = users.where((u) => u.role == UserRole.admin).toList();
+    if (editable.isEmpty) {
+      return const EmptyState(
+        icon: Icons.tune,
+        title: 'Nobody to configure yet',
+        subtitle: 'Invite someone, then set exactly what they can do here.',
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         Text(
-          'Choose which parts of the business each admin can monitor. '
-          'Managers and salespeople keep their standard access. These are '
-          'monitoring scopes - security rules still decide what data any '
-          'role can read.',
+          'Each role starts from a baseline. Adjust anything here without '
+          'creating a new role. Changing someone\'s role resets them to that '
+          "role's baseline.",
           style: context.textTheme.bodySmall
               ?.copyWith(color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 14),
-        if (admins.isEmpty)
-          const EmptyState(
-            icon: Icons.admin_panel_settings_outlined,
-            title: 'No admins yet',
-            subtitle: 'Invite someone as Admin, then set their access here.',
-          ),
-        ...admins.map((admin) {
-          final current = granted[admin.id] ??
-              const MonitorPermissions({
-                MonitorScope.contacts,
-                MonitorScope.pipeline,
-                MonitorScope.telecalling,
-                MonitorScope.performance,
-              });
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(admin.displayName, style: context.textTheme.titleSmall),
-                Text(admin.email,
-                    style: context.textTheme.bodySmall
-                        ?.copyWith(color: AppColors.textTertiary)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: MonitorScope.values.map((scope) {
-                    final on = current.has(scope);
-                    return FilterChip(
-                      selected: on,
-                      label: Text(scope.label,
-                          style: const TextStyle(fontSize: 11)),
-                      visualDensity: VisualDensity.compact,
-                      onSelected: (v) async {
-                        if (me == null) return;
-                        final next = {...current.scopes};
-                        if (v) {
-                          next.add(scope);
-                        } else {
-                          next.remove(scope);
-                        }
-                        try {
-                          await ref.read(permissionServiceProvider).grant(
-                                teamId: me.teamId ?? '',
-                                userId: admin.id,
-                                permissions: MonitorPermissions(next),
-                              );
-                        } catch (e) {
-                          if (context.mounted) {
-                            context.showError(describeFirestoreError(e));
-                          }
-                        }
-                      },
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          );
-        }),
+        const SizedBox(height: 12),
+        ...editable.map((u) => _UserCard(user: u, actor: me)),
+        const SizedBox(height: 30),
       ],
+    );
+  }
+}
+
+class _UserCard extends ConsumerWidget {
+  const _UserCard({required this.user, required this.actor});
+
+  final AppUser user;
+  final AppUser? actor;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = capabilitiesOf(user);
+    final grouped = <String, List<Capability>>{};
+    for (final c in Capability.values) {
+      grouped.putIfAbsent(c.group, () => []).add(c);
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+          title: Text(user.displayName, style: context.textTheme.titleSmall),
+          subtitle: Text(
+            '${user.role.label} · ${current.length} of '
+            '${Capability.values.length} permissions',
+            style: context.textTheme.bodySmall
+                ?.copyWith(color: AppColors.textTertiary),
+          ),
+          children: [
+            for (final entry in grouped.entries)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(entry.key,
+                        style: context.textTheme.labelMedium
+                            ?.copyWith(color: AppColors.textTertiary)),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: entry.value.map((cap) {
+                        final on = current.contains(cap);
+                        return FilterChip(
+                          selected: on,
+                          visualDensity: VisualDensity.compact,
+                          // Sensitive powers are marked so granting one is a
+                          // deliberate act rather than a stray tap.
+                          avatar: cap.isSensitive
+                              ? Icon(Icons.warning_amber,
+                                  size: 13,
+                                  color: on
+                                      ? AppColors.warning
+                                      : AppColors.textTertiary)
+                              : null,
+                          label: Text(cap.label,
+                              style: const TextStyle(fontSize: 11)),
+                          onSelected: (v) async {
+                            final next = {...current};
+                            if (v) {
+                              next.add(cap);
+                            } else {
+                              next.remove(cap);
+                            }
+                            try {
+                              await ref
+                                  .read(capabilityServiceProvider)
+                                  .setFor(user.id, next);
+                            } catch (e) {
+                              if (context.mounted) {
+                                context.showError(
+                                    describeFirestoreError(e));
+                              }
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => ref
+                      .read(capabilityServiceProvider)
+                      .resetToRoleDefaults(user.id, user.role),
+                  icon: const Icon(Icons.restart_alt, size: 15),
+                  label: Text('Reset to ${user.role.label} defaults'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

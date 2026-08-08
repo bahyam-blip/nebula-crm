@@ -133,6 +133,7 @@ class AppUser extends Equatable {
     this.role = UserRole.salesRep,
     this.teamId,
     this.phone,
+    this.capabilities,
     this.title,
     this.lastActiveAt,
     this.createdAt,
@@ -146,6 +147,13 @@ class AppUser extends Equatable {
   final UserRole role;
   final String? teamId;
   final String? phone;
+
+  /// Effective capability ids for this person.
+  ///
+  /// Null means "never customised" - fall back to the role's defaults. An
+  /// empty list is meaningfully different: it means an admin deliberately
+  /// revoked everything.
+  final List<String>? capabilities;
   final String? title;
   final DateTime? lastActiveAt;
   final DateTime? createdAt;
@@ -161,6 +169,9 @@ class AppUser extends Equatable {
       role: _parseRole(data['role'] as String?),
       teamId: data['teamId'] as String?,
       phone: data['phone'] as String?,
+      capabilities: (data['capabilities'] as List?)
+          ?.map((e) => e.toString())
+          .toList(),
       title: data['title'] as String?,
       lastActiveAt: (data['lastActiveAt'] as Timestamp?)?.toDate(),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
@@ -177,6 +188,7 @@ class AppUser extends Equatable {
         'role': role.name,
         'teamId': teamId,
         'phone': phone,
+        'capabilities': capabilities,
         'title': title,
         'lastActiveAt': lastActiveAt != null
             ? Timestamp.fromDate(lastActiveAt!)
@@ -194,6 +206,7 @@ class AppUser extends Equatable {
     UserRole? role,
     String? teamId,
     String? phone,
+    List<String>? capabilities,
     String? title,
     DateTime? lastActiveAt,
     UserPreferences? preferences,
@@ -206,6 +219,7 @@ class AppUser extends Equatable {
       role: role ?? this.role,
       teamId: teamId ?? this.teamId,
       phone: phone ?? this.phone,
+      capabilities: capabilities ?? this.capabilities,
       title: title ?? this.title,
       lastActiveAt: lastActiveAt ?? this.lastActiveAt,
       createdAt: createdAt,

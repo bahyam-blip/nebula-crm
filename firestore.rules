@@ -46,6 +46,20 @@ service cloud.firestore {
     // Exactly one account can create system/bootstrap, and only that
     // account may hold superAdmin. This replaces the old approach of
     // counting the users collection, which rules can never permit.
+    // Effective capabilities, mirroring the app's resolution order: an
+    // explicit list wins, otherwise fall back to role. Rules are the real
+    // boundary here - hiding a button stops an honest mistake, not a
+    // modified client.
+    function caps() {
+      return hasProfile() && userDoc().data.keys().hasAny(['capabilities'])
+        ? userDoc().data.capabilities
+        : [];
+    }
+
+    function hasCap(name) {
+      return isSuperAdmin() || name in caps();
+    }
+
     function bootstrapOwner() {
       return exists(/databases/$(database)/documents/system/bootstrap)
         ? get(/databases/$(database)/documents/system/bootstrap).data.ownerId
@@ -99,7 +113,8 @@ service cloud.firestore {
     // pays); only an admin sets it.
     match /settings/{teamId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if hasCap('commissions.setRate')
+                   || hasCap('team.managePermissions');
     }
 
     // ── Commissions ───────────────────────────────────────────
@@ -113,8 +128,8 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.teamId == userTeamId()
         && request.resource.data.salesPersonId == request.auth.uid;
-      allow update: if isManager() && sameTeam(resource);
-      allow delete: if isAdmin() && sameTeam(resource);
+      allow update: if hasCap('commissions.approve') && sameTeam(resource);
+      allow delete: if hasCap('settings.manage') && sameTeam(resource);
     }
 
     // ── Companies ─────────────────────────────────────────────
@@ -220,12 +235,16 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isSuperAdmin() || sameTeam(resource)
       );
-      allow create: if isSignedIn() && canEditDeals()
+      // A plain create needs contacts.create. Assigning the new record to
+      // somebody else is really distribution, so it needs that capability
+      // instead - this is what stops a telecaller importing a list and
+      // handing it around.
+      allow create: if isSignedIn()
         && request.resource.data.teamId == userTeamId()
+        && hasCap('contacts.create')
         && (
           request.resource.data.ownerId == request.auth.uid
-          // Bulk import and lead distribution assign leads to teammates.
-          || isManager()
+          || hasCap('leads.distribute')
         );
       allow update: if isSignedIn() && (
         isSuperAdmin() ||
@@ -244,23 +263,15 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isSuperAdmin() || sameTeam(resource)
       );
-      allow create: if isSignedIn() && canEditDeals()
+      allow create: if isSignedIn()
         && request.resource.data.teamId == userTeamId()
-        && (
-          request.resource.data.ownerId == request.auth.uid
-          // Bulk import and lead distribution assign leads to teammates.
-          || isManager()
-        );
+        && hasCap('deals.edit');
       allow update: if isSignedIn() && (
         isSuperAdmin() ||
         (isManager() && sameTeam(resource)) ||
         isOwner(resource)
       );
-      allow delete: if isSignedIn() && (
-        isSuperAdmin() ||
-        (isAdmin() && sameTeam(resource)) ||
-        isOwner(resource)
-      );
+      allow delete: if hasCap('deals.delete') && sameTeam(resource);
     }
 
     // ── ACTIVITIES collection ─────────────────────────────────

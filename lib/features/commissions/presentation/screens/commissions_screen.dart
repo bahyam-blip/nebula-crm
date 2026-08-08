@@ -7,7 +7,9 @@ import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/common_widgets.dart';
 import '../../../auth/models/app_user.dart';
+import '../../../../core/auth/capabilities.dart';
 import '../../../auth/providers/auth_provider.dart';
+import '../../../auth/providers/capability_provider.dart';
 import '../../models/commission.dart';
 import '../../providers/commission_provider.dart';
 
@@ -18,26 +20,31 @@ class CommissionsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final me = ref.watch(currentAppUserValueProvider);
-    final isAdmin = me?.role.canManageTeam ?? false;
+    final caps = ref.watch(myCapabilitiesProvider);
+    // Seeing team earnings and setting the rate are separate powers: a
+    // manager may need the first without ever touching the second.
+    final seesTeam = caps.can(Capability.commissionsViewTeam);
+    final setsRate = caps.can(Capability.commissionsSetRate);
+    final isAdmin = seesTeam || setsRate;
 
     return DefaultTabController(
-      length: isAdmin ? 3 : 1,
+      length: 1 + (seesTeam ? 1 : 0) + (setsRate ? 1 : 0),
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Commissions'),
           bottom: isAdmin
-              ? const TabBar(tabs: [
-                  Tab(text: 'My earnings'),
-                  Tab(text: 'Team'),
-                  Tab(text: 'Rate'),
+              ? TabBar(tabs: [
+                  const Tab(text: 'My earnings'),
+                  if (seesTeam) const Tab(text: 'Team'),
+                  if (setsRate) const Tab(text: 'Rate'),
                 ])
               : null,
         ),
         body: isAdmin
-            ? const TabBarView(children: [
-                _MyEarningsTab(),
-                _TeamTab(),
-                _RateTab(),
+            ? TabBarView(children: [
+                const _MyEarningsTab(),
+                if (seesTeam) const _TeamTab(),
+                if (setsRate) const _RateTab(),
               ])
             : const _MyEarningsTab(),
       ),

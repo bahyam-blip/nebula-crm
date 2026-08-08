@@ -7,7 +7,9 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/widgets/common_widgets.dart';
 import '../../../auth/models/app_user.dart';
+import '../../../../core/auth/capabilities.dart';
 import '../../../auth/providers/auth_provider.dart';
+import '../../../auth/providers/capability_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../contacts/models/contact.dart';
 import '../../providers/telecalling_provider.dart';
@@ -189,7 +191,8 @@ class _LeadDistributionScreenState
   @override
   Widget build(BuildContext context) {
     final me = ref.watch(currentAppUserValueProvider);
-    final canManage = me?.role.canManageTeam ?? false;
+    final canManage =
+        ref.watch(myCapabilitiesProvider).can(Capability.leadsDistribute);
     final leadsAsync = ref.watch(teamLeadsProvider);
     final members =
         ref.watch(teamMembersListProvider).valueOrNull ?? const <AppUser>[];
@@ -200,7 +203,7 @@ class _LeadDistributionScreenState
         body: const EmptyState(
           icon: Icons.lock,
           title: 'Managers only',
-          subtitle: 'You need manager access to move leads between people.',
+          subtitle: 'Distributing leads is not enabled for your account.',
         ),
       );
     }

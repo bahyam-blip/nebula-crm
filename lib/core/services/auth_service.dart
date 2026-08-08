@@ -6,6 +6,7 @@ import 'package:logger/logger.dart';
 
 import '../../features/auth/models/app_user.dart';
 import '../../features/auth/services/invite_service.dart';
+import '../auth/capabilities.dart';
 import '../constants/app_constants.dart';
 
 final logger = Logger(printer: PrettyPrinter(methodCount: 0));
@@ -283,7 +284,12 @@ class AuthService {
       createdAt: DateTime.now(),
       lastActiveAt: DateTime.now(),
     );
-    await userRef.set(appUser.toFirestore());
+    await userRef.set({
+      ...appUser.toFirestore(),
+      // Seed the role's baseline so rules have something concrete to read
+      // rather than inferring from the role on every check.
+      'capabilities': defaultCapabilityIdsFor(role),
+    });
 
     // Audit entry is best-effort; never block signup on it.
     try {
@@ -333,6 +339,7 @@ class AuthService {
       await userRef.update({
         'role': UserRole.superAdmin.name,
         'teamId': AppConstants.defaultTeamId,
+        'capabilities': defaultCapabilityIdsFor(UserRole.superAdmin),
         'updatedAt': FieldValue.serverTimestamp(),
       });
       return true;

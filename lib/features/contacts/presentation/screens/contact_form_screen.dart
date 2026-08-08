@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/auth/capabilities.dart';
+import '../../../auth/providers/capability_provider.dart';
+
 import '../../../../core/services/firestore_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
@@ -142,7 +145,9 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
         actions: [
           // Bulk entry lives one tap from single entry, which is where
           // someone with a spreadsheet actually looks for it.
-          if (_editingId == null)
+          if (_editingId == null &&
+              ref.watch(myCapabilitiesProvider)
+                  .can(Capability.contactsImport))
             IconButton(
               tooltip: 'Import from CSV',
               icon: const Icon(Icons.upload_file, size: 20),

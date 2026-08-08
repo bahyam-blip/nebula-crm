@@ -10,7 +10,9 @@ import '../../../../core/services/firestore_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../auth/models/app_user.dart';
+import '../../../../core/auth/capabilities.dart';
 import '../../../auth/providers/auth_provider.dart';
+import '../../../auth/providers/capability_provider.dart';
 import '../../services/csv_import_service.dart';
 
 /// Every user on the current user's team, for choosing who gets the leads.
@@ -135,7 +137,8 @@ class _CsvImportScreenState extends ConsumerState<CsvImportScreen> {
   @override
   Widget build(BuildContext context) {
     final me = ref.watch(currentAppUserValueProvider);
-    final canImport = me?.role.canManageTeam ?? false;
+    final canImport =
+        ref.watch(myCapabilitiesProvider).can(Capability.contactsImport);
     final parsed = _parsed;
 
     return Scaffold(
@@ -145,7 +148,8 @@ class _CsvImportScreenState extends ConsumerState<CsvImportScreen> {
               child: Padding(
                 padding: EdgeInsets.all(32),
                 child: Text(
-                  'Only admins and managers can import contacts.',
+                  'Importing contacts is not enabled for your account. '
+                  'Ask a super admin if you need it.',
                   textAlign: TextAlign.center,
                 ),
               ),
