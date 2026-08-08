@@ -134,19 +134,20 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        actions: [
-          TextButton.icon(
-            onPressed: () => context.push('/contacts/import'),
-            icon: const Icon(Icons.upload_file, size: 16),
-            label: const Text('CSV'),
-          ),
-        ],
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
         title: Text(_editingId != null ? 'Edit Contact' : 'New Contact'),
         actions: [
+          // Bulk entry lives one tap from single entry, which is where
+          // someone with a spreadsheet actually looks for it.
+          if (_editingId == null)
+            IconButton(
+              tooltip: 'Import from CSV',
+              icon: const Icon(Icons.upload_file, size: 20),
+              onPressed: () => context.push('/contacts/import'),
+            ),
           TextButton(
             onPressed: _isLoading ? null : _save,
             child: const Text('Save'),
