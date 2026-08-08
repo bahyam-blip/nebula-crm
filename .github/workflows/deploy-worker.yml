@@ -136,6 +136,34 @@ jobs:
             exit 1
           fi
 
+      # Is the FCM API actually enabled on the project? Firestore was not,
+      # and the failure looks identical from the app: silence.
+      - name: Verify FCM is reachable
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          [ -z "$FIREBASE_SERVICE_ACCOUNT" ] && exit 0
+          pip install --quiet google-auth requests
+          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json python3 - <<'PYEOF'
+          import google.auth, google.auth.transport.requests as gt, requests
+          creds, _ = google.auth.default(
+              scopes=["https://www.googleapis.com/auth/firebase.messaging"])
+          creds.refresh(gt.Request())
+          print("::warning::FCM token minted OK")
+          # A deliberately invalid device token: a healthy API replies 400
+          # INVALID_ARGUMENT, a disabled one replies 403 with the reason.
+          r = requests.post(
+              "https://fcm.googleapis.com/v1/projects/nebula-crm-70f58/messages:send",
+              headers={"Authorization": f"Bearer {creds.token}"},
+              json={"message": {"token": "probe-invalid-token",
+                                "notification": {"title": "probe", "body": "probe"}}},
+              timeout=30)
+          body = r.text.replace("\n", " ")[:400]
+          print(f"::warning::FCM probe HTTP {r.status_code} {body}")
+          PYEOF
+          rm -f /tmp/sa.json
+
       - name: Smoke test
         run: |
           URL=$(grep -oE "https://[a-z0-9.-]+\.workers\.dev" /tmp/wrangler.log | sort -u | head -1)
