@@ -193,6 +193,44 @@ export default {
     if (!claims) return json({ error: 'invalid or expired token' }, 401);
     const uid = claims.sub;
 
+    // ── AI proxy ──
+    // Sarvam's key lives here as a Worker secret. It must never ship in the
+    // APK: an APK can be decompiled, and a leaked key is billable to you.
+    // The Worker only relays; it never decides what the AI may touch. The
+    // app executes any resulting action with the signed-in user's own
+    // Firestore permissions, so the AI cannot escalate privileges.
+    if (request.method === 'POST' && path === '/v1/ai') {
+      if (!env.SARVAM_API_KEY) {
+        return json({ error: 'AI is not configured on the server.' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch (_) {
+        return json({ error: 'invalid JSON body' }, 400);
+      }
+
+      const upstream = await fetch('https://api.sarvam.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-subscription-key': env.SARVAM_API_KEY,
+        },
+        body: JSON.stringify({
+          model: body.model || 'sarvam-m',
+          messages: body.messages || [],
+          temperature: body.temperature ?? 0.2,
+          max_tokens: body.max_tokens ?? 1200,
+        }),
+      });
+
+      const text = await upstream.text();
+      return new Response(text, {
+        status: upstream.status,
+        headers: { 'Content-Type': 'application/json', ...CORS },
+      });
+    }
+
     // ── Write ──
     if (request.method === 'POST' && path === '/v1/upload') {
       const key = url.searchParams.get('path');

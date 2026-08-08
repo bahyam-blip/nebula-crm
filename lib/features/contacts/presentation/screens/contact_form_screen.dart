@@ -134,6 +134,13 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        actions: [
+          TextButton.icon(
+            onPressed: () => context.push('/contacts/import'),
+            icon: const Icon(Icons.upload_file, size: 16),
+            label: const Text('CSV'),
+          ),
+        ],
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => context.pop(),

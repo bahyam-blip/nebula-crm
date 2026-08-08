@@ -60,6 +60,21 @@ jobs:
           echo "::error::Register one manually: https://dash.cloudflare.com/$ACCOUNT/workers/onboarding"
           exit 1
 
+      - name: Push Sarvam key as a Worker secret
+        working-directory: cloudflare/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: af3007244dc00e001004045fd488b42b
+          SARVAM_AI_API: ${{ secrets.SARVAM_AI_API }}
+        run: |
+          if [ -z "$SARVAM_AI_API" ]; then
+            echo "::warning::SARVAM_AI_API not set - AI endpoint will return 503."
+            exit 0
+          fi
+          printf '%s' "$SARVAM_AI_API" \
+            | npx --yes wrangler@latest secret put SARVAM_API_KEY 2>&1 | tail -3
+          echo "::warning::SARVAM_API_KEY stored as a Worker secret"
+
       - name: Deploy worker
         working-directory: cloudflare/worker
         env:
