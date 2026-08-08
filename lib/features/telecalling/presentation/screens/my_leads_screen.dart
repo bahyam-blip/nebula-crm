@@ -11,6 +11,7 @@ import '../../../auth/providers/auth_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../contacts/models/contact.dart';
 import '../../models/call_log.dart';
+import '../../../commissions/providers/commission_provider.dart';
 import '../../providers/telecalling_provider.dart';
 
 /// Colour coding for a call outcome. Green means progress, red means stop.
@@ -347,9 +348,22 @@ class _DispositionSheetState extends ConsumerState<_DispositionSheet> {
               followUpAt: _followUp,
             ),
       );
+      // A conversion is a subscription sale, so credit the commission in
+      // the same action rather than making anyone record it separately.
+      if (_outcome == CallStatus.converted) {
+        await ref.read(commissionServiceProvider).recordSale(
+              salesPerson: me,
+              contactId: widget.contact.id,
+              contactName: widget.contact.name,
+              note: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+            );
+      }
+
       if (!mounted) return;
       Navigator.of(context).pop();
-      context.showSuccess('Logged: ${_outcome.label}');
+      context.showSuccess(_outcome == CallStatus.converted
+          ? 'Sale recorded. Commission credited to you.'
+          : 'Logged: ${_outcome.label}');
     } catch (e) {
       if (mounted) context.showError(describeFirestoreError(e));
     } finally {

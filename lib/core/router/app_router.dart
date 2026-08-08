@@ -14,6 +14,7 @@ import '../../features/contacts/presentation/screens/contact_form_screen.dart';
 import '../../features/assistant/presentation/screens/ai_tools_screen.dart';
 import '../../features/auth/presentation/screens/profile_edit_screen.dart';
 import '../../features/calendar/presentation/screens/calendar_screen.dart';
+import '../../features/commissions/presentation/screens/commissions_screen.dart';
 import '../../features/companies/presentation/screens/companies_screen.dart';
 import '../../features/contacts/presentation/screens/csv_import_screen.dart';
 import '../../features/tasks/presentation/screens/tasks_screen.dart';
@@ -147,6 +148,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ProfileEditScreen(),
       ),
       GoRoute(
+        path: '/commissions',
+        name: 'commissions',
+        builder: (_, __) => const CommissionsScreen(),
+      ),
+      GoRoute(
         path: '/companies',
         name: 'companies',
         builder: (_, __) => const CompaniesScreen(),
@@ -253,6 +259,12 @@ class _MoreScreen extends StatelessWidget {
         label: 'Tasks & Reminders',
         route: '/tasks',
         color: AppColors.warning,
+      ),
+      _MenuItem(
+        icon: Icons.payments,
+        label: 'Commissions',
+        route: '/commissions',
+        color: AppColors.success,
       ),
       _MenuItem(
         icon: Icons.business,

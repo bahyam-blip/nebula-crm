@@ -94,6 +94,29 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Commission rate ───────────────────────────────────────
+    // Everyone may read the rate (a salesperson needs to know what a sale
+    // pays); only an admin sets it.
+    match /settings/{teamId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Commissions ───────────────────────────────────────────
+    // A closer may create their own record and read it; managers see the
+    // whole team and are alone in approving or marking paid, so nobody can
+    // sign off their own money.
+    match /commissions/{commissionId} {
+      allow read: if isSignedIn()
+                  && (resource.data.salesPersonId == request.auth.uid
+                      || (isManager() && sameTeam(resource)));
+      allow create: if isSignedIn()
+        && request.resource.data.teamId == userTeamId()
+        && request.resource.data.salesPersonId == request.auth.uid;
+      allow update: if isManager() && sameTeam(resource);
+      allow delete: if isAdmin() && sameTeam(resource);
+    }
+
     // ── Companies ─────────────────────────────────────────────
     match /companies/{companyId} {
       allow read: if isSignedIn() && sameTeam(resource);

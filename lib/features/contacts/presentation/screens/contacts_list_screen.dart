@@ -27,10 +27,12 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
+          // A plain pinned bar. SliverAppBar.large combined with a
+          // FlexibleSpaceBar title AND a bottom widget double-rendered the
+          // title and pushed the search field into the middle of the screen.
+          SliverAppBar(
             title: const Text('Contacts'),
             pinned: true,
-            stretch: true,
             actions: [
               IconButton(
                 tooltip: 'Import from CSV',
@@ -38,23 +40,11 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
                 onPressed: () => context.push('/contacts/import'),
               ),
             ],
-            flexibleSpace: FlexibleSpaceBar(
-              title: Text('Contacts', style: context.textTheme.titleLarge),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.surface, AppColors.background],
-                  ),
-                ),
-              ),
-            ),
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(72),
+              preferredSize: const Size.fromHeight(56),
               child: Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: TextField(
                   onChanged: (v) => ref
                       .read(contactSearchProvider.notifier)

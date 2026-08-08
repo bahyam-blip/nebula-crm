@@ -7,6 +7,7 @@ import '../../../../core/utils/extensions.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../telecalling/providers/telecalling_provider.dart';
+import '../../../commissions/providers/commission_provider.dart';
 import '../../services/ai_action_executor.dart';
 
 class _Msg {
@@ -70,6 +71,14 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
         'open': leads.where((c) => c.callStatus.isOpen).length,
         'unassigned': unassigned,
         'perPerson': perPerson,
+      },
+      'commissions': {
+        'ratePerSale': ref.read(commissionSettingsProvider).valueOrNull
+            ?.payoutPerSale,
+        'byPerson': {
+          for (final r in ref.read(earningsLeaderboardProvider))
+            if (r.sales > 0) r.name: {'sales': r.sales, 'earned': r.earned},
+        },
       },
       'today': DateTime.now().toIso8601String().split('T').first,
     };

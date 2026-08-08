@@ -4,19 +4,23 @@ import 'package:timeago/timeago.dart' as timeago;
 
 /// Formatting helpers — currency, dates, percentages, compact numbers.
 abstract class Formatters {
-  static String currency(num value, {String symbol = r'$', int decimals = 0}) {
+  /// Rupees, grouped the Indian way (1,00,000 rather than 100,000).
+  static String currency(num value, {String symbol = '₹', int decimals = 0}) {
     final fmt = NumberFormat.currency(
+      locale: 'en_IN',
       symbol: symbol,
       decimalDigits: decimals,
     );
     return fmt.format(value);
   }
 
-  /// Compact currency — $12.4K, $1.2M, $3.4B.
-  static String currencyCompact(num value, {String symbol = r'$'}) {
-    if (value.abs() >= 1e9) return '$symbol${(value / 1e9).toStringAsFixed(1)}B';
-    if (value.abs() >= 1e6) return '$symbol${(value / 1e6).toStringAsFixed(1)}M';
-    if (value.abs() >= 1e3) return '$symbol${(value / 1e3).toStringAsFixed(1)}K';
+  /// Compact rupees using lakh and crore, which is how these numbers are
+  /// actually spoken here — "12.4K" reads as nothing to an Indian sales team.
+  static String currencyCompact(num value, {String symbol = '₹'}) {
+    final v = value.abs();
+    if (v >= 1e7) return '$symbol${(value / 1e7).toStringAsFixed(2)} Cr';
+    if (v >= 1e5) return '$symbol${(value / 1e5).toStringAsFixed(2)} L';
+    if (v >= 1e3) return '$symbol${(value / 1e3).toStringAsFixed(1)}K';
     return '$symbol${value.toStringAsFixed(0)}';
   }
 
