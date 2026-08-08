@@ -128,6 +128,8 @@ class NotificationService {
         // permission that users must grant in system settings, and a
         // callback reminder is fine landing a few minutes late.
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
     } catch (e) {
       if (kDebugMode) debugPrint('Could not schedule notification: $e');
