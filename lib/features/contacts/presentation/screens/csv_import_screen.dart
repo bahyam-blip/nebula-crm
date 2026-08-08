@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/services/firebase_boot.dart';
@@ -123,7 +124,7 @@ class _CsvImportScreenState extends ConsumerState<CsvImportScreen> {
       );
       if (!mounted) return;
       setState(() => _summary = summary);
-      context.showSuccess('Imported ${summary.created} contacts.');
+      context.showSuccess(summary.headline);
     } catch (e) {
       if (mounted) context.showError(describeFirestoreError(e));
     } finally {
@@ -432,21 +433,47 @@ class _CsvImportScreenState extends ConsumerState<CsvImportScreen> {
   }
 
   Widget _resultCard(ImportSummary s) => _card(
-        title: 'Import complete',
+        title: s.headline,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${s.created} contacts created',
-                style: context.textTheme.bodyMedium
-                    ?.copyWith(color: AppColors.success)),
-            if (s.skipped > 0)
-              Text('${s.skipped} skipped (duplicates or invalid)',
+            if (s.created > 0)
+              Text('${s.created} created',
+                  style: context.textTheme.bodyMedium
+                      ?.copyWith(color: AppColors.success)),
+            // Each skip reason is listed separately: "already in your CRM"
+            // and "repeated in the file" call for different responses.
+            if (s.duplicatesExisting > 0)
+              Text('${s.duplicatesExisting} already in your CRM',
                   style: context.textTheme.bodySmall
                       ?.copyWith(color: AppColors.textSecondary)),
+            if (s.duplicatesInFile > 0)
+              Text('${s.duplicatesInFile} repeated inside the file',
+                  style: context.textTheme.bodySmall
+                      ?.copyWith(color: AppColors.textSecondary)),
+            if (s.invalid > 0)
+              Text('${s.invalid} had no phone or email',
+                  style: context.textTheme.bodySmall
+                      ?.copyWith(color: AppColors.warning)),
             if (s.assignedTo > 0)
-              Text('Distributed across ${s.assignedTo} people',
+              Text('Shared across ${s.assignedTo} '
+                  'teammate${s.assignedTo == 1 ? '' : 's'}',
                   style: context.textTheme.bodySmall
                       ?.copyWith(color: AppColors.textSecondary)),
+            const SizedBox(height: 10),
+            if (s.created > 0)
+              FilledButton.icon(
+                onPressed: () => context.go('/contacts'),
+                icon: const Icon(Icons.arrow_forward, size: 16),
+                label: const Text('View contacts'),
+              )
+            else if (s.duplicatesExisting > 0)
+              Text(
+                'Turn off "Skip duplicates" to import them again as new '
+                'records.',
+                style: context.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textTertiary),
+              ),
           ],
         ),
       );

@@ -186,10 +186,19 @@ class AuthService {
     if (!snap.exists) {
       await _createUserDoc(user, defaultDisplayName ?? user.displayName ?? 'User');
     } else {
+      // Only adopt the provider's photo when the profile has none.
+      //
+      // This previously wrote user.photoURL on every sign-in, which
+      // overwrote an avatar the user had uploaded to R2 with whatever
+      // Google had - so a photo set in the app vanished at the next login.
+      // A picture the user chose beats one the identity provider supplied.
+      final data = snap.data() ?? const <String, dynamic>{};
+      final hasOwnPhoto = ((data['photoUrl'] as String?) ?? '').isNotEmpty;
+
       await ref.set({
         'lastActiveAt': FieldValue.serverTimestamp(),
         'email': user.email,
-        if (user.photoURL != null) 'photoUrl': user.photoURL,
+        if (!hasOwnPhoto && user.photoURL != null) 'photoUrl': user.photoURL,
       }, SetOptions(merge: true));
     }
   }

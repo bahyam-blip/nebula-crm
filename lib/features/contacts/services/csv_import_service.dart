@@ -433,13 +433,15 @@ class CsvImportService {
     final existing = skipDuplicates ? await existingKeys(teamId) : <String>{};
 
     var created = 0;
-    var skipped = 0;
+    var duplicatesExisting = 0;
+    var duplicatesInFile = 0;
+    var invalid = 0;
     final seenInFile = <String>{};
     final batchQueue = <Map<String, dynamic>>[];
 
     for (final row in rows) {
       if (!row.isValid) {
-        skipped++;
+        invalid++;
         continue;
       }
 
@@ -448,13 +450,20 @@ class CsvImportService {
       final pKey = phone.isNotEmpty ? 'p:${normalisePhone(phone)}' : null;
       final eKey = email.isNotEmpty ? 'e:${email.toLowerCase()}' : null;
 
-      final dupe = (pKey != null &&
-              (existing.contains(pKey) || seenInFile.contains(pKey))) ||
-          (eKey != null &&
-              (existing.contains(eKey) || seenInFile.contains(eKey)));
+      // Separate the two reasons: "already in your CRM" and "repeated
+      // inside this file" need very different responses from the user, and
+      // collapsing them into one number made a re-run look like a failure.
+      final inCrm = (pKey != null && existing.contains(pKey)) ||
+          (eKey != null && existing.contains(eKey));
+      final inFile = (pKey != null && seenInFile.contains(pKey)) ||
+          (eKey != null && seenInFile.contains(eKey));
 
-      if (dupe) {
-        skipped++;
+      if (inCrm) {
+        duplicatesExisting++;
+        continue;
+      }
+      if (inFile) {
+        duplicatesInFile++;
         continue;
       }
 
@@ -511,7 +520,10 @@ class CsvImportService {
 
     return ImportSummary(
       created: created,
-      skipped: skipped,
+      duplicatesExisting: duplicatesExisting,
+      duplicatesInFile: duplicatesInFile,
+      invalid: invalid,
+      existingContacts: existing.length,
       assignedTo: assigneeIds.length,
     );
   }
@@ -520,11 +532,38 @@ class CsvImportService {
 class ImportSummary {
   const ImportSummary({
     required this.created,
-    required this.skipped,
-    required this.assignedTo,
+    this.duplicatesExisting = 0,
+    this.duplicatesInFile = 0,
+    this.invalid = 0,
+    this.existingContacts = 0,
+    this.assignedTo = 0,
   });
 
   final int created;
-  final int skipped;
+
+  /// Already present in the CRM before this import.
+  final int duplicatesExisting;
+
+  /// The same person appearing twice inside the uploaded file.
+  final int duplicatesInFile;
+
+  final int invalid;
+
+  /// How many contact keys the team already had, for context.
+  final int existingContacts;
+
   final int assignedTo;
+
+  int get skipped => duplicatesExisting + duplicatesInFile + invalid;
+
+  /// Plain explanation of the outcome, so a zero-row import is never a
+  /// mystery.
+  String get headline {
+    if (created > 0) return '$created contacts imported';
+    if (duplicatesExisting > 0) {
+      return 'Nothing new - all $duplicatesExisting already in your CRM';
+    }
+    if (invalid > 0) return 'No rows could be read';
+    return 'Nothing to import';
+  }
 }
