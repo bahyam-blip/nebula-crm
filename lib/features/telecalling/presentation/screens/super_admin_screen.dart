@@ -14,6 +14,7 @@ import '../../../auth/providers/auth_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../contacts/models/contact.dart';
 import '../../../../core/services/data_migration.dart';
+import '../../../admin/providers/permissions_provider.dart';
 import '../../../auth/services/invite_service.dart';
 import '../../providers/telecalling_provider.dart';
 
@@ -39,7 +40,7 @@ class SuperAdminScreen extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Super admin'),
@@ -48,6 +49,7 @@ class SuperAdminScreen extends ConsumerWidget {
               Tab(text: 'Teams'),
               Tab(text: 'People'),
               Tab(text: 'Invites'),
+              Tab(text: 'Access'),
               Tab(text: 'Audit'),
             ],
           ),
@@ -57,6 +59,7 @@ class SuperAdminScreen extends ConsumerWidget {
             _TeamsTab(),
             _PeopleTab(),
             _InvitesTab(),
+            _AccessTab(),
             _AuditTab(),
           ],
         ),
@@ -475,6 +478,103 @@ class _InvitesTabState extends ConsumerState<_InvitesTab> {
           label: const Text('Repair records'),
         ),
         const SizedBox(height: 40),
+      ],
+    );
+  }
+}
+
+/// Choose what each admin is allowed to monitor.
+class _AccessTab extends ConsumerWidget {
+  const _AccessTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final users = ref.watch(allUsersGlobalProvider).valueOrNull ?? const [];
+    final granted =
+        ref.watch(grantedPermissionsProvider).valueOrNull ?? const {};
+    final me = ref.watch(currentAppUserValueProvider);
+
+    final admins = users.where((u) => u.role == UserRole.admin).toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Text(
+          'Choose which parts of the business each admin can monitor. '
+          'Managers and salespeople keep their standard access. These are '
+          'monitoring scopes - security rules still decide what data any '
+          'role can read.',
+          style: context.textTheme.bodySmall
+              ?.copyWith(color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 14),
+        if (admins.isEmpty)
+          const EmptyState(
+            icon: Icons.admin_panel_settings_outlined,
+            title: 'No admins yet',
+            subtitle: 'Invite someone as Admin, then set their access here.',
+          ),
+        ...admins.map((admin) {
+          final current = granted[admin.id] ??
+              const MonitorPermissions({
+                MonitorScope.contacts,
+                MonitorScope.pipeline,
+                MonitorScope.telecalling,
+                MonitorScope.performance,
+              });
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(admin.displayName, style: context.textTheme.titleSmall),
+                Text(admin.email,
+                    style: context.textTheme.bodySmall
+                        ?.copyWith(color: AppColors.textTertiary)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: MonitorScope.values.map((scope) {
+                    final on = current.has(scope);
+                    return FilterChip(
+                      selected: on,
+                      label: Text(scope.label,
+                          style: const TextStyle(fontSize: 11)),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (v) async {
+                        if (me == null) return;
+                        final next = {...current.scopes};
+                        if (v) {
+                          next.add(scope);
+                        } else {
+                          next.remove(scope);
+                        }
+                        try {
+                          await ref.read(permissionServiceProvider).grant(
+                                teamId: me.teamId ?? '',
+                                userId: admin.id,
+                                permissions: MonitorPermissions(next),
+                              );
+                        } catch (e) {
+                          if (context.mounted) {
+                            context.showError(describeFirestoreError(e));
+                          }
+                        }
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          );
+        }),
       ],
     );
   }

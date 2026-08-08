@@ -108,13 +108,16 @@ final taskFilterProvider = StateProvider<TaskFilter>((ref) => TaskFilter.open);
 /// A task with no due date sinks below dated ones rather than blocking
 /// the top of the list.
 final visibleTasksProvider = Provider<List<CrmTask>>((ref) {
+  final roleName = ref.watch(currentAppUserValueProvider)?.role.name ?? '';
   final all = ref.watch(teamTasksProvider).valueOrNull ?? const <CrmTask>[];
   final uid = ref.watch(currentUserIdProvider);
   final scope = ref.watch(taskScopeProvider);
   final filter = ref.watch(taskFilterProvider);
 
   var list = all.where((t) {
-    if (scope == TaskScope.mine && t.assignedTo != uid) return false;
+    // "Mine" must include broadcasts aimed at my role or the whole team,
+    // otherwise an announcement to every telecaller reaches nobody's list.
+    if (scope == TaskScope.mine && !t.targets(uid, roleName)) return false;
     switch (filter) {
       case TaskFilter.open:
         return t.status.isOpen;

@@ -106,6 +106,8 @@ class CrmTask extends Equatable {
     this.remindAt,
     this.completedAt,
     this.acknowledged = false,
+    this.audienceRole,
+    this.audienceEveryone = false,
     this.createdAt,
     this.updatedAt,
   });
@@ -129,6 +131,21 @@ class CrmTask extends Equatable {
 
   /// Reminders keep surfacing until explicitly acknowledged (spec §15).
   final bool acknowledged;
+
+  /// Broadcast targets. A task can go to one person (assignedTo), to a
+  /// whole role such as every telecaller, or to the entire team. Storing
+  /// the audience rather than fanning out one task per member keeps a
+  /// single item to edit and a single place to see who it went to.
+  final String? audienceRole;
+  final bool audienceEveryone;
+
+  bool get isBroadcast => audienceEveryone || audienceRole != null;
+
+  /// Is this task addressed to [user]?
+  bool targets(String userId, String roleName) =>
+      assignedTo == userId ||
+      audienceEveryone ||
+      (audienceRole != null && audienceRole == roleName);
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -171,6 +188,8 @@ class CrmTask extends Equatable {
       remindAt: (d['remindAt'] as Timestamp?)?.toDate(),
       completedAt: (d['completedAt'] as Timestamp?)?.toDate(),
       acknowledged: d['acknowledged'] as bool? ?? false,
+      audienceRole: d['audienceRole'] as String?,
+      audienceEveryone: d['audienceEveryone'] as bool? ?? false,
       createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
       updatedAt: (d['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -194,6 +213,8 @@ class CrmTask extends Equatable {
         'completedAt':
             completedAt != null ? Timestamp.fromDate(completedAt!) : null,
         'acknowledged': acknowledged,
+        'audienceRole': audienceRole,
+        'audienceEveryone': audienceEveryone,
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
             : FieldValue.serverTimestamp(),

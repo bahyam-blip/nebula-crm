@@ -9,6 +9,7 @@ import '../../../auth/providers/auth_provider.dart';
 import '../../../contacts/models/call_status.dart';
 import '../../../telecalling/providers/telecalling_provider.dart';
 import '../../../commissions/providers/commission_provider.dart';
+import '../../../insights/providers/monitor_provider.dart';
 import '../../services/ai_action_executor.dart';
 
 class _Msg {
@@ -93,6 +94,11 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             if (r.sales > 0) r.name: {'sales': r.sales, 'earned': r.earned},
         },
       },
+      // Signals are computed on-device. Handing the model the conclusions
+      // rather than the raw rows keeps it prioritising instead of counting,
+      // which it does slower and occasionally wrong.
+      'needsAttention':
+          ref.read(monitorSummaryProvider)['signals'],
       'today': DateTime.now().toIso8601String().split('T').first,
     };
   }
