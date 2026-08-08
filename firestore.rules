@@ -94,6 +94,28 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Companies ─────────────────────────────────────────────
+    match /companies/{companyId} {
+      allow read: if isSignedIn() && sameTeam(resource);
+      allow create: if isSignedIn() && canEditDeals()
+        && request.resource.data.teamId == userTeamId();
+      allow update: if isSignedIn() && canEditDeals() && sameTeam(resource);
+      allow delete: if isManager() && sameTeam(resource);
+    }
+
+    // ── Notes and documents ───────────────────────────────────
+    // One collection covers both: a document is a note carrying a file URL,
+    // which keeps the customer timeline a single ordered stream.
+    match /notes/{noteId} {
+      allow read: if isSignedIn() && sameTeam(resource);
+      allow create: if isSignedIn()
+        && request.resource.data.teamId == userTeamId()
+        && request.resource.data.authorId == request.auth.uid;
+      // Authors edit their own; managers can tidy up anyone's.
+      allow update, delete: if isSignedIn() && sameTeam(resource)
+        && (resource.data.authorId == request.auth.uid || isManager());
+    }
+
     // ── Invites ───────────────────────────────────────────────
     // Document id is the lowercased email, so signup can resolve its own
     // invite with a single get() before any profile exists.

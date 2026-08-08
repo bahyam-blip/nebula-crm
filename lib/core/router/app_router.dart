@@ -11,7 +11,10 @@ import '../../features/auth/presentation/screens/team_management_screen.dart';
 import '../../features/contacts/presentation/screens/contacts_list_screen.dart';
 import '../../features/contacts/presentation/screens/contact_detail_screen.dart';
 import '../../features/contacts/presentation/screens/contact_form_screen.dart';
+import '../../features/assistant/presentation/screens/ai_tools_screen.dart';
 import '../../features/auth/presentation/screens/profile_edit_screen.dart';
+import '../../features/calendar/presentation/screens/calendar_screen.dart';
+import '../../features/companies/presentation/screens/companies_screen.dart';
 import '../../features/contacts/presentation/screens/csv_import_screen.dart';
 import '../../features/tasks/presentation/screens/tasks_screen.dart';
 import '../../features/telecalling/presentation/screens/calling_dashboard_screen.dart';
@@ -142,6 +145,21 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ProfileEditScreen(),
       ),
       GoRoute(
+        path: '/companies',
+        name: 'companies',
+        builder: (_, __) => const CompaniesScreen(),
+      ),
+      GoRoute(
+        path: '/calendar',
+        name: 'calendar',
+        builder: (_, __) => const CalendarScreen(),
+      ),
+      GoRoute(
+        path: '/ai-tools',
+        name: 'aiTools',
+        builder: (_, __) => const AiToolsScreen(),
+      ),
+      GoRoute(
         path: '/my-leads',
         name: 'myLeads',
         builder: (_, __) => const MyLeadsScreen(),
@@ -235,6 +253,24 @@ class _MoreScreen extends StatelessWidget {
         color: AppColors.warning,
       ),
       _MenuItem(
+        icon: Icons.business,
+        label: 'Companies',
+        route: '/companies',
+        color: AppColors.info,
+      ),
+      _MenuItem(
+        icon: Icons.calendar_month,
+        label: 'Calendar',
+        route: '/calendar',
+        color: AppColors.stageNegotiation,
+      ),
+      _MenuItem(
+        icon: Icons.auto_awesome,
+        label: 'AI Tools',
+        route: '/ai-tools',
+        color: AppColors.tertiary,
+      ),
+      _MenuItem(
         icon: Icons.headset_mic,
         label: 'My Leads',
         route: '/my-leads',
@@ -269,6 +305,24 @@ class _MoreScreen extends StatelessWidget {
         label: 'Campaigns',
         route: '/campaigns',
         color: AppColors.accent,
+      ),
+      _MenuItem(
+        icon: Icons.business,
+        label: 'Companies',
+        route: '/companies',
+        color: AppColors.info,
+      ),
+      _MenuItem(
+        icon: Icons.calendar_month,
+        label: 'Calendar',
+        route: '/calendar',
+        color: AppColors.stageNegotiation,
+      ),
+      _MenuItem(
+        icon: Icons.auto_awesome,
+        label: 'AI Tools',
+        route: '/ai-tools',
+        color: AppColors.tertiary,
       ),
       _MenuItem(
         icon: Icons.headset_mic,

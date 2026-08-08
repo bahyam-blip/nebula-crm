@@ -23,6 +23,8 @@ abstract class AppConstants {
   static const String colTeams = 'teams';
   static const String colSystem = 'system';
   static const String colInvites = 'invites';
+  static const String colCompanies = 'companies';
+  static const String colNotes = 'notes';
 
   /// Shared workspace every signup joins, so a team sees one pipeline.
   static const String defaultTeamId = 'default-team';
