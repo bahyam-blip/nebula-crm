@@ -104,6 +104,23 @@ jobs:
             exit 1
           fi
 
+      - name: Verify the Sarvam model responds
+        env:
+          SARVAM_AI_API: ${{ secrets.SARVAM_AI_API }}
+        run: |
+          [ -z "$SARVAM_AI_API" ] && exit 0
+          CODE=$(curl -s -o /tmp/ai.json -w "%{http_code}" \
+            -X POST https://api.sarvam.ai/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "api-subscription-key: $SARVAM_AI_API" \
+            -d '{"model":"sarvam-105b","messages":[{"role":"user","content":"Reply with the word ok"}],"temperature":0}')
+          BODY=$(tr '\n' ' ' < /tmp/ai.json | cut -c1-220)
+          echo "::warning::SARVAM model check HTTP $CODE $BODY"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Sarvam rejected the request - the model name or key is wrong."
+            exit 1
+          fi
+
       - name: Smoke test
         run: |
           URL=$(grep -oE "https://[a-z0-9.-]+\.workers\.dev" /tmp/wrangler.log | sort -u | head -1)

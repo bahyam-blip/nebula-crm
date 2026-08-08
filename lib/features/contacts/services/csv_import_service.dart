@@ -8,31 +8,63 @@ import '../models/contact.dart';
 class CsvRow {
   CsvRow({
     required this.lineNumber,
-    required this.values,
+    required this.cells,
+    this.name,
+    this.email,
+    this.phone,
+    this.company,
+    this.jobTitle,
+    this.notes,
+    this.city,
     this.error,
   });
 
   final int lineNumber;
-  final Map<String, String> values;
+  final List<String> cells;
+  String? name;
+  String? email;
+  String? phone;
+  String? company;
+  String? jobTitle;
+  String? notes;
+  String? city;
   String? error;
 
   bool get isValid => error == null;
+}
 
-  String? get name => _pick(['name', 'full name', 'fullname', 'contact name']);
-  String? get email => _pick(['email', 'email address', 'e-mail']);
-  String? get phone =>
-      _pick(['phone', 'mobile', 'phone number', 'contact number', 'number']);
-  String? get company => _pick(['company', 'organisation', 'organization']);
-  String? get jobTitle => _pick(['title', 'job title', 'designation', 'role']);
-  String? get notes => _pick(['notes', 'note', 'remarks', 'comments']);
-  String? get city => _pick(['city', 'location', 'address']);
+/// Which column feeds which field, worked out from the header row.
+class ColumnMap {
+  ColumnMap({
+    this.name = -1,
+    this.email = -1,
+    this.phone = -1,
+    this.company = -1,
+    this.jobTitle = -1,
+    this.notes = -1,
+    this.city = -1,
+  });
 
-  String? _pick(List<String> keys) {
-    for (final k in keys) {
-      final v = values[k];
-      if (v != null && v.trim().isNotEmpty) return v.trim();
-    }
-    return null;
+  int name;
+  int email;
+  int phone;
+  int company;
+  int jobTitle;
+  int notes;
+  int city;
+
+  /// Human summary so the user can see what we understood.
+  List<String> describe(List<String> headers) {
+    String at(int i) => i >= 0 && i < headers.length ? headers[i] : '-';
+    final out = <String>[];
+    if (name >= 0) out.add('Name <- ${at(name)}');
+    if (phone >= 0) out.add('Phone <- ${at(phone)}');
+    if (email >= 0) out.add('Email <- ${at(email)}');
+    if (company >= 0) out.add('Company <- ${at(company)}');
+    if (jobTitle >= 0) out.add('Title <- ${at(jobTitle)}');
+    if (city >= 0) out.add('Address <- ${at(city)}');
+    if (notes >= 0) out.add('Notes <- ${at(notes)}');
+    return out;
   }
 }
 
@@ -40,20 +72,17 @@ class CsvParseResult {
   CsvParseResult({
     required this.headers,
     required this.rows,
+    required this.mapping,
   });
 
   final List<String> headers;
   final List<CsvRow> rows;
+  final ColumnMap mapping;
 
   List<CsvRow> get validRows => rows.where((r) => r.isValid).toList();
   List<CsvRow> get invalidRows => rows.where((r) => !r.isValid).toList();
 }
 
-/// Parses and imports contacts from CSV.
-///
-/// Written without a CSV package dependency: the parser below handles
-/// quoted fields, embedded commas, escaped quotes and CRLF, which covers
-/// what Excel and Google Sheets actually emit.
 class CsvImportService {
   CsvImportService(this._db);
 
@@ -65,7 +94,10 @@ class CsvImportService {
   // ── Parsing ──────────────────────────────────────────────────
 
   /// Split raw CSV text into rows of fields (RFC 4180-ish).
-  static List<List<String>> tokenise(String input) {
+  ///
+  /// [delimiter] defaults to comma but exports from Indian and European
+  /// tools frequently use semicolons or tabs, so it is detected per file.
+  static List<List<String>> tokenise(String input, {String delimiter = ','}) {
     final rows = <List<String>>[];
     var field = StringBuffer();
     var row = <String>[];
@@ -76,7 +108,6 @@ class CsvImportService {
 
       if (inQuotes) {
         if (ch == '"') {
-          // A doubled quote is a literal quote.
           if (i + 1 < input.length && input[i + 1] == '"') {
             field.write('"');
             i++;
@@ -89,25 +120,23 @@ class CsvImportService {
         continue;
       }
 
-      switch (ch) {
-        case '"':
-          inQuotes = true;
-        case ',':
-          row.add(field.toString());
-          field = StringBuffer();
-        case '\r':
-          break; // handled by \n
-        case '\n':
-          row.add(field.toString());
-          field = StringBuffer();
-          rows.add(row);
-          row = <String>[];
-        default:
-          field.write(ch);
+      if (ch == '"') {
+        inQuotes = true;
+      } else if (ch == delimiter) {
+        row.add(field.toString());
+        field = StringBuffer();
+      } else if (ch == '\r') {
+        // Part of a CRLF pair; the \n does the work.
+      } else if (ch == '\n') {
+        row.add(field.toString());
+        field = StringBuffer();
+        rows.add(row);
+        row = <String>[];
+      } else {
+        field.write(ch);
       }
     }
 
-    // Trailing field / row without a newline terminator.
     if (field.isNotEmpty || row.isNotEmpty) {
       row.add(field.toString());
       rows.add(row);
@@ -116,39 +145,245 @@ class CsvImportService {
     return rows.where((r) => r.any((c) => c.trim().isNotEmpty)).toList();
   }
 
-  /// Parse CSV text into validated rows keyed by lowercase header.
-  static CsvParseResult parse(String csvText) {
-    final table = tokenise(csvText);
-    if (table.isEmpty) {
-      return CsvParseResult(headers: const [], rows: const []);
+  /// Guess the delimiter from the header line.
+  static String detectDelimiter(String input) {
+    final firstLine = input.split('\n').first;
+    var best = ',';
+    var bestCount = 0;
+    for (final d in [',', ';', '\t', '|']) {
+      final n = firstLine.split(d).length - 1;
+      if (n > bestCount) {
+        bestCount = n;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  static final RegExp _emailRe =
+      RegExp(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}');
+
+  /// Indian mobile numbers, with or without +91, and generic 8-15 digit runs.
+  static final RegExp _phoneRe = RegExp(r'(?:\+?91[\-\s]?)?[0-9][0-9\-\s]{7,16}[0-9]');
+
+  /// Pull the first email out of a cell that may hold several.
+  static String? firstEmail(String cell) {
+    final m = _emailRe.firstMatch(cell);
+    return m?.group(0);
+  }
+
+  /// Pull the first usable phone number out of a cell.
+  static String? firstPhone(String cell) {
+    for (final m in _phoneRe.allMatches(cell)) {
+      final digits = (m.group(0) ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+      if (digits.length >= 8 && digits.length <= 13) return digits;
+    }
+    return null;
+  }
+
+  /// Reduce a header to letters only, so "Phone No." and "phone_no" match.
+  static String _norm(String h) =>
+      h.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  /// Work out which column feeds which field.
+  ///
+  /// Header names vary wildly between exports - this file used "emails" and
+  /// "phones", which an exact-match list missed entirely and rejected all
+  /// 15,099 rows. Matching is therefore by synonym AND substring, and
+  /// anything still unmapped is recovered by scanning cell contents.
+  static ColumnMap mapColumns(List<String> headers, List<List<String>> sample) {
+    const synonyms = <String, List<String>>{
+      'name': [
+        'name', 'names', 'fullname', 'full', 'contactname', 'customername',
+        'clientname', 'person', 'contact', 'customer', 'client', 'advocate',
+        'lawyer', 'owner', 'leadname', 'firstname'
+      ],
+      'email': ['email', 'emails', 'mail', 'mails', 'emailaddress', 'eid'],
+      'phone': [
+        'phone', 'phones', 'mobile', 'mobiles', 'phonenumber', 'phoneno',
+        'mobileno', 'contactnumber', 'contactno', 'number', 'cell',
+        'whatsapp', 'tel', 'telephone', 'msisdn'
+      ],
+      'company': [
+        'company', 'companyname', 'organisation', 'organization', 'org',
+        'firm', 'business', 'account', 'employer'
+      ],
+      'jobTitle': ['title', 'jobtitle', 'designation', 'role', 'position'],
+      'city': [
+        'city', 'address', 'location', 'area', 'town', 'district', 'state',
+        'addresscontext', 'place'
+      ],
+      'notes': [
+        'notes', 'note', 'remark', 'remarks', 'comment', 'comments',
+        'description', 'details', 'source', 'context'
+      ],
+    };
+
+    final normalised = headers.map(_norm).toList();
+    final map = ColumnMap();
+
+    int findFor(String field, {List<int> taken = const []}) {
+      final keys = synonyms[field]!;
+      // Exact match wins over a substring match.
+      for (final k in keys) {
+        for (var i = 0; i < normalised.length; i++) {
+          if (taken.contains(i)) continue;
+          if (normalised[i] == k) return i;
+        }
+      }
+      for (final k in keys) {
+        for (var i = 0; i < normalised.length; i++) {
+          if (taken.contains(i)) continue;
+          if (normalised[i].contains(k)) return i;
+        }
+      }
+      return -1;
     }
 
-    final headers =
-        table.first.map((h) => h.trim().toLowerCase()).toList(growable: false);
-    final rows = <CsvRow>[];
+    final taken = <int>[];
+    void assign(String field, void Function(int) set) {
+      final i = findFor(field, taken: taken);
+      if (i >= 0) {
+        set(i);
+        taken.add(i);
+      }
+    }
 
-    for (var i = 1; i < table.length; i++) {
-      final cells = table[i];
-      final map = <String, String>{};
-      for (var c = 0; c < headers.length && c < cells.length; c++) {
-        map[headers[c]] = cells[c].trim();
+    // Order matters: phone/email are the most distinctive, and "contact"
+    // appears in both "contact name" and "contact number".
+    assign('email', (i) => map.email = i);
+    assign('phone', (i) => map.phone = i);
+    assign('name', (i) => map.name = i);
+    assign('company', (i) => map.company = i);
+    assign('jobTitle', (i) => map.jobTitle = i);
+    assign('city', (i) => map.city = i);
+    assign('notes', (i) => map.notes = i);
+
+    // Recover anything the headers did not reveal by looking at the data.
+    // This is what makes an unlabelled or oddly-labelled export still work.
+    if (sample.isNotEmpty) {
+      final cols = headers.length;
+      List<String> column(int i) => sample
+          .where((r) => i < r.length)
+          .map((r) => r[i])
+          .toList();
+
+      if (map.email < 0) {
+        for (var i = 0; i < cols; i++) {
+          if (taken.contains(i)) continue;
+          final hits = column(i).where((v) => _emailRe.hasMatch(v)).length;
+          if (hits > sample.length * 0.5) {
+            map.email = i;
+            taken.add(i);
+            break;
+          }
+        }
+      }
+      if (map.phone < 0) {
+        for (var i = 0; i < cols; i++) {
+          if (taken.contains(i)) continue;
+          final hits = column(i).where((v) => firstPhone(v) != null).length;
+          if (hits > sample.length * 0.5) {
+            map.phone = i;
+            taken.add(i);
+            break;
+          }
+        }
+      }
+      if (map.name < 0) {
+        // A name column is mostly letters and mostly unique.
+        for (var i = 0; i < cols; i++) {
+          if (taken.contains(i)) continue;
+          final vals = column(i).where((v) => v.trim().isNotEmpty).toList();
+          if (vals.isEmpty) continue;
+          final wordy = vals
+              .where((v) =>
+                  RegExp(r'^[A-Za-z][A-Za-z .,\-]{1,60}$').hasMatch(v.trim()))
+              .length;
+          if (wordy > vals.length * 0.7) {
+            map.name = i;
+            taken.add(i);
+            break;
+          }
+        }
+      }
+    }
+
+    return map;
+  }
+
+  /// Parse CSV text into validated rows.
+  static CsvParseResult parse(String csvText) {
+    final delimiter = detectDelimiter(csvText);
+    final table = tokenise(csvText, delimiter: delimiter);
+    if (table.isEmpty) {
+      return CsvParseResult(
+          headers: const [], rows: const [], mapping: ColumnMap());
+    }
+
+    final headers = table.first.map((h) => h.trim()).toList();
+    final body = table.skip(1).toList();
+    final sample = body.take(40).toList();
+    final map = mapColumns(headers, sample);
+
+    final rows = <CsvRow>[];
+    for (var i = 0; i < body.length; i++) {
+      final cells = body[i];
+      String? at(int idx) {
+        if (idx < 0 || idx >= cells.length) return null;
+        final v = cells[idx].trim();
+        return v.isEmpty ? null : v;
       }
 
-      final row = CsvRow(lineNumber: i + 1, values: map);
+      final row = CsvRow(lineNumber: i + 2, cells: cells);
+      row.name = at(map.name);
+      row.company = at(map.company);
+      row.jobTitle = at(map.jobTitle);
+      row.city = at(map.city);
+      row.notes = at(map.notes);
 
-      // A contact is useless without a name and some way to reach them.
+      // Cells often hold several values; take the first usable one.
+      final rawEmail = at(map.email);
+      row.email = rawEmail == null ? null : firstEmail(rawEmail);
+      final rawPhone = at(map.phone);
+      row.phone = rawPhone == null ? null : firstPhone(rawPhone);
+
+      // Last resort: scan the whole row. Better to find a number in an
+      // unexpected column than to reject a usable lead.
+      if (row.email == null) {
+        for (final c in cells) {
+          final e = firstEmail(c);
+          if (e != null) {
+            row.email = e;
+            break;
+          }
+        }
+      }
+      if (row.phone == null) {
+        for (var c = 0; c < cells.length; c++) {
+          if (c == map.email) continue;
+          final ph = firstPhone(cells[c]);
+          if (ph != null) {
+            row.phone = ph;
+            break;
+          }
+        }
+      }
+      if (row.name == null || row.name!.isEmpty) {
+        // Fall back to the local part of the email rather than dropping it.
+        if (row.email != null) row.name = row.email!.split('@').first;
+      }
+
       if ((row.name ?? '').isEmpty) {
-        row.error = 'Missing name';
+        row.error = 'No name found';
       } else if ((row.phone ?? '').isEmpty && (row.email ?? '').isEmpty) {
-        row.error = 'Needs a phone number or an email';
-      } else if (row.email != null && !_looksLikeEmail(row.email!)) {
-        row.error = 'Invalid email: ${row.email}';
+        row.error = 'No phone or email found';
       }
 
       rows.add(row);
     }
 
-    return CsvParseResult(headers: headers, rows: rows);
+    return CsvParseResult(headers: headers, rows: rows, mapping: map);
   }
 
   static bool _looksLikeEmail(String s) =>

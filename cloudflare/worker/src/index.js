@@ -219,7 +219,8 @@ export default {
         // Keep the payload minimal. Extra parameters are the usual cause of
         // a 400 from providers that only accept a subset of the OpenAI shape.
         body: JSON.stringify({
-          model: body.model || 'sarvam-m',
+          // sarvam-m was retired; the API names sarvam-105b as the replacement.
+          model: body.model || 'sarvam-105b',
           messages: body.messages || [],
           temperature: body.temperature ?? 0.2,
         }),

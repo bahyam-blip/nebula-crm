@@ -247,11 +247,38 @@ class _CsvImportScreenState extends ConsumerState<CsvImportScreen> {
 
   Widget _summaryCard(CsvParseResult parsed) {
     final bad = parsed.invalidRows.length;
+    final mapping = parsed.mapping.describe(parsed.headers);
     return _card(
       title: 'Parsed ${parsed.rows.length} rows',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Surfacing the mapping makes a wrong guess obvious immediately
+          // instead of showing a pile of identical row errors.
+          if (mapping.isNotEmpty) ...[
+            Text('Detected columns',
+                style: context.textTheme.labelMedium
+                    ?.copyWith(color: AppColors.textTertiary)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: mapping
+                  .map((m) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceHigh,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(m,
+                            style: context.textTheme.bodySmall
+                                ?.copyWith(fontSize: 11)),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 12),
+          ],
           Row(
             children: [
               _stat('Ready', parsed.validRows.length, AppColors.success),
