@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/services/firebase_boot.dart';
+import '../../../../core/services/push_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/widgets/common_widgets.dart';
@@ -97,6 +98,16 @@ class _LeadDistributionScreenState
           ),
       'Distributed ${ids.length} leads.',
     );
+
+    // Tell the recipients, or they will not know until they next look.
+    await ref.read(pushServiceProvider).notify(
+          title: 'New leads assigned',
+          body: '${ids.length} leads shared across '
+              '${_targetCallers.length} of you.',
+          userIds: _targetCallers.toList(),
+          data: const {'route': '/my-leads'},
+          channel: 'callbacks',
+        );
   }
 
   Future<void> _reassignTo(String? userId, List<Contact> visible) async {
@@ -117,6 +128,16 @@ class _LeadDistributionScreenState
           ? 'Unassigned ${ids.length} leads.'
           : 'Reassigned ${ids.length} leads.',
     );
+
+    if (userId != null) {
+      await ref.read(pushServiceProvider).notify(
+            title: '${ids.length} leads assigned to you',
+            body: 'Open My Leads to start calling.',
+            userIds: [userId],
+            data: const {'route': '/my-leads'},
+            channel: 'callbacks',
+          );
+    }
   }
 
   Future<void> _rebalance(List<Contact> all) async {

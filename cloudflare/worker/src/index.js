@@ -13,6 +13,13 @@
  *   GET    /v1/health              liveness probe
  */
 
+import {
+  getAccessToken,
+  deviceTokensFor,
+  teamMemberIds,
+  sendToTokens,
+} from './push.js';
+
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
 const ALLOWED_CONTENT = [
@@ -243,6 +250,79 @@ export default {
         status: 200,
         headers: { 'Content-Type': 'application/json', ...CORS },
       });
+    }
+
+    // ── Cross-user push ──
+    // The caller is already authenticated above. They may notify a specific
+    // user, a role within their team, or the whole team. The Worker resolves
+    // recipients server-side so a client cannot address arbitrary devices by
+    // supplying tokens directly.
+    if (request.method === 'POST' && path === '/v1/notify') {
+      if (!env.FIREBASE_SERVICE_ACCOUNT) {
+        return json({ error: 'push is not configured' }, 503);
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch (_) {
+        return json({ error: 'invalid JSON body' }, 400);
+      }
+
+      const title = (body.title || '').toString().slice(0, 120);
+      const message = (body.body || '').toString().slice(0, 400);
+      if (!title) return json({ error: 'title required' }, 400);
+
+      try {
+        const accessToken = await getAccessToken(env);
+
+        // Who the sender is allowed to speak for: their own team only.
+        const senderTokensDoc = await fetch(
+          `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}` +
+            `/databases/(default)/documents/users/${uid}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        const senderDoc = senderTokensDoc.ok ? await senderTokensDoc.json() : null;
+        const senderTeam = senderDoc?.fields?.teamId?.stringValue || '';
+        if (!senderTeam) return json({ error: 'no team' }, 403);
+
+        let targets = [];
+        if (Array.isArray(body.userIds) && body.userIds.length) {
+          targets = body.userIds.slice(0, 200);
+        } else if (body.role) {
+          targets = await teamMemberIds(env, accessToken, senderTeam, body.role);
+        } else if (body.everyone) {
+          targets = await teamMemberIds(env, accessToken, senderTeam, null);
+        } else {
+          return json({ error: 'no recipients' }, 400);
+        }
+
+        // Never notify the sender about their own action.
+        targets = targets.filter((t) => t !== uid);
+
+        const tokens = [];
+        for (const t of targets) {
+          const list = await deviceTokensFor(env, accessToken, t);
+          tokens.push(...list);
+        }
+        if (!tokens.length) return json({ ok: true, sent: 0, recipients: 0 });
+
+        const result = await sendToTokens(env, accessToken, [...new Set(tokens)], {
+          title,
+          body: message,
+          data: body.data || {},
+          channel: body.channel || 'tasks',
+        });
+
+        return json({
+          ok: true,
+          recipients: targets.length,
+          sent: result.sent,
+          stale: result.stale.length,
+        });
+      } catch (e) {
+        return json({ error: 'push failed', detail: String(e).slice(0, 300) }, 500);
+      }
     }
 
     // ── Write ──

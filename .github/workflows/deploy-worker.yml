@@ -75,6 +75,21 @@ jobs:
             | npx --yes wrangler@latest secret put SARVAM_API_KEY 2>&1 | tail -3
           echo "::warning::SARVAM_API_KEY stored as a Worker secret"
 
+      - name: Push Firebase service account as a Worker secret
+        working-directory: cloudflare/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: af3007244dc00e001004045fd488b42b
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT not set - push disabled."
+            exit 0
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" \
+            | npx --yes wrangler@latest secret put FIREBASE_SERVICE_ACCOUNT 2>&1 | tail -3
+          echo "::warning::FIREBASE_SERVICE_ACCOUNT stored as a Worker secret"
+
       - name: Deploy worker
         working-directory: cloudflare/worker
         env:

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/auth_service.dart';
+import '../../../core/services/push_service.dart';
 import '../models/app_user.dart';
 
 /// Current Firebase [User], refreshed on auth state changes.
@@ -23,6 +24,7 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
   if (user == null) return Stream.value(null);
 
   var repairAttempted = false;
+  var pushRegistered = false;
 
   return FirebaseFirestore.instance
       .collection(AppConstants.colUsers)
@@ -31,6 +33,11 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
       .asyncMap((d) async {
     if (d.exists) {
       final me = AppUser.fromFirestore(d);
+      // Record this handset so teammates can reach it. Cheap and idempotent.
+      if (!pushRegistered) {
+        pushRegistered = true;
+        await ref.read(pushServiceProvider).registerDevice();
+      }
       // The workspace creator promotes themselves if nobody holds the
       // bootstrap claim yet, so there is never a workspace with no admin.
       if (me.role != UserRole.superAdmin && !repairAttempted) {
