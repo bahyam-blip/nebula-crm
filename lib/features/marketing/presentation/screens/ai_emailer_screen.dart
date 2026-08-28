@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -121,6 +122,62 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
     }
   }
 
+  /// Go-live check: one REAL email through the transactional endpoint.
+  Future<void> _sendTest() async {
+    final controller = TextEditingController(
+      text: FirebaseAuth.instance.currentUser?.email ?? '',
+    );
+    final to = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Send a test email'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'One real email is sent right now from your verified sender (das@aidraft.bond) through MailerCloud\'s transactional API.',
+              style: context.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.emailAddress,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Deliver to',
+                hintText: 'you@example.com',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Send test')),
+        ],
+      ),
+    );
+    if (to == null || to.isEmpty) return;
+    if (!mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final r = await ref.read(mailApiProvider).sendTestEmail(to);
+      if (r['ok'] == true) {
+        _toast('Sent to ${r['sent_to']} from ${r['from']} ✓ Check MailerCloud → Logs to confirm.');
+      } else {
+        final code = r['provider_status'] ?? '?';
+        final err = (r['error'] ?? r['message'] ?? 'unknown error').toString();
+        _toast('Provider rejected ($code): $err');
+      }
+    } catch (e) {
+      _toast(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _deleteTask(MailTask t) async {
     try {
       await ref.read(mailApiProvider).deleteTask(t.id);
@@ -147,6 +204,11 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
       appBar: AppBar(
         title: const Text('AI Email'),
         actions: [
+          IconButton(
+            tooltip: 'Send a test email (go-live check)',
+            onPressed: _busy ? null : _sendTest,
+            icon: const Icon(Icons.outgoing_mail, size: 20),
+          ),
           IconButton(
             tooltip: 'Sync contacts to MailerCloud',
             onPressed: _busy ? null : _syncContacts,
@@ -179,7 +241,7 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
                 message: '$e',
                 onRetry: () => ref.invalidate(mailStatusProvider),
               ),
-              data: (s) => _StatusCard(status: s, onToggle: _toggleDryRun),
+              data: (s) => _StatusCard(status: s, onToggle: _toggleDryRun, onTestSend: _sendTest),
             ),
             const SizedBox(height: 14),
 
@@ -300,9 +362,10 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
 /* ── Status card ── */
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status, required this.onToggle});
+  const _StatusCard({required this.status, required this.onToggle, this.onTestSend});
   final MailStatus status;
   final ValueChanged<bool> onToggle;
+  final VoidCallback? onTestSend;
 
   @override
   Widget build(BuildContext context) {
@@ -366,11 +429,43 @@ class _StatusCard extends StatelessWidget {
               ),
             ],
           ),
-          if (missing.contains('MAILERCLOUD_API_KEY') ||
-              missing.contains('MAILERCLOUD_SENDER_EMAIL')) ...[
+          if (status.configured) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(Icons.verified_user_outlined, size: 14, color: AppColors.success),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'From: ${status.senderName.isEmpty ? 'Nebula CRM' : status.senderName} <${status.senderEmail.isEmpty ? 'das@aidraft.bond' : status.senderEmail}>'
+                    '  ·  delivery: ${status.deliveryMode}',
+                    style: context.textTheme.labelSmall
+                        ?.copyWith(color: AppColors.textSecondary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (!status.ready && missing.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'AI campaign planning also needs: ${missing.join(", ")}. Test sends work without it.',
+                style: context.textTheme.labelSmall
+                    ?.copyWith(color: AppColors.textTertiary),
+              ),
+            ],
+          ],
+          for (final w in status.warnings.take(1)) ...[
+            const SizedBox(height: 6),
+            Text(w,
+                style: context.textTheme.labelSmall
+                    ?.copyWith(color: AppColors.warning)),
+          ],
+          if (missing.contains('MAILERCLOUD_API_KEY')) ...[
             const SizedBox(height: 10),
             Text(
-              'Add the MailerCloud secrets in the repo (Settings → Secrets → Actions), then re-run the Deploy Worker workflow. Everything else is already wired.',
+              'Add MAILERCLOUD_API_KEY in the repo (Settings → Secrets → Actions), then re-run the Deploy Worker workflow. Everything else is already wired.',
               style: context.textTheme.labelSmall
                   ?.copyWith(color: AppColors.textTertiary),
             ),
@@ -395,6 +490,17 @@ class _StatusCard extends StatelessWidget {
               ),
             ],
           ),
+          if (status.configured && onTestSend != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onTestSend,
+                icon: const Icon(Icons.outgoing_mail, size: 16),
+                label: const Text('Send test email — verify the connection'),
+              ),
+            ),
+          ],
         ],
       ),
     );

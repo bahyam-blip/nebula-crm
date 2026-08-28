@@ -15,7 +15,7 @@ An **advanced, AI-powered CRM** built with Flutter, Firebase, and Riverpod. Desi
 | Sales Pipeline | Drag-and-drop Kanban, weighted forecast, deal velocity, win/loss insights |
 | Analytics Dashboard | KPI cards, revenue trend, conversion funnel, AI insight banner |
 | Marketing Automation | Campaigns, drip sequences, A/B variants, audience builder |
-| AI Emailer | Autonomous campaigns: give Sarvam a plain-language task, it writes templates, syncs Firestore contacts to MailerCloud, schedules sends, learns from analytics |
+| AI Emailer | Autonomous campaigns: give Sarvam a plain-language task, it plans, writes personalized templates, syncs Firestore contacts to MailerCloud and delivers — small audiences instantly via the transactional Email API (mail merge), large ones as scheduled campaigns — with a one-tap test send to verify the whole chain, and analytics feeding back into every future email |
 | Customer Service | Ticketing with SLA, priority queues, knowledge base |
 | AI Assistant | Conversational chat, next-best-action cards, deal insights, sentiment |
 

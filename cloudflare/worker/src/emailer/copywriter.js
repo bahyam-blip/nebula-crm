@@ -76,8 +76,15 @@ export async function writeEmail(env, task, planEmail, brief, learnings) {
   };
 }
 
-/** Render copy into a branded, responsive HTML email (Nebula dark-premium palette). */
-export function renderHtml(env, copy) {
+/**
+ * Render copy into a branded, responsive HTML email (Nebula dark-premium palette).
+ *
+ * personalize: injects a `Hi {{first_name}},` salutation. The placeholder is
+ * replaced per recipient by MailerCloud's mail merge (POST /email-api) —
+ * ONLY use this when the message goes through the personalized endpoint;
+ * on the plain /email endpoint the placeholder would be delivered literally.
+ */
+export function renderHtml(env, copy, { personalize = false } = {}) {
   const name = env.MAIL_BUSINESS_NAME || 'Nebula CRM';
   const brand = env.MAIL_BRAND_COLOR || '#6C8CFF';
   const logoUrl = env.MAIL_LOGO_URL || '';
@@ -113,6 +120,10 @@ export function renderHtml(env, copy) {
     env.MAIL_PERMISSION_REMINDER ||
     `You are receiving this because you subscribed to updates from ${esc(name)}.`;
 
+  const salutation = personalize
+    ? `<p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.65;color:#374151;">Hi {{first_name}},</p>`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
@@ -129,6 +140,7 @@ export function renderHtml(env, copy) {
     <tr><td style="padding:26px 30px 10px 30px;" align="left">${logo}</td></tr>
     <tr><td style="padding:8px 30px 0 30px;">
       <h1 style="margin:14px 0 10px 0;font-size:24px;line-height:1.3;color:#111827;">${esc(copy.headline)}</h1>
+      ${salutation}
       <p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.65;color:#374151;">${esc(copy.intro)}</p>
     </td></tr>
     ${sections}${cta}${ps}

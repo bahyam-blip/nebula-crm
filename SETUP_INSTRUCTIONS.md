@@ -190,27 +190,43 @@ into MailerCloud, and schedules the sends. Campaigns are written into the same F
 ### One-time setup (2 minutes)
 
 The email engine ships ready. It stores its state (tasks, locks, analytics
-cache) in **Firestore** automatically — no KV namespace, no extra secrets
-beyond the two below.
+cache) in **Firestore** automatically — no KV namespace needed. The sending
+identity is already pinned to the account's verified domain sender
+**das@aidraft.bond**, so only one secret is required:
 
-1. **Add GitHub secrets** (Repo → Settings → Secrets and variables → Actions → New repository secret):
-   | Secret | Where to get it |
-   |---|---|
-   | `MAILERCLOUD_API_KEY` | app.mailercloud.com → Account → API Integrations |
-   | `MAILERCLOUD_SENDER_EMAIL` | A **verified** sender in MailerCloud |
+1. **Add GitHub secret** (Repo → Settings → Secrets and variables → Actions → New repository secret):
+   | Secret | Where to get it | Required? |
+   |---|---|---|
+   | `MAILERCLOUD_API_KEY` | app.mailercloud.com → Account → API Integrations | **Yes — nothing can send without it** |
+   | `MAILERCLOUD_SENDER_EMAIL` | A **verified** sender in MailerCloud | No — defaults to `das@aidraft.bond` (override only if you want a different verified sender) |
    (SARVAM_AI_API and FIREBASE_SERVICE_ACCOUNT are already set.)
 
 2. **Re-run the "Deploy Storage Worker" workflow** (Actions → Deploy Storage
    Worker → Run workflow). Its summary page shows a readiness table — when
-   every row is green, the system is live. The workflow pushes the secrets
-   to the Worker for you.
+   `MAILERCLOUD_API_KEY` is green, the system is live. The workflow pushes
+   the secrets to the Worker for you (and pushes `das@aidraft.bond` as the
+   sender even when the optional secret is absent).
 
-3. **Optional** — edit `cloudflare/worker/wrangler.toml` vars to give the AI
+3. **Go-live check (30 seconds)** — open the app → **AI Email** → tap the
+   **send (test) icon** (or **Send test email** on the status card) and enter
+   your own address. One real email is sent immediately through the
+   transactional endpoint `email-api.mailercloud.com/email` from
+   `das@aidraft.bond`. Then check **MailerCloud → Logs** — the message must
+   appear there. If the provider returns an error (e.g. `9011 sender not
+   verified`), the app shows the exact code to report.
+
+   Terminal equivalent:
+   ```bash
+   curl -X POST "$WORKER/v1/mail/test" -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" -d '{"to":"you@example.com"}'
+   ```
+
+4. **Optional** — edit `cloudflare/worker/wrangler.toml` vars to give the AI
    more context: `MAIL_BUSINESS_PROFILE`, `MAIL_WEBSITE_URL`, `MAIL_CTA_URL`
    (the AI also infers the business from your CRM data and task instructions,
    so these can stay empty).
 
-4. **Optional** — a Workers KV namespace is no longer required. If you prefer
+5. **Optional** — a Workers KV namespace is no longer required. If you prefer
    it, uncomment the `[[kv_namespaces]]` block in `wrangler.toml` after
    `npx wrangler kv namespace create NEBULA_EMAIL_KV`.
 
@@ -240,6 +256,8 @@ curl "$WORKER/v1/mail/analytics?refresh=1" -H "Authorization: Bearer $TOKEN"
 curl "$WORKER/v1/mail/status"    -H "Authorization: Bearer $TOKEN"   # config & health
 curl -X POST "$WORKER/v1/mail/sync"   -H "Authorization: Bearer $TOKEN"   # contacts → MailerCloud only
 curl -X POST "$WORKER/v1/mail/run?force=1" -H "Authorization: Bearer $TOKEN"  # run pipeline now
+curl -X POST "$WORKER/v1/mail/test" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"to":"you@example.com"}'  # one REAL email — go-live check
 curl -X POST "$WORKER/v1/mail/config" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{"dry_run":true}'          # owner safety switch
 ```
@@ -248,12 +266,20 @@ curl -X POST "$WORKER/v1/mail/config" -H "Authorization: Bearer $TOKEN" \
 
 - **Audience = your Firestore `contacts`** (only rows with a valid email; optional
   `MAIL_TEAM_ID` filter). The AI targets segments by `status` (lead, customer, mql…).
-- **Sends happen on MailerCloud** as *scheduled campaigns* (up to 26 h ahead), so the
-  email lands at the AI-chosen minute. Cron checks every 30 min.
+- **Two delivery engines** (`MAIL_DELIVERY_MODE`, default `auto`):
+  - **Transactional Email API** (`email-api.mailercloud.com/email-api`, mail merge) —
+    audiences up to `MAIL_TRANSACTIONAL_MAX` (250) are delivered *immediately*,
+    personalized per recipient (`Hi {{first_name}},`), with per-recipient outcomes.
+    Hard bounces / unsubscribes / spam reports are auto-suppressed for future sends.
+  - **Scheduled campaigns** (Marketing API) — larger audiences; opens/clicks/unsubs
+    tracked per campaign, delivery at the AI-chosen minute.
+- **Verified identity everywhere**: `from` is `das@aidraft.bond` (or your
+  `MAILERCLOUD_SENDER_EMAIL` override) on both engines — never a Gmail/Yahoo address.
 - **Every campaign appears in the app's Marketing screen** with live metrics
   (sent / opens / clicks / unsubscribes) written back from MailerCloud.
 - **The AI learns**: each analytics pull turns numbers into directives that feed the
   next planning & copywriting prompts.
-- **Safety**: `MAIL_DRY_RUN = "true"` (default) plans & writes copy but sends nothing;
-  role-gated endpoints (superAdmin/admin/manager); run-lock prevents double sends;
-  template/analytics failures are non-fatal; mailer stays inert until all config is present.
+- **Safety**: `POST /v1/mail/config {"dry_run":true}` (owner toggle in the app) plans &
+  writes copy but sends nothing — the **test send always sends for real** since it is
+  the explicit go-live check; role-gated endpoints (superAdmin/admin/manager); run-lock
+  prevents double sends; template/analytics failures are non-fatal.

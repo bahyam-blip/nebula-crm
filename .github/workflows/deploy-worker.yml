@@ -83,9 +83,10 @@ jobs:
           MAILERCLOUD_API_KEY: ${{ secrets.MAILERCLOUD_API_KEY }}
           MAILERCLOUD_SENDER_EMAIL: ${{ secrets.MAILERCLOUD_SENDER_EMAIL }}
         run: |
-          # Both values come from app.mailercloud.com (API key: Account →
-          # API Integrations; sender: a VERIFIED sender email). Until they
-          # are set the AI mailer stays disabled and everything else works.
+          # API key comes from app.mailercloud.com (Account → API Integrations).
+          # The sender falls back to MAIL_SENDER_EMAIL in wrangler.toml
+          # (das@aidraft.bond, the verified domain sender) when the secret is
+          # absent — but an explicit secret always wins.
           if [ -z "$MAILERCLOUD_API_KEY" ]; then
             echo "::warning::MAILERCLOUD_API_KEY not set - AI mailer disabled (/v1/mail/status explains)."
             exit 0
@@ -97,7 +98,9 @@ jobs:
               | npx --yes wrangler@latest secret put MAILERCLOUD_SENDER_EMAIL 2>&1 | tail -3
             echo "::warning::MAILERCLOUD_SENDER_EMAIL stored as a Worker secret"
           else
-            echo "::warning::MAILERCLOUD_SENDER_EMAIL not set - add it to enable sending."
+            printf '%s' "das@aidraft.bond" \
+              | npx --yes wrangler@latest secret put MAILERCLOUD_SENDER_EMAIL 2>&1 | tail -3
+            echo "::warning::MAILERCLOUD_SENDER_EMAIL not in repo secrets - default verified sender das@aidraft.bond pushed instead"
           fi
           echo "::warning::MAILERCLOUD_API_KEY stored as a Worker secret"
 
@@ -116,8 +119,8 @@ jobs:
             | npx --yes wrangler@latest secret put FIREBASE_SERVICE_ACCOUNT 2>&1 | tail -3
           echo "::warning::FIREBASE_SERVICE_ACCOUNT stored as a Worker secret"
 
-      # The AI mailer stays inert until BOTH MailerCloud secrets exist in
-      # THIS repo's Actions secrets. Surface readiness where the owner will
+      # The AI mailer stays inert until MAILERCLOUD_API_KEY exists in THIS
+      # repo's Actions secrets. Surface readiness where the owner will
       # actually see it: the run summary page.
       - name: AI mailer readiness summary
         if: always()
@@ -131,20 +134,23 @@ jobs:
             echo ""
             echo "| Requirement | Status |"
             echo "|---|---|"
-            echo "| SARVAM_AI_API secret | $([ '$SARVAM_AI_API_SET' = 'true' ] && echo '✅ set' || echo '❌ missing') |"
+            echo "| SARVAM_AI_API secret | $([ '$SARVAM_AI_API_SET' = 'true' ] && echo '✅ set' || echo '❌ missing (AI planning/copy disabled)') |"
             echo "| FIREBASE_SERVICE_ACCOUNT secret | ✅ set |"
             echo "| MAILERCLOUD_API_KEY secret | $([ '$MAILERCLOUD_API_KEY_SET' = 'true' ] && echo '✅ set' || echo '❌ **missing — email sending is disabled**') |"
-            echo "| MAILERCLOUD_SENDER_EMAIL secret | $([ '$MAILERCLOUD_SENDER_EMAIL_SET' = 'true' ] && echo '✅ set' || echo '❌ **missing — email sending is disabled**') |"
+            echo "| MAILERCLOUD_SENDER_EMAIL secret | $([ '$MAILERCLOUD_SENDER_EMAIL_SET' = 'true' ] && echo '✅ set' || echo '➖ not set — default verified sender **das@aidraft.bond** is used automatically') |"
             echo "| Worker state (tasks/locks) | ✅ Firestore (no KV setup needed) |"
+            echo "| Sending endpoint | ✅ Email API \`email-api.mailercloud.com/email\` (+ \`/email-api\` mail merge) |"
             echo ""
-            if [ '$MAILERCLOUD_API_KEY_SET' != 'true' ] || [ '$MAILERCLOUD_SENDER_EMAIL_SET' != 'true' ]; then
+            if [ '$MAILERCLOUD_API_KEY_SET' != 'true' ]; then
               echo "### ⚠️ To switch the email system ON"
               echo "1. Repo → **Settings → Secrets and variables → Actions → New repository secret**"
               echo "2. Add \`MAILERCLOUD_API_KEY\` (app.mailercloud.com → Account → API Integrations)"
-              echo "3. Add \`MAILERCLOUD_SENDER_EMAIL\` (a **verified** sender in MailerCloud)"
-              echo "4. Re-run this workflow (Run workflow button) — the AI Email screen in the app will then go live."
+              echo "3. Re-run this workflow (Run workflow button)"
             else
-              echo "✅ All set — open the app → More → **AI Email Campaigns**, give the AI a task, and it plans/writes/schedules real emails."
+              echo "### ✅ Go-live check"
+              echo "1. Open the app → More → **AI Email** → tap the **send (test) icon**"
+              echo "2. Enter your own address — one real email is sent via \`email-api.mailercloud.com\` from \`das@aidraft.bond\`"
+              echo "3. Check **MailerCloud → Logs**: the message must appear there. If you get a 400/error reply, the app shows the exact provider code to report."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

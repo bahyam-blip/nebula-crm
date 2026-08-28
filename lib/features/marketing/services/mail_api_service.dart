@@ -74,19 +74,31 @@ class MailStatus {
     required this.configured,
     required this.missing,
     required this.dryRun,
+    this.ready = false,
+    this.warnings = const [],
     this.dryRunSource = '',
     this.stateBackend = '',
     this.timezone = 'Asia/Calcutta',
+    this.senderEmail = '',
+    this.senderName = '',
+    this.deliveryMode = 'auto',
+    this.suppressions = 0,
     this.businessType,
     this.lastRunAt,
   });
 
-  final bool configured;
-  final List<String> missing;
+  final bool configured; // can send (MAILERCLOUD_API_KEY present)
+  final List<String> missing; // missing for the FULL AI pipeline
   final bool dryRun;
+  final bool ready; // full AI pipeline available
+  final List<String> warnings;
   final String dryRunSource;
   final String stateBackend;
   final String timezone;
+  final String senderEmail; // verified "from" address
+  final String senderName;
+  final String deliveryMode; // auto | transactional | campaign
+  final int suppressions; // auto-learned bad addresses
   final String? businessType;
   final String? lastRunAt;
 
@@ -96,9 +108,19 @@ class MailStatus {
             .map((e) => e.toString())
             .toList(),
         dryRun: m['dryRun'] as bool? ?? true,
+        ready: m['ready'] as bool? ?? false,
+        warnings: ((m['warnings'] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
         dryRunSource: (m['dryRunSource'] as String?) ?? '',
         stateBackend: (m['stateBackend'] as String?) ?? '',
         timezone: (m['timezone'] as String?) ?? 'Asia/Calcutta',
+        senderEmail:
+            ((m['sender'] as Map?)?['from'] as String?) ?? '',
+        senderName:
+            ((m['sender'] as Map?)?['fromName'] as String?) ?? '',
+        deliveryMode: (m['delivery_mode'] as String?) ?? 'auto',
+        suppressions: (m['suppressions'] as num?)?.toInt() ?? 0,
         businessType:
             ((m['business_understood'] as Map?)?['type'] as String?),
         lastRunAt: ((m['last_run'] as Map?)?['at'] as String?),
@@ -271,6 +293,17 @@ class MailApiService {
   /// Set the owner dry-run override. `null` resets to the server default.
   Future<void> setDryRun(bool? dryRun) async {
     await _send('POST', '/v1/mail/config', body: {'dry_run': dryRun});
+  }
+
+  /// Send ONE real email to [to] through the transactional endpoint
+  /// (email-api.mailercloud.com/email) — the go-live check. Returns the
+  /// full provider reply: {ok, sent_to, from, endpoint, provider, next_step}
+  /// or {ok:false, provider_status, error, message} on failure.
+  Future<Map<String, dynamic>> sendTestEmail(String to, {String? subject}) async {
+    return _send('POST', '/v1/mail/test', body: {
+      'to': to,
+      if (subject != null && subject.trim().isNotEmpty) 'subject': subject,
+    });
   }
 }
 

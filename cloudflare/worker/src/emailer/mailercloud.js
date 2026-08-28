@@ -17,6 +17,7 @@
  */
 
 import { fetchWithBackoff, htmlToText } from './http.js';
+import { resolveSender } from './emailapi.js';
 
 export class MailerCloud {
   constructor(env) {
@@ -114,6 +115,9 @@ export class MailerCloud {
    */
   async createAndPublishCampaign({ name, subject, html, preheader, listId, scheduledAt }) {
     const env = this.env;
+    // Same verified identity as the transactional engine (das@aidraft.bond
+    // unless overridden): the "from" of a campaign must be a verified sender.
+    const sender = resolveSender(env);
     const body = {
       name: name.slice(0, 150),
       subject,
@@ -125,10 +129,10 @@ export class MailerCloud {
         `You are receiving this because you subscribed to updates from ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}.`,
       list_ids: [listId],
       sender: {
-        sender_email: env.MAILERCLOUD_SENDER_EMAIL,
-        sender_name: env.MAILERCLOUD_SENDER_NAME || env.MAIL_BUSINESS_NAME || 'Nebula CRM',
+        sender_email: sender.from,
+        sender_name: sender.fromName,
       },
-      reply_email: env.MAILERCLOUD_REPLY_EMAIL || env.MAILERCLOUD_SENDER_EMAIL,
+      reply_email: sender.replyTo || sender.from,
       is_publish: '1', // "1" → publish/schedule, "0" → draft
     };
     if (scheduledAt) body.scheduled_at = scheduledAt;

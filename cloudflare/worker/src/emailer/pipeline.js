@@ -4,8 +4,17 @@
  * Owner flow:  POST /v1/mail/tasks {instruction} — plain language, e.g.
  *   "Send 3 emails this week to 500 leads about our monsoon sale"
  * The AI (Sarvam) plans count/timing/audience, writes each template, syncs
- * the CRM contacts to MailerCloud, schedules the campaign — and writes the
+ * the CRM contacts to MailerCloud, delivers the email — and writes the
  * campaign into Firestore `campaigns/` so it appears natively in the app.
+ *
+ * Delivery engine (MAIL_DELIVERY_MODE, default "auto"):
+ *   transactional — MailerCloud Email API (email-api.mailercloud.com),
+ *                   personalized per recipient ({{first_name}} mail merge),
+ *                   immediate + per-recipient outcomes. Used for audiences
+ *                   up to MAIL_TRANSACTIONAL_MAX (default 250) in auto mode,
+ *                   and ALWAYS for /v1/mail/test.
+ *   campaign      — Marketing API scheduled campaign (right tool for the
+ *                   full list: opens/clicks/unsubs tracking at scale).
  *
  * Routes (all require a Firebase ID token; mutations + reads require a
  * campaign-manager role: superAdmin | admin | manager — mirroring the
@@ -15,28 +24,37 @@
  *   DELETE /v1/mail/tasks/:id
  *   POST   /v1/mail/run?force=1     run the pipeline now
  *   POST   /v1/mail/sync            CRM → MailerCloud contact sync only
+ *   POST   /v1/mail/test            {to} — send ONE real email now (go-live check)
  *   GET    /v1/mail/analytics?refresh=1
  *   GET    /v1/mail/preview?task=…  AI writes a sample — sends nothing
  *   GET    /v1/mail/status          config & health
  *   POST   /v1/mail/config          {dry_run: true|false|null} — owner override
  *
  * Cron: every 30 min (wrangler.toml) → runPipeline. Emails whose send time
- * falls within MAIL_LOOKAHEAD_HOURS (default 26) are created as scheduled
- * MailerCloud campaigns, so delivery happens at the AI-chosen minute even
- * if cron is delayed.
+ * falls within MAIL_LOOKAHEAD_HOURS (default 26) are delivered: small
+ * audiences immediately via the Email API (at the AI-chosen minute ± cron
+ * drift), large ones as scheduled MailerCloud campaigns.
  *
  * State (tasks, locks, analytics cache) lives in Workers KV when the
  * binding exists, otherwise directly in Firestore — see state.js. Either
  * way the mailer needs NO manual KV setup anymore.
  *
- * The ONLY things the mailer still needs to actually send:
- *   secrets: SARVAM_API_KEY, MAILERCLOUD_API_KEY, MAILERCLOUD_SENDER_EMAIL,
- *            FIREBASE_SERVICE_ACCOUNT (all pushed by the deploy workflow).
- * DRY_RUN defaults to true and can be overridden any time by the owner via
- * POST /v1/mail/config {dry_run:false} (the app exposes this toggle).
+ * What the mailer needs to send:
+ *   MAILERCLOUD_API_KEY (secret) — without it nothing can send.
+ *   MAILERCLOUD_SENDER_EMAIL (secret, optional) — falls back to the
+ *     MAIL_SENDER_EMAIL var, then the verified account sender das@aidraft.bond.
+ *   SARVAM_API_KEY + FIREBASE_SERVICE_ACCOUNT — for the AI pipeline,
+ *     CRM audiences and write-back; NOT needed for /test.
  */
 
 import { MailerCloud } from './mailercloud.js';
+import {
+  EMAIL_API_BASE,
+  resolveSender,
+  sendEmail,
+  sendPersonalizedBatch,
+  hintFor,
+} from './emailapi.js';
 import { fetchCrmContacts, getUserRole, canManageCampaigns, upsertCampaignDoc, logActivity } from './firestore.js';
 import { buildBusinessBrief, planTask } from './planner.js';
 import { writeEmail, renderHtml, saveTemplate } from './copywriter.js';
@@ -58,6 +76,8 @@ function json(obj, status = 200) {
 }
 
 const DRY_OVERRIDE_KEY = 'mail:dry_run_override';
+const SUPPRESSION_KEY = 'mail:suppressions';
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /** Effective dry-run: owner override (state) → env MAIL_DRY_RUN → true. */
 async function dryRunEffective(env, store) {
@@ -67,24 +87,78 @@ async function dryRunEffective(env, store) {
   return { dryRun: (env.MAIL_DRY_RUN ?? 'true') !== 'false', source: 'env' };
 }
 
-/** What the mailer still needs to send; reports exactly what is missing. */
+function deliveryMode(env) {
+  const m = String(env.MAIL_DELIVERY_MODE || 'auto').toLowerCase();
+  return ['auto', 'transactional', 'campaign'].includes(m) ? m : 'auto';
+}
+
+function transactionalMax(env) {
+  const n = parseInt(env.MAIL_TRANSACTIONAL_MAX || '250', 10);
+  return Number.isFinite(n) && n > 0 ? n : 250;
+}
+
+/** Which engine delivers a given email? ("auto" decides by audience size) */
+function pickDeliveryMode(env, audienceSize) {
+  const mode = deliveryMode(env);
+  if (mode !== 'auto') return mode;
+  return audienceSize <= transactionalMax(env) ? 'transactional' : 'campaign';
+}
+
+/** What the mailer still needs; reports exactly what is missing. */
 export async function mailConfigState(env, store = null) {
   const missing = [];
   if (!env.SARVAM_API_KEY) missing.push('SARVAM_API_KEY');
   if (!env.MAILERCLOUD_API_KEY) missing.push('MAILERCLOUD_API_KEY');
-  if (!env.MAILERCLOUD_SENDER_EMAIL) missing.push('MAILERCLOUD_SENDER_EMAIL');
   if (!env.FIREBASE_SERVICE_ACCOUNT) missing.push('FIREBASE_SERVICE_ACCOUNT');
+  // MAILERCLOUD_SENDER_EMAIL is optional — resolveSender() has two fallbacks,
+  // ending at the verified account sender (das@aidraft.bond).
+
+  const canSend = !!env.MAILERCLOUD_API_KEY;
+  const sender = resolveSender(env);
+  const warnings = [];
+  if (!env.MAILERCLOUD_SENDER_EMAIL && !env.MAIL_SENDER_EMAIL) {
+    warnings.push(`MAILERCLOUD_SENDER_EMAIL not set — using built-in default ${sender.from}. Make sure it is a VERIFIED sender in MailerCloud.`);
+  }
 
   const st = store || (stateBackendName(env) !== 'none' ? createStore(env) : null);
   const dry = await dryRunEffective(env, st);
 
   return {
-    configured: missing.length === 0,
-    missing,
+    configured: canSend,          // sending capability (test + pipeline delivery)
+    ready: canSend && missing.length === 0, // full AI pipeline
+    canSend,
+    missing,                      // still missing for the FULL pipeline
+    warnings,
     dryRun: dry.dryRun,
     dryRunSource: dry.source,
     state_backend: stateBackendName(env),
+    sender: { from: sender.from, fromName: sender.fromName, replyTo: sender.replyTo },
+    delivery_mode: deliveryMode(env),
+    transactional_max: transactionalMax(env),
+    email_api: EMAIL_API_BASE,
   };
+}
+
+/* ── Suppression list (auto-learned from provider outcomes) ─────────── */
+
+async function loadSuppressions(store) {
+  if (!store) return new Set();
+  const raw = await store.get(SUPPRESSION_KEY);
+  const list = raw ? JSON.parse(raw) : [];
+  return new Set(list.map((s) => s.email));
+}
+
+async function addSuppressions(store, entries) {
+  if (!store || !entries?.length) return;
+  const list = JSON.parse((await store.get(SUPPRESSION_KEY)) || '[]');
+  const seen = new Set(list.map((s) => s.email));
+  for (const e of entries) {
+    if (!seen.has(e.email)) {
+      seen.add(e.email);
+      list.push(e);
+    }
+  }
+  await store.put(SUPPRESSION_KEY, JSON.stringify(list.slice(-5000)));
 }
 
 /* ══════════════════════ HTTP router ══════════════════════ */
@@ -107,6 +181,7 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
   if (sub === '/status' && request.method === 'GET') {
     const last = store ? JSON.parse((await store.get('mail:last_run')) || 'null') : null;
     const brief = store ? JSON.parse((await store.get('biz:brief')) || 'null') : null;
+    const suppressions = store ? (await loadSuppressions(store)).size : 0;
     return json({
       ...state,
       ai_model: env.SARVAM_MODEL || 'sarvam-105b',
@@ -115,6 +190,7 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
         ? { type: brief.business_type, tone: brief.tone, from: brief.source || 'ai' }
         : false,
       last_run: last,
+      suppressions,
     });
   }
 
@@ -131,8 +207,78 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
     return json({ ok: true, ...(await mailConfigState(env, store)) });
   }
 
-  if (!state.configured) {
-    return json({ error: 'mailer not configured', ...state }, 503);
+  // ── TEST SEND — the go-live check. Sends ONE real email right now via
+  //    the transactional Email API. Needs only MAILERCLOUD_API_KEY; works
+  //    regardless of dry-run (it is explicit and owner-triggered).
+  if (sub === '/test' && request.method === 'POST') {
+    if (!state.canSend) return json({ error: 'MAILERCLOUD_API_KEY is not configured', ...state }, 503);
+    const body = await request.json().catch(() => ({}));
+    const to = String(body.to || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(to)) return json({ error: 'a valid "to" email address is required, e.g. {"to":"you@example.com"}' }, 400);
+
+    const sender = resolveSender(env);
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    const bizName = env.MAIL_BUSINESS_NAME || 'Nebula CRM';
+    const copy = {
+      subject: String(body.subject || '').trim() || `Nebula CRM test email — ${stamp}`,
+      preheader: 'If this lands in your inbox, the CRM → MailerCloud connection works end to end.',
+      headline: 'Your email system works',
+      intro: `This is a live test email sent directly from ${bizName} through the MailerCloud Email API at ${EMAIL_API_BASE}/email — the transactional endpoint your CRM uses.`,
+      sections: [
+        {
+          title: 'What this proves',
+          body: `Your MailerCloud API key authenticated successfully, and the message was sent from the verified sender ${sender.from} (${sender.fromName}). The request used version 1.0 of the send-email contract with both HTML and plain-text parts for the best inbox placement.`,
+        },
+        {
+          title: 'One last thing to confirm',
+          body: 'Open your MailerCloud account and go to Logs — this message should appear there within a minute. Once you see it, every AI-planned campaign from the CRM will deliver through the same verified identity.',
+        },
+      ],
+      cta_text: 'Open Nebula CRM',
+      closing: 'Happy sending,',
+      ps: 'Re-run this test any time from the AI Email screen — it never touches your contact lists.',
+    };
+    const html = renderHtml(env, copy);
+
+    const res = await sendEmail(env, {
+      to: [{ name: String(body.name || '').slice(0, 100), email: to }],
+      subject: copy.subject,
+      html,
+      metadata: {
+        messageId: `nebula-test-${Date.now().toString(36)}`,
+        custom: { campaign_id: 'nebula-test-send', source: 'nebula-ai-mailer' },
+      },
+    });
+
+    if (res.ok) {
+      return json({
+        ok: true,
+        sent_to: to,
+        from: `${sender.fromName} <${sender.from}>`,
+        endpoint: `${EMAIL_API_BASE}/email`,
+        provider: res.raw,
+        next_step: 'Open MailerCloud → Logs and confirm this message appears there. If it does, the integration is fully connected.',
+      });
+    }
+    // Surface the EXACT provider reply — support can identify a 400 instantly.
+    return json(
+      {
+        ok: false,
+        sent_to: to,
+        from: `${sender.fromName} <${sender.from}>`,
+        endpoint: `${EMAIL_API_BASE}/email`,
+        provider_status: res.statusCode,
+        provider: res.raw,
+        error: hintFor(res.statusCode),
+        message: res.message,
+      },
+      502
+    );
+  }
+
+  // ── Everything below needs the full AI pipeline ──
+  if (!state.ready) {
+    return json({ error: 'mailer not fully configured', ...state }, 503);
   }
 
   const mc = new MailerCloud(env);
@@ -171,8 +317,17 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
     case sub === '/sync' && request.method === 'POST': {
       const listId = await mc.ensureList(store);
       const contacts = await fetchCrmContacts(env, { max: parseInt(env.MAIL_MAX_SYNC || '5000', 10) });
-      const synced = state.dryRun ? contacts.length : await mc.upsertContacts(listId, contacts);
-      return json({ ok: true, listId, crmContacts: contacts.length, syncedOrWouldSync: synced, dryRun: state.dryRun });
+      const suppressed = await loadSuppressions(store);
+      const clean = contacts.filter((c) => !suppressed.has(c.email));
+      const synced = state.dryRun ? clean.length : await mc.upsertContacts(listId, clean);
+      return json({
+        ok: true,
+        listId,
+        crmContacts: contacts.length,
+        suppressed: contacts.length - clean.length,
+        syncedOrWouldSync: synced,
+        dryRun: state.dryRun,
+      });
     }
 
     case sub === '/analytics' && request.method === 'GET': {
@@ -197,7 +352,7 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
     }
 
     default:
-      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config'] }, 404);
+      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config'] }, 404);
   }
 }
 
@@ -207,7 +362,7 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
 export async function runMailCron(env) {
   if (stateBackendName(env) === 'none') return; // no KV, no Firestore — stay silent & cheap
   const state = await mailConfigState(env);
-  if (!state.configured) return;
+  if (!state.ready) return;
   await runPipeline(env, { trigger: 'cron' }).catch((e) => console.error('[mailer:cron]', e));
 }
 
@@ -274,7 +429,7 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
       }
     }
 
-    // 5) Execute due emails (create scheduled MailerCloud campaigns + CRM docs)
+    // 5) Execute due emails
     const nowMs = Date.now();
     for (const task of tasks) {
       if (task.status !== 'active' || !task.plan) continue;
@@ -291,7 +446,10 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           if (audience.length === 0) throw new Error('audience is empty');
 
           const copy = await writeEmail(env, task, planEmail, brief, learnings);
-          const html = renderHtml(env, copy);
+          // personalize → the HTML carries {{first_name}} which MailerCloud
+          // replaces per recipient (inactive on non-merge endpoints).
+          const personalize = pickDeliveryMode(env, audience.length) === 'transactional';
+          const html = renderHtml(env, copy, { personalize });
           const crmCampaignId = `ai_${task.id}_${mail.seq}`;
 
           if (dryRun) {
@@ -302,6 +460,8 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
             continue;
           }
 
+          // Sync recipients to the MailerCloud list first (tracking, segments,
+          // and campaign-mode delivery all rely on the list existing).
           const listId = await mc.ensureList(store);
           const synced = await mc.upsertContacts(listId, audience);
           log.push(`task ${task.id} email ${mail.seq}: synced ${synced} recipient(s) to MailerCloud list ${listId}`);
@@ -309,25 +469,28 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           const tpl = await saveTemplate(mc, env, copy, html, `${task.id.slice(-4)} #${mail.seq}`);
           mail.templateId = tpl?.id ?? tpl?.data?.id ?? null;
 
-          const campaign = await mc.createAndPublishCampaign({
-            name: `Nebula AI | ${task.id} #${mail.seq} | ${copy.subject.slice(0, 60)}`,
-            subject: copy.subject,
-            html,
-            preheader: copy.preheader,
-            listId,
-            scheduledAt: isoToAccountTime(mail.sendAt, timezone),
-          });
-          mail.campaignId = campaign?.id ?? campaign?.data?.id ?? null;
+          const mode = pickDeliveryMode(env, audience.length);
+          let delivery;
+          if (mode === 'transactional') {
+            delivery = await deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail });
+          } else {
+            delivery = await deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId });
+          }
+
+          mail.campaignId = delivery.campaignId ?? null;
           mail.subject = copy.subject;
-          mail.status = mail.campaignId ? 'scheduled' : 'created';
+          mail.status = delivery.status;
+          mail.delivery = { mode, ...(delivery.summary || {}) };
 
           // ── Make it visible in the app: write the campaign doc ──
+          const sentCount = delivery.summary?.sent ?? audience.length;
+          const bounceCount = (delivery.summary?.failed ?? 0) + (delivery.summary?.deferred ?? 0);
           await upsertCampaignDoc(env, {
             id: crmCampaignId,
             fields: {
               name: `AI | ${task.id} #${mail.seq} | ${copy.subject.slice(0, 60)}`,
               channel: 'email',
-              status: 'scheduled',
+              status: delivery.status === 'sent' ? 'sent' : delivery.status === 'partial' ? 'sent' : delivery.status,
               ownerId: task.createdBy || 'ai-mailer',
               teamId: env.MAIL_TEAM_ID || null,
               audienceCount: audience.length,
@@ -339,7 +502,13 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
               ctaUrl: env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '',
               scheduleType: 'once',
               scheduledAt: mail.sendAt,
-              metrics: { sent: 0, delivered: 0, opens: 0, clicks: 0, conversions: 0, bounces: 0, unsubscribes: 0, revenue: 0 },
+              metrics: {
+                sent: sentCount,
+                delivered: sentCount,
+                opens: 0, clicks: 0, conversions: 0,
+                bounces: bounceCount,
+                unsubscribes: 0, revenue: 0,
+              },
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
               // mailer-specific extras (Dart parser ignores unknown fields)
@@ -348,17 +517,25 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
               mailercloudCampaignId: mail.campaignId,
               mailercloudTemplateId: mail.templateId,
               mailercloudListId: listId,
+              deliveryMode: mode,
+              delivery: delivery.summary || null,
               aiPlan: { goal: planEmail.goal, angle: planEmail.angle, tone: planEmail.tone, reasoning: String(task.plan.reasoning || '').slice(0, 500) },
             },
           });
           await logActivity(env, {
-            title: `AI email scheduled: ${copy.subject}`,
-            description: `Email ${mail.seq} of task ${task.id} → ${audience.length} recipients at ${mail.sendAt} (${task.instruction.slice(0, 120)})`,
+            title: `AI email ${delivery.status === 'scheduled' ? 'scheduled' : 'sent'}: ${copy.subject}`,
+            description: describeDelivery(delivery, { mode, audience: audience.length, sendAt: mail.sendAt, taskId: task.id, instruction: task.instruction }),
             campaignId: crmCampaignId,
-            metadata: { mailercloudCampaignId: mail.campaignId, audience: audience.length },
+            metadata: {
+              mailercloudCampaignId: mail.campaignId,
+              audience: audience.length,
+              mode,
+              sent: delivery.summary?.sent ?? null,
+              failed: delivery.summary?.failed ?? null,
+            },
           });
 
-          log.push(`task ${task.id} email ${mail.seq}: campaign ${mail.campaignId} "${copy.subject}" → ${mail.status} for ${mail.sendAt} (CRM: campaigns/${crmCampaignId})`);
+          log.push(`task ${task.id} email ${mail.seq}: ${mode} → ${delivery.status} "${copy.subject}" (${describeDelivery(delivery, { audience: audience.length })})`);
         } catch (e) {
           mail.status = 'failed';
           mail.error = e.message;
@@ -380,6 +557,92 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
   } finally {
     await store.delete('mail:lock');
   }
+}
+
+/* ══════════════════════ Delivery engines ══════════════════════ */
+
+/**
+ * Transactional engine — MailerCloud Email API, personalized mail merge,
+ * 50 recipients per request, per-recipient outcome tracking, auto-
+ * suppression of hard bounces/unsubs/spam reports.
+ */
+async function deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail }) {
+  const suppressed = await loadSuppressions(store);
+  const recipients = audience
+    .filter((c) => !suppressed.has(c.email))
+    .map((c) => ({
+      name: [c.first_name, c.last_name].filter(Boolean).join(' ').slice(0, 100),
+      email: c.email,
+      merge_vars: {
+        first_name: c.first_name || 'there',
+        company: c.company_name || '',
+      },
+    }));
+
+  const result = await sendPersonalizedBatch(env, {
+    subject: copy.subject,
+    html,
+    text: plainOf(html),
+    recipients,
+    metadata: {
+      messageId: `${crmCampaignId}-${mail.seq}`.slice(0, 100),
+      custom: { campaign_id: crmCampaignId, source: 'nebula-ai-mailer' },
+    },
+  });
+
+  if (result.suppressions.length) {
+    await addSuppressions(store, result.suppressions);
+    console.warn(`[mailer] suppressed ${result.suppressions.length} address(es) after provider outcomes`);
+  }
+
+  const status = result.sent === 0 && result.failed > 0
+    ? 'failed'
+    : result.failed > 0 || result.deferred > 0
+      ? 'partial'
+      : 'sent';
+
+  return {
+    status,
+    campaignId: null, // Email API sends are tracked by metadata.custom.campaign_id
+    summary: {
+      sent: result.sent,
+      deferred: result.deferred,
+      failed: result.failed,
+      accepted_rate: recipients.length ? +((result.sent / recipients.length) * 100).toFixed(1) : 0,
+      failures: result.failures.slice(0, 25),
+      endpoint: `${EMAIL_API_BASE}/email-api`,
+    },
+  };
+}
+
+/**
+ * Campaign engine — Marketing API scheduled campaign (large audiences):
+ * delivery at the AI-chosen minute, opens/clicks/unsubs tracked per campaign.
+ */
+async function deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId }) {
+  const campaign = await mc.createAndPublishCampaign({
+    name: `Nebula AI | ${crmCampaignId} | ${copy.subject.slice(0, 60)}`,
+    subject: copy.subject,
+    html,
+    preheader: copy.preheader,
+    listId,
+    scheduledAt: isoToAccountTime(mail.sendAt, timezone),
+  });
+  const campaignId = campaign?.id ?? campaign?.data?.id ?? null;
+  if (!campaignId) throw new Error('MailerCloud campaign creation returned no id');
+  return { status: 'scheduled', campaignId, summary: { mailercloud_campaign: String(campaignId), scheduled_for: mail.sendAt } };
+}
+
+function describeDelivery(delivery, { mode, audience, sendAt, taskId, instruction } = {}) {
+  const s = delivery.summary || {};
+  if (mode === 'transactional') {
+    return [
+      `Email ${sendAt ? `planned for ${sendAt}` : ''} of task ${taskId || ''}`,
+      `${s.sent ?? 0} accepted, ${s.failed ?? 0} failed, ${s.deferred ?? 0} deferred of ${audience ?? '?'} recipients`,
+      instruction ? `(${String(instruction).slice(0, 120)})` : '',
+    ].filter(Boolean).join(' → ');
+  }
+  return `Campaign ${s.mailercloud_campaign || ''} scheduled for ${s.scheduled_for || sendAt} to ${audience ?? '?'} recipients`;
 }
 
 /* ══════════════════════ Helpers ══════════════════════ */
