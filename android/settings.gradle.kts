@@ -20,7 +20,7 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
     // Processes google-services.json -> generates default_web_client_id,
     // which google_sign_in needs to obtain an idToken for Firebase.
     id("com.google.gms.google-services") version "4.4.2" apply false
