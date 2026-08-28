@@ -48,6 +48,7 @@ MAIL_TIMEZONE = "Asia/Calcutta"
 MAIL_TEAM_ID = ""                   # optional: only sync contacts of this team (empty = all)
 MAIL_MAX_SYNC = "5000"              # cap on contacts pulled from Firestore per run
 MAIL_DRY_RUN = "false"              # live mode. The owner can flip this any time from the app (AI Email screen) or POST /v1/mail/config {"dry_run":true}.
+MAIL_CRON_ENABLED = "true"          # emergency brake: set to "false" (and redeploy) to stop ALL autonomous runs if you ever need to protect Firestore quota.
 MAIL_LOOKAHEAD_HOURS = "26"         # deliver emails up to this many hours ahead of the AI-chosen time
 MAIL_ANALYTICS_INTERVAL_HOURS = "20"
 MC_CREATE_TEMPLATES = "true"        # save every AI template into MailerCloud's template library

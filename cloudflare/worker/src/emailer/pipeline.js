@@ -426,12 +426,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * another run is mid-flight we retry politely instead of force-stealing
  * the lock (overlapping runs could double-send).
  */
+/** True when an error is a provider rate/quota wall — retrying only adds pressure. */
+function isQuotaError(e) {
+  const m = String(e?.message || e || '');
+  return /429|RESOURCE_EXHAUSTED|Quota exceeded|rate limit/i.test(m);
+}
+
 async function runWhenFree(env, onlyTaskId, attempts = 5) {
   for (let i = 0; i < attempts; i++) {
     const r = await runPipeline(env, { trigger: 'task', onlyTaskId }).catch((e) => {
       console.error('[mailer] background run failed:', e.message);
       return { error: e.message };
     });
+    // A quota/rate wall means Google is actively throttling the project:
+    // hammering it again in 12s turns one outage into a longer one. Bail out
+    // and let the next cron tick (or the owner's manual run) take over.
+    if (r?.error && isQuotaError({ message: r.error })) {
+      console.warn('[mailer] background run aborted — provider quota/rate wall:', r.error);
+      return { skipped: true, reason: `aborted on quota: ${r.error}` };
+    }
     if (!r?.skipped) return r;
     await sleep(parseInt(env.MAIL_RUN_RETRY_MS || '12000', 10)); // lock held — retry
   }
@@ -441,6 +454,9 @@ async function runWhenFree(env, onlyTaskId, attempts = 5) {
 /** Cron entry — called from the worker's scheduled() handler. */
 export async function runMailCron(env) {
   if (stateBackendName(env) === 'none') return; // no KV, no Firestore — stay silent & cheap
+  // Owner kill-switch: MAIL_CRON_ENABLED=false stops ALL autonomous runs
+  // (Firestore pressure, sends) while keeping the app's manual controls.
+  if (String(env.MAIL_CRON_ENABLED ?? 'true').toLowerCase() === 'false') return;
   const state = await mailConfigState(env);
   if (!state.ready) return;
   await runPipeline(env, { trigger: 'cron' }).catch((e) => console.error('[mailer:cron]', e));

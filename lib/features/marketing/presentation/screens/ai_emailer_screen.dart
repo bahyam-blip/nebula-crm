@@ -46,10 +46,21 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
 
   void _startPollingIfNeeded() {
     _poll?.cancel();
-    _poll = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (!mounted) return;
+    // Adaptive, bounded polling. A fixed 8s tick used to run forever whenever
+    // a task got stuck (e.g. during a Firestore outage), with every tick
+    // costing Worker → Firestore reads — that amplifies the very outage it
+    // waits out. Now: 8s for the first 2 minutes (normal run length), then
+    // every 32s, and polling stops entirely after ~10 minutes — a manual
+    // pull-to-refresh or reopening the screen resumes it.
+    var ticks = 0;
+    _poll = Timer.periodic(const Duration(seconds: 8), (t) {
+      if (!mounted) { t.cancel(); return; }
+      ticks++;
       final active = ref.read(mailHasActiveTasksProvider);
-      if (active) ref.invalidate(mailTasksProvider);
+      if (!active) { t.cancel(); return; }
+      if (ticks > 75) { t.cancel(); return; } // ~10 min ceiling
+      if (ticks > 15 && ticks % 4 != 0) return; // after 2 min: every 32s
+      ref.invalidate(mailTasksProvider);
     });
   }
 
