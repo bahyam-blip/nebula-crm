@@ -260,3 +260,140 @@ jobs:
             exit 1
           fi
           echo "::warning::SMOKE TESTS PASSED"
+
+      # ── End-to-end verification of the AI email system ───────────────────
+      # The owner's go-live protocol, executed automatically after every
+      # deploy: mint a short-lived Firebase ID token for a campaign-manager
+      # user (superAdmin first), then call the deployed worker:
+      #   GET  /v1/mail/status — must report the MailerCloud key present
+      #   POST /v1/mail/test   — sends ONE real email via the MailerCloud
+      #                          transactional Email API to that user's own
+      #                          address. The provider's raw reply is echoed
+      #                          verbatim so a 400 can be reported to
+      #                          MailerCloud support exactly as received.
+      # NEVER fails the deploy: a MailerCloud-side problem must not block
+      # shipping code.
+      - name: Verify AI email system end-to-end (one real test email)
+        if: always()
+        env:
+          MAILERCLOUD_API_KEY_SET: ${{ secrets.MAILERCLOUD_API_KEY != '' }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_WEB_API_KEY: AIzaSyAmI0s71dkSfGrDo2mOrmgCUXk8UUYK2Fs
+          FIREBASE_ANDROID_API_KEY: AIzaSyAvFw7TrlgwwKsivkcv_lEOwHutWpRcDYc
+          WORKER_URL: https://nebula-crm-storage.nebula-crm.workers.dev
+        run: |
+          [ "$MAILERCLOUD_API_KEY_SET" = "true" ] || { echo "::warning::EMAILVERIFY skipped — MAILERCLOUD_API_KEY not set"; exit 0; }
+          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || { echo "::warning::EMAILVERIFY skipped — FIREBASE_SERVICE_ACCOUNT not set (cannot mint a token)"; exit 0; }
+          pip install --quiet google-auth requests
+          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json python3 - <<'PYEOF'
+          import json, os, time
+          import requests
+          import google.auth
+          import google.auth.jwt
+          import google.auth.transport.requests as gtr
+
+          PROJECT = "nebula-crm-70f58"
+          WORKER = os.environ["WORKER_URL"]
+          KEYS = [os.environ.get("FIREBASE_WEB_API_KEY", ""),
+                  os.environ.get("FIREBASE_ANDROID_API_KEY", "")]
+
+          def say(msg):
+              print(f"::warning::EMAILVERIFY {msg}")
+
+          try:
+              creds, _ = google.auth.default(
+                  scopes=["https://www.googleapis.com/auth/datastore"])
+              creds.refresh(gtr.Request())
+          except Exception as e:
+              say(f"service account auth failed: {e}")
+              raise SystemExit(0)
+
+          # 1) Find a campaign-manager user (superAdmin first) in Firestore.
+          to_email = uid = None
+          try:
+              r = requests.get(
+                  f"https://firestore.googleapis.com/v1/projects/{PROJECT}"
+                  f"/databases/(default)/documents/users?pageSize=50",
+                  headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
+              r.raise_for_status()
+              docs = []
+              for d in r.json().get("documents", []):
+                  f = d.get("fields", {})
+                  role = (f.get("role", {}).get("stringValue") or "").strip()
+                  email = (f.get("email", {}).get("stringValue") or "").strip()
+                  if not email:
+                      continue
+                  u = d["name"].rsplit("/", 1)[-1]
+                  docs.append((u, email, role))
+              admins = [x for x in docs if x[2] == "superAdmin"]
+              mgrs = [x for x in docs if x[2] in ("admin", "manager")]
+              pool = admins + mgrs
+              if pool:
+                  uid, to_email, role = pool[0]
+                  say(f"verifying as users/{uid} role={role} -> test email to {to_email}")
+          except Exception as e:
+              say(f"Firestore users read failed: {e}")
+          if not uid:
+              say("no superAdmin/admin/manager user with an email found in Firestore — cannot verify; open the app once and run the in-app test send instead")
+              raise SystemExit(0)
+
+          # 2) Mint a Firebase custom token for that uid, exchange for an
+          #    ID token (same identity the Flutter app would present).
+          now = int(time.time())
+          custom = google.auth.jwt.encode({
+              "iss": creds.service_account_email,
+              "sub": creds.service_account_email,
+              "aud": "https://identitytoolkit.googleapis.com/"
+                     "google.identity.identitytoolkit.v1.IdentityToolkit",
+              "iat": now, "exp": now + 3500, "uid": uid,
+          }, creds.signer, algorithm="RS256")
+
+          id_token = None
+          last_err = None
+          for key in [k for k in KEYS if k]:
+              try:
+                  r = requests.post(
+                      "https://identitytoolkit.googleapis.com/v1/"
+                      "accounts:signInWithCustomToken",
+                      params={"key": key},
+                      json={"token": custom, "returnSecureToken": True}, timeout=30)
+                  if r.ok:
+                      id_token = r.json().get("idToken")
+                      break
+                  last_err = f"HTTP {r.status_code} {r.text[:200]}"
+              except Exception as e:
+                  last_err = str(e)
+          if not id_token:
+              say(f"custom-token exchange failed: {last_err}")
+              raise SystemExit(0)
+          AH = {"Authorization": f"Bearer {id_token}", "Content-Type": "application/json"}
+
+          # 3) Status — is the mailer configured on the deployed worker?
+          try:
+              r = requests.get(f"{WORKER}/v1/mail/status", headers=AH, timeout=30)
+              st = r.json() if "json" in r.headers.get("content-type", "") else {}
+              say(f"/v1/mail/status HTTP {r.status_code} configured={st.get('configured')} "
+                  f"ready={st.get('ready')} dryRun={st.get('dryRun')} "
+                  f"missing={st.get('missing')} sender={st.get('sender', {}).get('from')}")
+          except Exception as e:
+              say(f"/v1/mail/status failed: {e}")
+
+          # 4) ONE real email through the transactional Email API.
+          try:
+              r = requests.post(f"{WORKER}/v1/mail/test", headers=AH,
+                                json={"to": to_email, "name": "Nebula Owner"}, timeout=120)
+              body = r.json() if "json" in r.headers.get("content-type", "") else {"raw": r.text[:400]}
+              if r.ok and body.get("ok"):
+                  say(f"TEST EMAIL SENT to {to_email} from {body.get('from')} "
+                      f"provider={json.dumps(body.get('provider'))[:200]} "
+                      f"— check MailerCloud -> Logs")
+              else:
+                  say(f"TEST EMAIL FAILED HTTP {r.status_code} "
+                      f"provider_status={body.get('provider_status')} "
+                      f"message={body.get('message')} "
+                      f"provider={json.dumps(body.get('provider'))[:400]}")
+          except Exception as e:
+              say(f"/v1/mail/test failed: {e}")
+          PYEOF
+          rm -f /tmp/sa.json
