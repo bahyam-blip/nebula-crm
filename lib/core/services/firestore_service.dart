@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../assistant/models/insight.dart';
-import '../../auth/providers/auth_provider.dart';
-import '../../contacts/models/contact.dart';
-import '../../marketing/models/campaign.dart';
-import '../../pipeline/models/deal.dart';
-import '../../service/models/ticket.dart';
+import '../../features/assistant/models/insight.dart';
+import '../../features/auth/providers/auth_provider.dart';
+import '../../features/contacts/models/contact.dart';
+import '../../features/marketing/models/campaign.dart';
+import '../../features/pipeline/models/deal.dart';
+import '../../features/service/models/ticket.dart';
 import '../constants/app_constants.dart';
 import 'remote/data_api.dart';
 import 'remote/data_codec.dart';

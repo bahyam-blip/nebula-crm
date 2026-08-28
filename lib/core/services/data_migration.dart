@@ -35,11 +35,8 @@ class DataMigration {
 
   Future<bool> alreadyRun() async {
     try {
-      final doc = await _db
-          .collection(AppConstants.colSystem)
-          .doc(_markerDoc)
-          .get();
-      return doc.exists;
+      final doc = await _ds.get('system', _markerDoc);
+      return doc != null;
     } catch (_) {
       return false;
     }

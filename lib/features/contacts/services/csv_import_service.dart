@@ -88,6 +88,8 @@ class CsvParseResult {
 class CsvImportService {
   CsvImportService(this._ds);
 
+  final RemoteDataSource _ds;
+
   /// Cap writes per batch request so one import never stalls a round trip.
   static const int _batchLimit = 400;
 

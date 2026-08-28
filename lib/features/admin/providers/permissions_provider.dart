@@ -142,7 +142,7 @@ final grantedPermissionsProvider =
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const {});
   final ds = ref.watch(remoteDataServiceProvider);
-  return ds.watchList(
+  return ds.watch<Map<String, MonitorPermissions>>(
     () async {
       final doc = await ds.get(AppConstants.colSettings, teamId);
       final raw = (doc?.data ?? const {})['monitorPermissions']

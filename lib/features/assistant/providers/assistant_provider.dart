@@ -42,12 +42,8 @@ final chatMessagesProvider =
   return ds.watchList(
     () => ds.list(col, limit: 100).then((docs) {
       final list = docs.map(ChatMessage.fromFirestore).toList()
-        ..sort((a, b) {
-          final at = a.data['timestamp'];
-          final bt = b.data['timestamp'];
-          if (at is Timestamp && bt is Timestamp) return at.compareTo(bt);
-          return 0;
-        });
+        ..sort((a, b) => (a.timestamp ?? DateTime(0))
+            .compareTo(b.timestamp ?? DateTime(0)));
       return list;
     }),
     interval: const Duration(seconds: 8),

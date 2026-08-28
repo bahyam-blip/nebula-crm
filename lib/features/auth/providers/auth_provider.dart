@@ -24,7 +24,7 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
   var pushRegistered = false;
   var bootstrapped = false;
 
-  return ds.watchList<AppUser?>(() async {
+  return ds.watch<AppUser?>(() async {
     if (!bootstrapped) {
       bootstrapped = true;
       await ds.bootstrap();

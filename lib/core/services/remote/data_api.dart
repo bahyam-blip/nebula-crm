@@ -10,7 +10,7 @@ import 'data_codec.dart';
 
 /// Exception surfaced by the data API.
 class DataApiException implements Exception {
-  DataApiException(this.status, this.message);
+  const DataApiException(this.status, this.message);
   final int status;
   final String message;
   @override
@@ -27,7 +27,7 @@ class WhereEq {
 
 /// One write inside a [RemoteDataSource.batch].
 class BatchOp {
-  BatchOp.set(this.col, this.data, {this.id, this.merge = true});
+  BatchOp.set(this.col, this.data, {this.id, this.merge = true}) : op = 'set';
   BatchOp.update(this.col, this.id, this.data)
       : op = 'update',
         merge = true;
@@ -58,7 +58,9 @@ class RemoteDataSource {
   Future<String> _token() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw const DataApiException(401, 'not signed in');
-    return user.getIdToken();
+    final token = await user.getIdToken();
+    if (token.isEmpty) throw const DataApiException(401, 'empty id token');
+    return token;
   }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
@@ -168,6 +170,44 @@ class RemoteDataSource {
   }
 
   // ── Realtime-ish helpers ──
+
+  /// Single-value variant of [watchList] — for profile/settings streams.
+  Stream<T> watch(
+    Future<T> Function() fetch, {
+    Duration interval = const Duration(seconds: 30),
+  }) {
+    late StreamController<T> controller;
+    Timer? timer;
+    var busy = false;
+
+    Future<void> tick() async {
+      if (busy || !controller.hasListener) return;
+      busy = true;
+      try {
+        final value = await fetch();
+        if (!controller.isClosed) controller.add(value);
+      } catch (e) {
+        if (!controller.isClosed) controller.addError(e);
+      } finally {
+        busy = false;
+      }
+    }
+
+    controller = StreamController<T>(
+      onListen: () async {
+        await tick();
+        timer = Timer.periodic(interval, (_) => tick());
+      },
+      onPause: () => timer?.cancel(),
+      onResume: () => timer = Timer.periodic(interval, (_) => tick()),
+      onCancel: () {
+        timer?.cancel();
+        timer = null;
+      },
+    );
+    return controller.stream;
+  }
+
   //
   // Firestore gave us push updates via snapshots(); D1 does not. These
   // wrappers give the same Stream<List<T>> API the screens already consume,
