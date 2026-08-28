@@ -170,7 +170,10 @@ jobs:
           fi
           npx --yes wrangler@latest d1 create nebula-crm-db 2>&1 | tail -2 || \
             echo "::warning::D1 database already exists (or create failed — continuing)"
-          D1_ID=$(npx --yes wrangler@latest d1 info nebula-crm-db --json 2>/dev/null \
+          # d1 info output shape varies across wrangler versions — collect
+          # every UUID seen across info/list and take the first.
+          D1_ID=$( ( npx --yes wrangler@latest d1 info nebula-crm-db 2>/dev/null || true; \
+                     npx --yes wrangler@latest d1 list 2>/dev/null || true ) \
             | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
           if [ -z "$D1_ID" ]; then
             echo "::error::Could not resolve D1 database UUID."
