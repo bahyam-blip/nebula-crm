@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/services/mailercloud_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/formatters.dart';
@@ -17,12 +18,13 @@ class CampaignsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final campaigns = ref.watch(campaignsProvider);
+    final mcCampaigns = ref.watch(mailerCloudCampaignsProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Campaigns')),
       body: campaigns.when(
         data: (list) {
-          if (list.isEmpty) {
+          if (list.isEmpty && mcCampaigns.valueOrNull?.isEmpty != false) {
             return const EmptyState(
               icon: Icons.send,
               title: 'No campaigns yet',
@@ -30,16 +32,39 @@ class CampaignsScreen extends ConsumerWidget {
               actionLabel: 'New campaign',
             );
           }
-          return ListView.separated(
+          return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) {
-              final c = list[i];
-              return _CampaignCard(campaign: c)
-                  .animate()
-                  .fadeIn(duration: 250.ms, delay: (i * 40).ms);
-            },
+            children: [
+              // ── MailerCloud live campaigns ──
+              ...?mcCampaigns.whenOrNull(
+                data: (mcList) {
+                  if (mcList.isEmpty) return null;
+                  return [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.cloud_done,
+                              size: 16, color: AppColors.info),
+                          const SizedBox(width: 6),
+                          Text('MailerCloud Live',
+                              style: context.textTheme.labelLarge),
+                        ],
+                      ),
+                    ),
+                    ...mcList.map((mc) => _MailerCloudCard(campaign: mc)),
+                    const SizedBox(height: 12),
+                  ];
+                },
+              ),
+              // ── Firestore-stored campaigns ──
+              ...list.asMap().entries.map((entry) {
+                final c = entry.value;
+                return _CampaignCard(campaign: c)
+                    .animate()
+                    .fadeIn(duration: 250.ms, delay: (entry.key * 40).ms);
+              }),
+            ],
           );
         },
         loading: () => const Center(
@@ -187,6 +212,92 @@ class _Metric extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Card showing a MailerCloud campaign with live send metrics.
+///
+/// Appears above the Firestore-stored campaigns on the campaigns screen,
+/// labelled "MailerCloud Live" so users can distinguish real sends (via
+/// MailerCloud) from campaign drafts stored in the CRM.
+class _MailerCloudCard extends StatelessWidget {
+  const _MailerCloudCard({required this.campaign});
+  final MailerCloudCampaign campaign;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.info.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.mark_email_read,
+                      color: AppColors.info, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        campaign.name,
+                        style: context.textTheme.titleSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        campaign.subject,
+                        style: context.textTheme.labelSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                StatusBadge(
+                  label: campaign.status.toUpperCase(),
+                  color: AppColors.info,
+                  outlined: true,
+                ),
+              ],
+            ),
+            if (campaign.sent > 0) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  _Metric(
+                    label: 'Sent',
+                    value: Formatters.compact(campaign.sent),
+                  ),
+                  _Metric(
+                    label: 'Open Rate',
+                    value: Formatters.percent(campaign.openRate, decimals: 1),
+                  ),
+                  _Metric(
+                    label: 'Click Rate',
+                    value: Formatters.percent(campaign.clickRate, decimals: 1),
+                  ),
+                  _Metric(
+                    label: 'Bounces',
+                    value: Formatters.compact(campaign.bounces),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
