@@ -2,7 +2,7 @@
 
 An **advanced, AI-powered CRM** built with Flutter, Firebase, and Riverpod. Designed with a **dark-premium, mobile-first** aesthetic for modern sales teams. Production-ready architecture with offline support, real-time sync, and agentic AI features.
 
-> Built per the requirements gathered from competitive research against Salesforce, HubSpot, Zoho, and Pipedrive. See [`CRM_Research_Report.md`](../CRM_Research_Report.md) for the feature matrix that drove this build.
+> Built per the requirements gathered from competitive research against Salesforce, HubSpot, Zoho, and Pipedrive. See [`CRM_Research_REPORT.md`](../CRM_Research_Report.md) for the feature matrix that drove this build.
 
 ---
 
@@ -54,8 +54,7 @@ lib/
 │   ├── dashboard/                 # KPI grid, charts, funnel
 │   ├── contacts/                  # List, detail 360, form
 │   ├── pipeline/                  # Kanban board, deal detail, form
-│   ├── marketing/                 # Campaigns, builder, drip editor
-│   ├── service/                   # Tickets, SLA, knowledge base
+│   ├── marketing/                 # Campaigns, builder, drip editor:│   ├── service/                   # Tickets, SLA, knowledge base
 │   └── assistant/                 # AI chat, NBA cards, insights
 └── shared/
     └── widgets/                   # MainScaffold (bottom nav), ProfileMenu
@@ -137,6 +136,30 @@ The app uses a **thin-client / thick-gateway** pattern:
 4. App renders AI output as **typed cards** (NBA, insight, sentiment) — never raw markdown blobs.
 
 This keeps the LLM provider swappable and API keys server-side.
+
+---
+
+## MailerCloud Email Marketing Integration
+
+Daily product-update emails are sent automatically through [MailerCloud](https://www.mailercloud.com). The integration works as follows:
+
+1. **GitHub Actions cron** (`daily-email.yml`) triggers at 10:00 AM IST every day.
+2. The cron calls the Cloudflare Worker's `/v1/mailercloud/send-daily` endpoint with a `CRON_SECRET`.
+3. The Worker reads CRM data (contacts, pipeline, recent activity) from Firestore.
+4. The existing **Sarvam AI** integration generates a personalised email about the business — subject, HTML body, plain text — based on what happened that day.
+5. The Worker creates a MailerCloud campaign (using the first verified sender and first contact list) and schedules it to send immediately.
+6. The Flutter app's campaigns screen shows live MailerCloud send metrics (opens, clicks, bounces) via `GET /v1/mailercloud/campaigns`.
+
+### Required GitHub secrets
+
+| Secret | What it is |
+|---|---|
+| `MAILERCLOUD_API_KEY` | Your MailerCloud API key (from Settings → API Integrations) |
+| `CRON_SECRET` | A random string (generate with `openssl rand -hex 32`) shared between the GitHub Actions cron and the Worker |
+| `CLOUDFLARE_API_TOKEN` | Already used by the deploy-worker workflow |
+| `FIREBASE_SERVICE_ACCOUNT` | Already used by the push notification system |
+
+The `deploy-worker.yml` workflow automatically pushes `MAILERCLOUD_API_KEY` and `CRON_SECRET` as Worker secrets on every deploy.
 
 ---
 

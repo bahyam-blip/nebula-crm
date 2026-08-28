@@ -10,6 +10,10 @@
  *   POST   /v1/upload?path=<key>   auth required, body = raw bytes
  *   GET    /v1/file/<key>          public read (media is not secret)
  *   DELETE /v1/file/<key>          auth required, same ownership rules
+ *   POST   /v1/ai                  auth required, proxies to Sarvam AI
+ *   POST   /v1/notify              auth required, cross-user push
+ *   POST   /v1/mailercloud/send-daily   CRON_SECRET, daily AI email
+ *   GET    /v1/mailercloud/campaigns    auth required, list MC campaigns
  *   GET    /v1/health              liveness probe
  */
 
@@ -19,6 +23,11 @@ import {
   teamMemberIds,
   sendToTokens,
 } from './push.js';
+
+import {
+  runDailyCampaign,
+  listCampaigns as mcListCampaigns,
+} from './mailercloud.js';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -191,6 +200,30 @@ export default {
       return new Response(object.body, { headers });
     }
 
+    // ── MailerCloud: daily campaign send (cron, no Firebase auth) ──
+    // This endpoint is called by the GitHub Actions cron job, not by the
+    // app. It authenticates with a shared CRON_SECRET instead of a Firebase
+    // ID token, so it must be above the Firebase auth gate below.
+    if (request.method === 'POST' && path === '/v1/mailercloud/send-daily') {
+      if (!env.MAILERCLOUD_API_KEY) {
+        return json({ error: 'MailerCloud is not configured on the server.' }, 503);
+      }
+      const cronSecret = url.searchParams.get('secret') || '';
+      if (!env.CRON_SECRET || cronSecret !== env.CRON_SECRET) {
+        return json({ error: 'unauthorized' }, 401);
+      }
+
+      try {
+        const result = await runDailyCampaign(env);
+        return json(result);
+      } catch (e) {
+        return json(
+          { error: 'daily campaign failed', detail: String(e).slice(0, 600) },
+          500
+        );
+      }
+    }
+
     // Everything below needs a valid Firebase ID token.
     const auth = request.headers.get('Authorization') || '';
     const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -359,6 +392,25 @@ export default {
         url: `${url.origin}/v1/file/${encodeURIComponent(key)}`,
         size: bytes.byteLength,
       });
+    }
+
+    // ── MailerCloud: list campaigns (for the Flutter app) ──
+    // Authenticated with a Firebase ID token like all other app routes.
+    // Returns the campaign list from MailerCloud so the marketing screen
+    // can show real send stats alongside the Firestore-stored campaigns.
+    if (request.method === 'GET' && path === '/v1/mailercloud/campaigns') {
+      if (!env.MAILERCLOUD_API_KEY) {
+        return json({ error: 'MailerCloud is not configured.' }, 503);
+      }
+      try {
+        const campaigns = await mcListCampaigns(env.MAILERCLOUD_API_KEY, 20);
+        return json({ campaigns });
+      } catch (e) {
+        return json(
+          { error: 'failed to list campaigns', detail: String(e).slice(0, 400) },
+          500
+        );
+      }
     }
 
     // ── Delete ──
