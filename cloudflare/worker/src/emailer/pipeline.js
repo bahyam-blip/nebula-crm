@@ -16,12 +16,12 @@
  *   campaign      — Marketing API scheduled campaign (right tool for the
  *                   full list: opens/clicks/unsubs tracking at scale).
  *
- * Routes (all require a Firebase ID token; mutations + reads require a
- * campaign-manager role: superAdmin | admin | manager — mirroring the
- * app's canManageCampaigns):
+ * Routes (all require a Firebase ID token — every signed-in teammate may use
+ * the mailer; the AI mailer is a product feature, not an admin panel):
  *   POST   /v1/mail/tasks           {instruction, source?}
- *   GET    /v1/mail/tasks
+ *   GET    /v1/mail/tasks           (each task carries progress + events[])
  *   DELETE /v1/mail/tasks/:id
+ *   POST   /v1/mail/tasks/:id/cancel  stop a live task — nothing more sends
  *   POST   /v1/mail/run?force=1     run the pipeline now
  *   POST   /v1/mail/sync            CRM → MailerCloud contact sync only
  *   POST   /v1/mail/test            {to} — send ONE real email now (go-live check)
@@ -29,6 +29,9 @@
  *   GET    /v1/mail/preview?task=…  AI writes a sample — sends nothing
  *   GET    /v1/mail/status          config & health
  *   POST   /v1/mail/config          {dry_run: true|false|null} — owner override
+ *   GET    /v1/mail/memory          what the AI knows about the business
+ *   POST   /v1/mail/memory          teach it {facts:{...}, note:"free text"}
+ *   POST   /v1/mail/memory/reset    wipe the memory
  *
  * Cron: every 30 min (wrangler.toml) → runPipeline. Emails whose send time
  * falls within MAIL_LOOKAHEAD_HOURS (default 26) are delivered: small
@@ -55,12 +58,13 @@ import {
   sendPersonalizedBatch,
   hintFor,
 } from './emailapi.js';
-import { fetchCrmContacts, getUserRole, canManageCampaigns, upsertCampaignDoc, logActivity } from './firestore.js';
+import { fetchCrmContacts, upsertCampaignDoc, logActivity } from './firestore.js';
 import { buildBusinessBrief, planTask } from './planner.js';
 import { writeEmail, renderHtml, saveTemplate } from './copywriter.js';
 import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled } from './analytics.js';
-import { putTask, getTask, listTasks, deleteTask, newTask, touch } from './tasks.js';
+import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, progressOf } from './tasks.js';
 import { createStore, stateBackendName } from './state.js';
+import { getMemory, saveMemory, resetMemory, teach, learnFromResults, memoryContext, syncBriefToMemory } from './memory.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -166,12 +170,11 @@ async function addSuppressions(store, entries) {
 export async function handleMail(request, env, { url, uid, ctx = { waitUntil: () => {} } }) {
   const store = stateBackendName(env) !== 'none' ? createStore(env) : null;
 
-  // Role gate — everything under /v1/mail is campaign management.
-  const role = await getUserRole(env, uid);
-  if (!canManageCampaigns(role)) {
-    return json({ error: `role "${role ?? 'unknown'}" cannot manage campaigns (superAdmin/admin/manager only)` }, 403);
-  }
-
+  // EVERY signed-in teammate can use the AI mailer. The token was already
+  // verified by the caller (index.js) — uid is used for audit/attribution
+  // only. Role lookups remain available to other modules but no longer gate
+  // this feature: blocking the whole team behind users/{uid}.role caused
+  // hard 403s whenever the doc was missing or the role value drifted.
   const state = await mailConfigState(env, store);
 
   const path = url.pathname; // e.g. /v1/mail/tasks
@@ -181,14 +184,16 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
   if (sub === '/status' && request.method === 'GET') {
     const last = store ? JSON.parse((await store.get('mail:last_run')) || 'null') : null;
     const brief = store ? JSON.parse((await store.get('biz:brief')) || 'null') : null;
+    const mem = await getMemory(store);
     const suppressions = store ? (await loadSuppressions(store)).size : 0;
     return json({
       ...state,
       ai_model: env.SARVAM_MODEL || 'sarvam-105b',
       timezone: env.MAIL_TIMEZONE || 'Asia/Calcutta',
-      business_understood: brief
-        ? { type: brief.business_type, tone: brief.tone, from: brief.source || 'ai' }
+      business_understood: mem.facts.business_type || brief
+        ? { type: mem.facts.business_type || brief?.business_type, tone: mem.facts.tone || brief?.tone, from: mem.facts.business_type ? 'memory' : (brief?.source || 'ai') }
         : false,
+      memory: { facts_known: Object.values(mem.facts).filter((v) => (Array.isArray(v) ? v.length : v)).length, insights: mem.insights.length },
       last_run: last,
       suppressions,
     });
@@ -276,6 +281,28 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
     );
   }
 
+  // ── Business memory — view / teach / reset ──────────────────────
+  // Available even when the pipeline is not fully configured: the owner can
+  // start teaching the AI before every secret is in place.
+  if (sub === '/memory' && request.method === 'GET') {
+    const mem = await getMemory(store);
+    return json({ memory: mem, context_preview: memoryContext(mem) });
+  }
+
+  if (sub === '/memory' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const hasFacts = body.facts && typeof body.facts === 'object';
+    const note = typeof body.note === 'string' ? body.note.trim() : '';
+    if (!hasFacts && !note) return json({ error: 'send facts:{business_type,industry,products,audience,tone,offers} and/or a note:"…" to teach the AI' }, 400);
+    const mem = await teach(env, store, { facts: body.facts || {}, note, origin: 'owner' });
+    return json({ ok: true, memory: mem });
+  }
+
+  if (sub === '/memory/reset' && request.method === 'POST') {
+    const mem = await resetMemory(store);
+    return json({ ok: true, memory: mem });
+  }
+
   // ── Everything below needs the full AI pipeline ──
   if (!state.ready) {
     return json({ error: 'mailer not fully configured', ...state }, 503);
@@ -289,16 +316,28 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
       const instruction = body.instruction || body.task || '';
       if (!instruction.trim()) return json({ error: 'instruction is required' }, 400);
       const task = newTask(instruction, body.source || 'api', uid);
+      addEvent(task, 'Task created — queued for the AI.', 'info');
       await putTask(store, task);
       // Plan/execute in the background — the task object tracks progress
       // (poll GET /v1/mail/tasks). kept alive by waitUntil after the reply.
-      ctx.waitUntil(runPipeline(env, { trigger: 'task', onlyTaskId: task.id }).catch((e) => console.error('[mailer]', e)));
-      return json({ ok: true, task }, 201);
+      // Plan/execute in the background. If another pipeline run holds the
+      // lock, retry instead of waiting up to 30 min for the next cron.
+      ctx.waitUntil(runWhenFree(env, task.id));
+      return json({ ok: true, task: { ...task, progress: progressOf(task) } }, 201);
     }
 
     case sub === '/tasks' && request.method === 'GET': {
       const tasks = await listTasks(store);
-      return json({ count: tasks.length, tasks });
+      return json({ count: tasks.length, tasks: tasks.map((t) => ({ ...t, progress: progressOf(t) })) });
+    }
+
+    case sub.startsWith('/tasks/') && sub.endsWith('/cancel') && request.method === 'POST': {
+      const id = sub.split('/')[2];
+      const t = await getTask(store, id);
+      if (!t) return json({ error: 'task not found' }, 404);
+      const changed = !!cancelTaskState(t);
+      if (changed) await putTask(store, t);
+      return json({ ok: true, cancelled: changed, task: { ...t, progress: progressOf(t) } });
     }
 
     case sub.startsWith('/tasks/') && request.method === 'DELETE': {
@@ -310,8 +349,12 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
     }
 
     case sub === '/run' && request.method === 'POST': {
-      const result = await runPipeline(env, { trigger: 'manual', force: url.searchParams.get('force') === '1' });
-      return json(result);
+      try {
+        const result = await runPipeline(env, { trigger: 'manual', force: url.searchParams.get('force') === '1' });
+        return json(result);
+      } catch (e) {
+        return json({ ok: false, error: e.message }, 500);
+      }
     }
 
     case sub === '/sync' && request.method === 'POST': {
@@ -347,16 +390,38 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
       const learnings = (await getLatestAnalytics(store))?.learnings ?? null;
       const pseudoTask = { id: 'preview', instruction, plan: null };
       const planEmail = { seq: 1, sendAt: new Date().toISOString(), goal: instruction.slice(0, 200), angle: 'highest-open-rate hook for this audience', tone: brief.tone || 'friendly', template_style: 'newsletter' };
-      const copy = await writeEmail(env, pseudoTask, planEmail, brief, learnings);
+      const mem = await getMemory(store);
+      syncBriefToMemory(mem, brief);
+      const copy = await writeEmail(env, pseudoTask, planEmail, brief, learnings, mem);
       return json({ preview: true, dryRun: true, copy, html: renderHtml(env, copy) });
     }
 
     default:
-      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config'] }, 404);
+      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'POST /v1/mail/tasks/:id/cancel', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config', 'GET/POST /v1/mail/memory', 'POST /v1/mail/memory/reset'] }, 404);
   }
 }
 
 /* ══════════════════════ Pipeline ══════════════════════ */
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Run the pipeline as soon as the run-lock frees. A brand-new task should
+ * start planning within seconds, not wait for the next cron tick — but if
+ * another run is mid-flight we retry politely instead of force-stealing
+ * the lock (overlapping runs could double-send).
+ */
+async function runWhenFree(env, onlyTaskId, attempts = 5) {
+  for (let i = 0; i < attempts; i++) {
+    const r = await runPipeline(env, { trigger: 'task', onlyTaskId }).catch((e) => {
+      console.error('[mailer] background run failed:', e.message);
+      return { error: e.message };
+    });
+    if (!r?.skipped) return r;
+    await sleep(parseInt(env.MAIL_RUN_RETRY_MS || '12000', 10)); // lock held — retry
+  }
+  return { skipped: true, reason: 'pipeline stayed busy; the cron will pick this task up' };
+}
 
 /** Cron entry — called from the worker's scheduled() handler. */
 export async function runMailCron(env) {
@@ -391,7 +456,8 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
       log.push('analytics: pulling campaign performance…');
       const snap = await collectAnalytics(mc, env, store);
       await markAnalyticsPulled(store);
-      log.push(`analytics: ${snap.campaigns?.length ?? 0} campaign(s) analysed, metrics written to CRM`);
+      if (snap.learnings) await learnFromResults(store, snap.learnings, snap.campaigns || []);
+      log.push(`analytics: ${snap.campaigns?.length ?? 0} campaign(s) analysed, metrics written to CRM, memory updated`);
     }
     const learnings = (await getLatestAnalytics(store))?.learnings ?? null;
 
@@ -408,21 +474,30 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
       .map((t) => t.instruction)
       .filter(Boolean);
     const brief = await buildBusinessBrief(env, store, { crmStats: stats, recentInstructions });
+    const memory = await getMemory(store);
+    syncBriefToMemory(memory, brief); // AI-inferred facts fill memory gaps (owner facts always win)
+    if (memory.facts.business_type) await saveMemory(store, memory);
 
     // 4) Plan pending tasks
     for (const task of tasks) {
       if (task.status === 'pending' || task.status === 'planning') {
         try {
           await putTask(store, touch(task, { status: 'planning' }));
-          const plan = await planTask(env, store, task, brief, learnings, stats);
+          const plan = await planTask(env, store, task, brief, learnings, stats, memory);
           task.plan = plan;
           task.emails = plan.emails.map((e) => ({
             seq: e.seq, sendAt: e.sendAt, subject: null, campaignId: null,
             crmCampaignId: null, status: 'planned', templateId: null,
           }));
+          addEvent(task, `Plan ready: ${plan.emails.length} email(s) → up to ${plan.audience.max_recipients} recipients (segment: ${plan.audience.segment ?? 'all'})`, 'plan');
+          // Remember what the owner markets about — future copy stays fresh.
+          memory.notes.unshift(`[campaign] ${task.instruction.slice(0, 240)}`);
+          memory.notes = memory.notes.slice(0, 20);
+          await saveMemory(store, memory);
           await putTask(store, touch(task, { status: 'active' }));
           log.push(`task ${task.id}: planned ${plan.emails.length} email(s) → ≤${plan.audience.max_recipients} recipients (segment: ${plan.audience.segment ?? 'all'})`);
         } catch (e) {
+          addEvent(task, `Planning failed: ${e.message}`, 'error');
           await putTask(store, touch(task, { status: 'failed', error: e.message }));
           log.push(`task ${task.id}: PLAN FAILED — ${e.message}`);
         }
@@ -436,6 +511,14 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
 
       for (const mail of task.emails) {
         if (mail.status !== 'planned') continue;
+        // Re-read the task: the owner may have cancelled or deleted it
+        // while this run was in flight. Never resurrect either.
+        const fresh = await getTask(store, task.id);
+        if (!fresh || fresh.status === 'cancelled') {
+          task.status = 'cancelled';
+          log.push(`task ${task.id}: cancelled/deleted mid-run — stopping`);
+          break;
+        }
         const sendMs = Date.parse(mail.sendAt);
         if (!Number.isFinite(sendMs)) { mail.status = 'failed'; mail.error = 'bad sendAt'; continue; }
         if (sendMs - nowMs > lookahead) continue; // not due yet
@@ -445,7 +528,7 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           const audience = pickAudience(contacts, task.plan.audience);
           if (audience.length === 0) throw new Error('audience is empty');
 
-          const copy = await writeEmail(env, task, planEmail, brief, learnings);
+          const copy = await writeEmail(env, task, planEmail, brief, learnings, memory);
           // personalize → the HTML carries {{first_name}} which MailerCloud
           // replaces per recipient (inactive on non-merge endpoints).
           const personalize = pickDeliveryMode(env, audience.length) === 'transactional';
@@ -481,6 +564,7 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           mail.subject = copy.subject;
           mail.status = delivery.status;
           mail.delivery = { mode, ...(delivery.summary || {}) };
+          addEvent(task, `"${copy.subject}" → ${mode} ${delivery.status} to ${audience.length} recipient(s)`, 'send');
 
           // ── Make it visible in the app: write the campaign doc ──
           const sentCount = delivery.summary?.sent ?? audience.length;
@@ -539,14 +623,18 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
         } catch (e) {
           mail.status = 'failed';
           mail.error = e.message;
+          addEvent(task, `Email ${mail.seq} failed: ${e.message}`, 'error');
           log.push(`task ${task.id} email ${mail.seq}: SEND FAILED — ${e.message}`);
         }
       }
 
+      if (task.status === 'cancelled') continue; // owner cancelled mid-run — do not overwrite
       const remaining = task.emails.filter((m) => m.status === 'planned');
       const failed = task.emails.filter((m) => m.status === 'failed');
       if (remaining.length === 0) {
-        await putTask(store, touch(task, { status: failed.length === task.emails.length ? 'failed' : 'done' }));
+        const finalStatus = failed.length === task.emails.length ? 'failed' : 'done';
+        addEvent(task, finalStatus === 'done' ? 'All emails processed. Campaigns visible in the app.' : 'Every email failed — see email errors.', finalStatus === 'done' ? 'info' : 'error');
+        await putTask(store, touch(task, { status: finalStatus }));
       } else {
         await putTask(store, task);
       }

@@ -35,6 +35,12 @@ class MainScaffold extends ConsumerWidget {
       route: '/pipeline',
     ),
     _NavDestination(
+      icon: Icons.mark_email_unread_outlined,
+      selectedIcon: Icons.mark_email_read_outlined,
+      label: 'Email',
+      route: '/ai-emailer',
+    ),
+    _NavDestination(
       icon: Icons.auto_awesome,
       selectedIcon: Icons.auto_awesome,
       label: 'Assistant',

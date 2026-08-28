@@ -26,3 +26,9 @@ final mailHasActiveTasksProvider = Provider<bool>((ref) {
   final tasks = ref.watch(mailTasksProvider).valueOrNull ?? const [];
   return tasks.any((t) => t.isActive);
 });
+
+/// What the AI knows about the business (facts + creative playbook).
+final mailMemoryProvider =
+    FutureProvider.autoDispose<MailMemory>((ref) {
+  return ref.watch(mailApiProvider).memory();
+});

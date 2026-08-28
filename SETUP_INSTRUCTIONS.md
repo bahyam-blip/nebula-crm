@@ -232,18 +232,31 @@ identity is already pinned to the account's verified domain sender
 
 ### Using it (no terminal needed)
 
-Open the app → **More → AI Email Campaigns** (or the ✨ icon on the Campaigns
-screen). Type what you want, e.g. *"Send 3 emails this week to leads about
+Open the app → **Email** tab on the bottom navigation (or More → AI Email
+Campaigns). Type what you want, e.g. *"Send 3 emails this week to leads about
 our monsoon sale — build urgency but keep it classy"*, and press **Launch AI
-campaign**. The task card tracks the AI live: planned → written → scheduled.
+campaign**. The task card tracks the AI live: planned → written → scheduled
+(tap a task for its full AI activity log, cancel any time before it sends).
 Toggle **LIVE / Safety mode** right on the status card. Every campaign also
 appears in the normal Campaigns screen with opens & clicks flowing back.
+
+**Business Brain (memory).** The AI keeps a persistent memory of your business —
+what you sell, who buys, the brand voice, plus a creative playbook distilled from
+real campaign results (winner/flop subjects, best send hour). Teach it once from
+the app (**Email tab → Business Brain → Teach**) or let it learn from your CRM and
+analytics. Every future campaign is planned and written against this memory.
+Owner-taught facts always outrank AI inference. API: `GET/POST /v1/mail/memory`,
+`POST /v1/mail/memory/reset`.
+
+**Who can use it.** Every signed-in teammate (any role) can use the AI mailer —
+creating tasks, sending tests, reading analytics. The Firebase ID token still
+authenticates every call; the old superAdmin/admin/manager gate was removed.
 
 Terminal equivalent:
 
 ```bash
 WORKER="https://nebula-crm-storage.<your-subdomain>.workers.dev"
-TOKEN="<Firebase ID token of a superAdmin/admin/manager>"   # from the app: user.getIdToken()
+TOKEN="<Firebase ID token of any signed-in user>"   # from the app: user.getIdToken()
 
 # Give the AI a task (it plans, writes, schedules — check progress with GET)
 curl -X POST "$WORKER/v1/mail/tasks" -H "Authorization: Bearer $TOKEN" \

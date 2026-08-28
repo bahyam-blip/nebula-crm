@@ -34,6 +34,50 @@ class MailTaskEmail {
       );
 }
 
+/// One AI progress event on a task (what the mailer did and when).
+class MailTaskEvent {
+  const MailTaskEvent({
+    required this.at,
+    required this.kind,
+    required this.text,
+  });
+
+  final String at;
+  final String kind; // info | plan | write | send | error | cancel
+  final String text;
+
+  factory MailTaskEvent.fromMap(Map<String, dynamic> m) => MailTaskEvent(
+        at: (m['at'] as String?) ?? '',
+        kind: (m['kind'] as String?) ?? 'info',
+        text: (m['text'] as String?) ?? '',
+      );
+}
+
+/// Derived progress for a task (computed by the Worker).
+class MailTaskProgress {
+  const MailTaskProgress({
+    this.total = 0,
+    this.done = 0,
+    this.failed = 0,
+    this.pending = 0,
+    this.nextSendAt = '',
+  });
+
+  final int total;
+  final int done;
+  final int failed;
+  final int pending;
+  final String nextSendAt;
+
+  factory MailTaskProgress.fromMap(Map<String, dynamic> m) => MailTaskProgress(
+        total: (m['total'] as num?)?.toInt() ?? 0,
+        done: (m['done'] as num?)?.toInt() ?? 0,
+        failed: (m['failed'] as num?)?.toInt() ?? 0,
+        pending: (m['pending'] as num?)?.toInt() ?? 0,
+        nextSendAt: (m['nextSendAt'] as String?) ?? '',
+      );
+}
+
 /// An owner instruction given to the AI mailer, with its execution state.
 class MailTask {
   const MailTask({
@@ -42,18 +86,24 @@ class MailTask {
     required this.status,
     required this.createdAt,
     this.emails = const [],
+    this.events = const [],
+    this.progress = const MailTaskProgress(),
     this.error,
   });
 
   final String id;
   final String instruction;
-  final String status; // pending|planning|active|done|failed
+  final String status; // pending|planning|active|done|failed|cancelled
   final String createdAt;
   final List<MailTaskEmail> emails;
+  final List<MailTaskEvent> events;
+  final MailTaskProgress progress;
   final String? error;
 
   bool get isActive =>
       status == 'pending' || status == 'planning' || status == 'active';
+
+  bool get isCancelled => status == 'cancelled';
 
   factory MailTask.fromMap(Map<String, dynamic> m) => MailTask(
         id: (m['id'] as String?) ?? '',
@@ -64,6 +114,12 @@ class MailTask {
             .whereType<Map>()
             .map((e) => MailTaskEmail.fromMap(e.cast<String, dynamic>()))
             .toList(),
+        events: ((m['events'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => MailTaskEvent.fromMap(e.cast<String, dynamic>()))
+            .toList(),
+        progress: MailTaskProgress.fromMap(
+            ((m['progress'] as Map?) ?? const {}).cast<String, dynamic>()),
         error: m['error'] as String?,
       );
 }
@@ -170,6 +226,94 @@ class MailAnalytics {
   }
 }
 
+/// The AI mailer's long-term memory about the business — what it sells,
+/// who buys, the brand voice, and the creative playbook it has learned
+/// from real campaign results. Owner-taught facts always win.
+class MailMemory {
+  const MailMemory({
+    this.businessType = '',
+    this.industry = '',
+    this.products = const [],
+    this.audience = '',
+    this.tone = '',
+    this.offers = const [],
+    this.insights = const [],
+    this.notes = const [],
+    this.updatedAt = '',
+  });
+
+  final String businessType;
+  final String industry;
+  final List<String> products;
+  final String audience;
+  final String tone;
+  final List<String> offers;
+  final List<MailInsight> insights;
+  final List<String> notes;
+  final String updatedAt;
+
+  bool get isEmpty =>
+      businessType.isEmpty &&
+      industry.isEmpty &&
+      products.isEmpty &&
+      audience.isEmpty &&
+      tone.isEmpty &&
+      offers.isEmpty &&
+      insights.isEmpty &&
+      notes.isEmpty;
+
+  int get factCount =>
+      (businessType.isEmpty ? 0 : 1) +
+      (industry.isEmpty ? 0 : 1) +
+      (audience.isEmpty ? 0 : 1) +
+      (tone.isEmpty ? 0 : 1) +
+      products.length +
+      offers.length;
+
+  factory MailMemory.fromMap(Map<String, dynamic> m) {
+    final facts = ((m['facts'] as Map?) ?? const {}).cast<String, dynamic>();
+    List<String> strList(dynamic v) => ((v as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList();
+    return MailMemory(
+      businessType: (facts['business_type'] as String?) ?? '',
+      industry: (facts['industry'] as String?) ?? '',
+      products: strList(facts['products']),
+      audience: (facts['audience'] as String?) ?? '',
+      tone: (facts['tone'] as String?) ?? '',
+      offers: strList(facts['offers']),
+      insights: ((m['insights'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => MailInsight.fromMap(e.cast<String, dynamic>()))
+          .toList(),
+      notes: strList(m['notes']),
+      updatedAt: (m['updatedAt'] as String?) ?? '',
+    );
+  }
+}
+
+/// One learned lesson in the creative playbook.
+class MailInsight {
+  const MailInsight({
+    required this.text,
+    this.kind = 'observation',
+    this.weight = 1,
+    this.at = '',
+  });
+
+  final String text;
+  final String kind; // recommendation | subject | timing | winner | flop | ...
+  final int weight;
+  final String at;
+
+  factory MailInsight.fromMap(Map<String, dynamic> m) => MailInsight(
+        text: (m['text'] as String?) ?? '',
+        kind: (m['kind'] as String?) ?? 'observation',
+        weight: (m['weight'] as num?)?.toInt() ?? 1,
+        at: (m['at'] as String?) ?? '',
+      );
+}
+
 class MailApiException implements Exception {
   MailApiException(this.message);
   final String message;
@@ -237,7 +381,7 @@ class MailApiService {
 
     if (res.statusCode == 403) {
       throw MailApiException(
-          'Only superAdmin, admin or manager can run the AI mailer.');
+          'Your account does not have access to this feature.');
     }
     if (res.statusCode >= 400) {
       String detail = 'Mailer error (${res.statusCode}).';
@@ -275,6 +419,13 @@ class MailApiService {
     await _send('DELETE', '/v1/mail/tasks/$id');
   }
 
+  /// Cancel a live task — nothing further will send for it.
+  Future<MailTask> cancelTask(String id) async {
+    final map = await _send('POST', '/v1/mail/tasks/$id/cancel', body: {});
+    return MailTask.fromMap(
+        (map['task'] as Map?)?.cast<String, dynamic>() ?? {});
+  }
+
   Future<Map<String, dynamic>> run({bool force = false}) async {
     return _send('POST', '/v1/mail/run?force=${force ? 1 : 0}', body: {});
   }
@@ -293,6 +444,49 @@ class MailApiService {
   /// Set the owner dry-run override. `null` resets to the server default.
   Future<void> setDryRun(bool? dryRun) async {
     await _send('POST', '/v1/mail/config', body: {'dry_run': dryRun});
+  }
+
+  /// What the AI currently knows about the business (facts + playbook).
+  Future<MailMemory> memory() async {
+    final map = await _send('GET', '/v1/mail/memory');
+    return MailMemory.fromMap(
+        ((map['memory'] as Map?) ?? const {}).cast<String, dynamic>());
+  }
+
+  /// Teach the AI: structured facts and/or a free-form note. The note is
+  /// distilled into durable facts + insights by the AI on the server.
+  Future<MailMemory> teach({
+    String? businessType,
+    String? industry,
+    String? audience,
+    String? tone,
+    List<String>? products,
+    List<String>? offers,
+    String? note,
+  }) async {
+    final facts = <String, dynamic>{
+      if (businessType != null && businessType.trim().isNotEmpty)
+        'business_type': businessType.trim(),
+      if (industry != null && industry.trim().isNotEmpty)
+        'industry': industry.trim(),
+      if (audience != null && audience.trim().isNotEmpty) 'audience': audience.trim(),
+      if (tone != null && tone.trim().isNotEmpty) 'tone': tone.trim(),
+      if (products != null && products.where((p) => p.trim().isNotEmpty).isNotEmpty)
+        'products': products,
+      if (offers != null && offers.where((o) => o.trim().isNotEmpty).isNotEmpty)
+        'offers': offers,
+    };
+    final map = await _send('POST', '/v1/mail/memory', body: {
+      if (facts.isNotEmpty) 'facts': facts,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+    });
+    return MailMemory.fromMap(
+        ((map['memory'] as Map?) ?? const {}).cast<String, dynamic>());
+  }
+
+  /// Wipe the business memory (the AI starts learning from scratch).
+  Future<void> resetMemory() async {
+    await _send('POST', '/v1/mail/memory/reset', body: {});
   }
 
   /// Send ONE real email to [to] through the transactional endpoint

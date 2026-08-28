@@ -121,6 +121,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
             builder: (_, __) => const AiAssistantScreen(),
           ),
           GoRoute(
+            path: '/ai-emailer',
+            name: 'aiEmailer',
+            builder: (_, __) => const AiEmailerScreen(),
+          ),
+          GoRoute(
             path: AppRoutes.more,
             name: 'more',
             builder: (_, __) => const _MoreScreen(),
@@ -203,11 +208,6 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         path: '/campaigns',
         name: 'campaigns',
         builder: (_, __) => const CampaignsScreen(),
-      ),
-      GoRoute(
-        path: '/ai-emailer',
-        name: 'aiEmailer',
-        builder: (_, __) => const AiEmailerScreen(),
       ),
       GoRoute(
         path: '/campaigns/new',

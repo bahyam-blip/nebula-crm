@@ -10,6 +10,7 @@
 
 import { sarvamChat } from './sarvam.js';
 import { esc, htmlToText } from './http.js';
+import { memoryContext } from './memory.js';
 
 const COPY_SCHEMA_PROMPT = `Return ONLY a JSON object:
 {
@@ -24,8 +25,26 @@ const COPY_SCHEMA_PROMPT = `Return ONLY a JSON object:
 }
 Rules: no fake statistics, no fake testimonials, no invented customer names, no false scarcity.`;
 
+/**
+ * The creative playbook — what separates an elite email marketer from a
+ * template-filler. Injected as system-level craft guidance for every email.
+ */
+const CREATIVE_PLAYBOOK = `CRAFT RULES (this is what gets opens and clicks):
+- SUBJECT: open with a curiosity gap or a specific, concrete outcome. Proven formulas:
+  question ("Still printing invoices by hand?"), specific number ("3 tweaks that lifted our demos 40%"),
+  loss-avoidance ("Your leads are cooling off"), insider/news ("We just shipped something for you"),
+  personal/story ("I almost quit. Then this happened"). Pick the formula that fits THIS email's angle.
+- PREHEADER must ADD information, never repeat the subject. Think of subject+preheader as a 2-line ad.
+- INTRO: first line must earn the second. No "Hope this email finds you well". Jump straight into the reader's world.
+- BODY: ONE core idea per email. Concrete > abstract: paint the before/after, use the reader's vocabulary.
+- CTA: one email, ONE action. Verb-first, low-friction ("See it in action" beats "Submit").
+- P.S. is prime real estate: restate the payoff or add urgency honestly (a real deadline only).
+- VOICE: match the brand voice from memory/brief. Write like a sharp human, not a marketer. Short sentences win.
+- AVOID: spam trigger words in subject (FREE!!!, guaranteed, act now), emoji carpets, ALL CAPS words,
+  generic filler ("we are pleased to announce"), fake urgency, wall-of-text paragraphs.`;
+
 /** Generate the email copy for one planned email. */
-export async function writeEmail(env, task, planEmail, brief, learnings) {
+export async function writeEmail(env, task, planEmail, brief, learnings, memory = null) {
   const learn = learnings
     ? `Analytics learnings from past campaigns (maximise for):\n${JSON.stringify({
         recommendations: learnings.recommendations || [],
@@ -34,11 +53,15 @@ export async function writeEmail(env, task, planEmail, brief, learnings) {
       }).slice(0, 1000)}`
     : 'No analytics yet — use proven email best practices.';
 
+  const memoryBlock = memoryContext(memory);
+
   const user = [
     'Write ONE high-engagement marketing email.',
     '',
     'BUSINESS:',
     JSON.stringify(brief),
+    '',
+    memoryBlock ? `BUSINESS MEMORY (owner-taught facts + proven plays for THIS business — follow them):\n${memoryBlock}` : '',
     '',
     'THIS EMAIL:',
     JSON.stringify(planEmail),
@@ -51,12 +74,12 @@ export async function writeEmail(env, task, planEmail, brief, learnings) {
     learn,
     '',
     COPY_SCHEMA_PROMPT,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const copy = await sarvamChat(
     env,
     [
-      { role: 'system', content: 'You are an elite direct-response email copywriter. Your emails get opened because they are specific, honest and human — never spammy. You always reply with valid JSON.' },
+      { role: 'system', content: `You are an elite direct-response email copywriter and creative strategist. Your emails get opened because they are specific, honest and human — never spammy. You invent fresh angles (story hooks, pattern interrupts, bold specific promises) instead of recycling generic marketing phrases. You always reply with valid JSON.\n\n${CREATIVE_PLAYBOOK}` },
       { role: 'user', content: user },
     ],
     { json: true, temperature: 0.8, maxTokens: 2500 }

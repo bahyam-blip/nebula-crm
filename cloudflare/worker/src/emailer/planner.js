@@ -10,6 +10,7 @@
 
 import { sarvamChat } from './sarvam.js';
 import { fetchWithBackoff } from './http.js';
+import { getMemory, memoryContext } from './memory.js';
 
 const BRIEF_SCHEMA_PROMPT = `Return ONLY a JSON object:
 {
@@ -121,21 +122,39 @@ export async function buildBusinessBrief(env, kv, { crmStats = null, recentInstr
 
   brief.generatedAt = new Date().toISOString();
   brief.source = profileGiven ? 'owner-profile' : site ? 'website' : inferred ? 'crm-inferred' : 'guess';
+
+  // Owner-taught Business Memory always outranks AI inference.
+  try {
+    const mem = await getMemory(kv);
+    const f = mem.facts || {};
+    if (f.business_type) brief.business_type = f.business_type;
+    if (f.industry) brief.industry = f.industry;
+    if (f.audience) brief.target_audience = f.audience;
+    if (f.tone) brief.tone = f.tone;
+    if (f.products?.length) brief.products = f.products;
+    if (f.offers?.length) brief.offers = f.offers;
+    if (f.business_type) brief.source = 'business-memory';
+  } catch { /* memory is best-effort */ }
+
   if (kv) await kv.put('biz:brief', JSON.stringify(brief), { expirationTtl: 60 * 60 * 24 * 7 });
   return brief;
 }
 
 /** Step 2 — turn an owner instruction into an executable multi-email plan. */
-export async function planTask(env, kv, task, brief, learnings, contactStats) {
+export async function planTask(env, kv, task, brief, learnings, contactStats, memory = null) {
   const learn = learnings && (learnings.recommendations?.length || learnings.observations?.length)
     ? `Past-campaign learnings (apply them):\n${JSON.stringify(learnings).slice(0, 1200)}`
     : 'No past analytics yet — use marketing best practice.';
+
+  const memoryBlock = memoryContext(memory);
 
   const user = [
     `Current time: ${new Date().toISOString()} (business timezone: ${env.MAIL_TIMEZONE || 'Asia/Calcutta'}).`,
     '',
     'BUSINESS BRIEF:',
     JSON.stringify(brief),
+    '',
+    memoryBlock ? `BUSINESS MEMORY (owner-taught facts + what already worked — this outranks the brief):\n${memoryBlock}` : '',
     '',
     'CRM AUDIENCE (contacts collection):',
     JSON.stringify(contactStats),
@@ -151,10 +170,12 @@ export async function planTask(env, kv, task, brief, learnings, contactStats) {
     `- If the task gives no recipient count, cap at ${contactStats.total}.`,
     `- sendAt must be in the future, between 08:00-20:00 in ${env.MAIL_TIMEZONE || 'Asia/Calcutta'}, never all at the same minute.`,
     '- Vary angles across emails (story → proof → urgency, etc.).',
+    '- Detect the campaign type (promotion, introduction, re-engagement, announcement, newsletter, follow-up) and let it shape the angles.',
+    '- Reuse angles from the CREATIVE PLAYBOOK that are marked WINNER. Never repeat subjects of FLOP emails or of the recent campaign focus list.',
     '- The audience.segment MUST be one of the CRM statuses shown in contact_stats.segments, or null for everyone.',
     '',
     PLAN_SCHEMA_PROMPT,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const plan = await sarvamChat(
     env,
