@@ -341,13 +341,25 @@ jobs:
           # 2) Mint a Firebase custom token for that uid, exchange for an
           #    ID token (same identity the Flutter app would present).
           now = int(time.time())
-          custom = google.auth.jwt.encode({
+          payload = {
               "iss": creds.service_account_email,
               "sub": creds.service_account_email,
               "aud": "https://identitytoolkit.googleapis.com/"
                      "google.identity.identitytoolkit.v1.IdentityToolkit",
               "iat": now, "exp": now + 3500, "uid": uid,
-          }, creds.signer, algorithm="RS256")
+          }
+          try:
+              # google-auth >= 2.38: encode(signer, payload) -> bytes
+              try:
+                  custom = google.auth.jwt.encode(creds.signer, payload)
+              except TypeError:
+                  # older releases: encode(payload, signer, algorithm=...)
+                  custom = google.auth.jwt.encode(payload, creds.signer, algorithm="RS256")
+              if isinstance(custom, bytes):
+                  custom = custom.decode("ascii")
+          except Exception as e:
+              say(f"custom-token signing failed: {type(e).__name__}: {e}")
+              raise SystemExit(0)
 
           id_token = None
           last_err = None
