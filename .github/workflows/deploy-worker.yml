@@ -154,6 +154,33 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ── Ensure the D1 database exists (the Firestore replacement) ──
+      # Create-if-missing, then read the real UUID back and inject it into
+      # wrangler.toml for THIS deploy only (the repo never carries an
+      # account-specific id). Then apply the schema (idempotent).
+      - name: Ensure D1 database + schema
+        working-directory: cloudflare/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: af3007244dc00e001004045fd488b42b
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set."
+            exit 1
+          fi
+          npx --yes wrangler@latest d1 create nebula-crm-db 2>&1 | tail -2 || \
+            echo "::warning::D1 database already exists (or create failed — continuing)"
+          D1_ID=$(npx --yes wrangler@latest d1 info nebula-crm-db --json 2>/dev/null \
+            | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+          if [ -z "$D1_ID" ]; then
+            echo "::error::Could not resolve D1 database UUID."
+            exit 1
+          fi
+          echo "::warning::D1 database nebula-crm-db = $D1_ID"
+          sed -i "s/D1_DATABASE_ID/$D1_ID/" wrangler.toml
+          npx --yes wrangler@latest d1 execute nebula-crm-db --remote --file schema.sql -y 2>&1 | tail -3
+          echo "::warning::D1 schema applied"
+
       - name: Deploy worker
         working-directory: cloudflare/worker
         env:
@@ -407,5 +434,70 @@ jobs:
                       f"provider={json.dumps(body.get('provider'))[:400]}")
           except Exception as e:
               say(f"/v1/mail/test failed: {e}")
+          PYEOF
+          rm -f /tmp/sa.json
+
+      # ── One-time data migration: Firestore → D1 ──────────────────────────
+      # Mints a token for the workspace owner (superAdmin in Firestore) and
+      # asks the Worker to copy every collection into D1. Idempotent: the
+      # Worker skips itself once a 'migrated_at' marker exists (force=1
+      # re-runs). Failure never blocks shipping.
+      - name: Migrate CRM data Firestore -> D1
+        if: always()
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_WEB_API_KEY: AIzaSyAmI0s71dkSfGrDo2mOrmgCUXk8UUYK2Fs
+          FIREBASE_ANDROID_API_KEY: AIzaSyAvFw7TrlgwwKsivkcv_lEOwHutWpRcDYc
+          WORKER_URL: https://nebula-crm-storage.nebula-crm.workers.dev
+          MIGRATE_UID: JAx9p511pYgXdHDNEenbxiXDP4i1
+        run: |
+          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || { echo "::warning::MIGRATE skipped — no service account"; exit 0; }
+          pip install --quiet google-auth requests
+          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json python3 - <<'PYEOF'
+          import os, time, json
+          import requests
+          import google.auth
+          import google.auth.jwt
+          import google.auth.transport.requests as gtr
+
+          WORKER = os.environ["WORKER_URL"]
+          UID = os.environ["MIGRATE_UID"]
+          KEYS = [os.environ.get("FIREBASE_WEB_API_KEY", ""), os.environ.get("FIREBASE_ANDROID_API_KEY", "")]
+
+          def say(msg): print(f"::warning::MIGRATE {msg}")
+
+          try:
+              creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/datastore"])
+              creds.refresh(gtr.Request())
+          except Exception as e:
+              say(f"service account auth failed: {e}"); raise SystemExit(0)
+
+          now = int(time.time())
+          payload = {"iss": creds.service_account_email, "sub": creds.service_account_email,
+                     "aud": "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit",
+                     "iat": now, "exp": now + 3500, "uid": UID}
+          try:
+              try:
+                  custom = google.auth.jwt.encode(creds.signer, payload)
+              except TypeError:
+                  custom = google.auth.jwt.encode(payload, creds.signer, algorithm="RS256")
+              if isinstance(custom, bytes): custom = custom.decode("ascii")
+          except Exception as e:
+              say(f"custom-token signing failed: {e}"); raise SystemExit(0)
+
+          id_token = None
+          for key in [k for k in KEYS if k]:
+              r = requests.post("https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken",
+                                params={"key": key}, json={"token": custom, "returnSecureToken": True}, timeout=30)
+              if r.ok:
+                  id_token = r.json().get("idToken"); break
+          if not id_token:
+              say("custom-token exchange failed"); raise SystemExit(0)
+
+          r = requests.post(f"{WORKER}/v1/admin/migrate-from-firestore",
+                            headers={"Authorization": f"Bearer {id_token}"}, json={}, timeout=300)
+          body = r.json() if "json" in r.headers.get("content-type", "") else {"raw": r.text[:300]}
+          say(f"migration HTTP {r.status_code}: {json.dumps(body)[:600]}")
           PYEOF
           rm -f /tmp/sa.json

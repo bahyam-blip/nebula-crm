@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/services/remote/data_codec.dart';
+
 /// Marketing campaign channel.
 enum CampaignChannel { email, sms, push, inApp, whatsapp }
 
@@ -62,8 +64,8 @@ class Campaign extends Equatable {
   final DateTime? updatedAt;
   final List<String> tags;
 
-  factory Campaign.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Campaign.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Campaign(
       id: doc.id,
       name: data['name'] as String? ?? '',
@@ -123,8 +125,8 @@ class Campaign extends Equatable {
         'metrics': metrics.toMap(),
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
         'tags': tags,
       };
 

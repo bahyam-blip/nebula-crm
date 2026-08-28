@@ -1,14 +1,14 @@
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
-import '../constants/app_constants.dart';
 import 'notification_service.dart';
+import 'remote/data_api.dart';
+import 'remote/data_codec.dart';
 import 'storage_service.dart' show kStorageBaseUrl;
 
 /// Cross-user push, delivered through Cloudflare rather than Cloud Functions.
@@ -19,10 +19,10 @@ import 'storage_service.dart' show kStorageBaseUrl;
 /// app only ever says "tell these people this" — it cannot address devices
 /// directly, because it never sees anyone else's tokens.
 class PushService {
-  PushService(this._db, {http.Client? client})
+  PushService(this._ds, {http.Client? client})
       : _client = client ?? http.Client();
 
-  final FirebaseFirestore _db;
+  final RemoteDataSource _ds;
   final http.Client _client;
 
   static final String _baseUrl =
@@ -68,9 +68,9 @@ class PushService {
 
   Future<void> _saveToken(String uid, String token) async {
     try {
-      await _db.collection(AppConstants.colUsers).doc(uid).set({
-        'fcmTokens': FieldValue.arrayUnion([token]),
-      }, SetOptions(merge: true));
+      await _ds.update('users', uid, {
+        'fcmTokens': ArrayUnion([token]),
+      });
     } catch (_) {}
   }
 
@@ -81,9 +81,9 @@ class PushService {
       final user = FirebaseAuth.instance.currentUser;
       final token = await FirebaseMessaging.instance.getToken();
       if (user == null || token == null) return;
-      await _db.collection(AppConstants.colUsers).doc(user.uid).set({
-        'fcmTokens': FieldValue.arrayRemove([token]),
-      }, SetOptions(merge: true));
+      await _ds.update('users', user.uid, {
+        'fcmTokens': ArrayRemove([token]),
+      });
     } catch (_) {}
   }
 
@@ -132,5 +132,5 @@ class PushService {
 }
 
 final pushServiceProvider = Provider<PushService>((ref) {
-  return PushService(FirebaseFirestore.instance);
+  return PushService(ref.watch(remoteDataServiceProvider));
 });

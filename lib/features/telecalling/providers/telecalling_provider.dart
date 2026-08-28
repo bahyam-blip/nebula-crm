@@ -1,8 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
 import '../../auth/models/app_user.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../contacts/models/call_status.dart';
@@ -11,19 +10,20 @@ import '../models/call_log.dart';
 import '../services/telecalling_service.dart';
 
 final telecallingServiceProvider = Provider<TelecallingService>((ref) {
-  return TelecallingService(ref.watch(firestoreProvider));
+  return TelecallingService(ref.watch(remoteDataServiceProvider));
 });
 
 /// Everyone on the current user's team.
 final teamMembersListProvider = StreamProvider<List<AppUser>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <AppUser>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colUsers)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(AppUser.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colUsers, where: [WhereEq('teamId', teamId)], limit: 200)
+        .then((docs) => docs.map(AppUser.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });
 
 /// Leads assigned to the signed-in telecaller.
@@ -34,25 +34,27 @@ final teamMembersListProvider = StreamProvider<List<AppUser>>((ref) {
 final myLeadsProvider = StreamProvider<List<Contact>>((ref) {
   final uid = ref.watch(currentUserIdProvider);
   if (uid.isEmpty) return Stream.value(const <Contact>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colContacts)
-      .where('teamId', isEqualTo: ref.watch(currentTeamIdProvider))
-      .where('assignedTo', isEqualTo: uid)
-      .snapshots()
-      .map((s) => s.docs.map(Contact.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colContacts, where: [
+          WhereEq('teamId', ref.watch(currentTeamIdProvider)),
+          WhereEq('assignedTo', uid),
+        ], limit: 500)
+        .then((docs) => docs.map(Contact.fromFirestore).toList()),
+  );
 });
 
 /// All leads belonging to the team (managers and above).
 final teamLeadsProvider = StreamProvider<List<Contact>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <Contact>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colContacts)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(Contact.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colContacts, where: [WhereEq('teamId', teamId)], limit: 500)
+        .then((docs) => docs.map(Contact.fromFirestore).toList()),
+  );
 });
 
 /// How the telecaller's queue is filtered.
@@ -119,30 +121,32 @@ final myQueueProvider = Provider<List<Contact>>((ref) {
 /// Call history for one contact, newest first.
 final contactCallLogsProvider =
     StreamProvider.family<List<CallLog>, String>((ref, contactId) {
-  return ref
-      .watch(firestoreProvider)
-      .collection(TeleCollections.callLogs)
-      .where('teamId', isEqualTo: ref.watch(currentTeamIdProvider))
-      .where('contactId', isEqualTo: contactId)
-      .snapshots()
-      .map((s) {
-    final logs = s.docs.map(CallLog.fromFirestore).toList()
-      ..sort((a, b) => (b.createdAt ?? DateTime(0))
-          .compareTo(a.createdAt ?? DateTime(0)));
-    return logs;
-  });
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () async {
+      final docs = await ds.list(TeleCollections.callLogs, where: [
+        WhereEq('teamId', ref.watch(currentTeamIdProvider)),
+        WhereEq('contactId', contactId),
+      ], limit: 100);
+      final logs = docs.map(CallLog.fromFirestore).toList()
+        ..sort((a, b) => (b.createdAt ?? DateTime(0))
+            .compareTo(a.createdAt ?? DateTime(0)));
+      return logs;
+    },
+    interval: const Duration(seconds: 30),
+  );
 });
 
 /// Team-wide call logs, used by the manager dashboard.
 final teamCallLogsProvider = StreamProvider<List<CallLog>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <CallLog>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(TeleCollections.callLogs)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(CallLog.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(TeleCollections.callLogs, where: [WhereEq('teamId', teamId)], limit: 500)
+        .then((docs) => docs.map(CallLog.fromFirestore).toList()),
+  );
 });
 
 /// How far back the dashboard looks.
@@ -192,29 +196,37 @@ final callsPerDayProvider = Provider<List<int>>((ref) {
 
 /// Every user across every team. Super admin only.
 final allUsersGlobalProvider = StreamProvider<List<AppUser>>((ref) {
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colUsers)
-      .snapshots()
-      .map((s) => s.docs.map(AppUser.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colUsers, limit: 500)
+        .then((docs) => docs.map(AppUser.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });
 
 /// Recent privileged actions, newest first.
 final auditLogProvider = StreamProvider<List<AuditEntry>>((ref) {
-  return ref
-      .watch(firestoreProvider)
-      .collection(TeleCollections.auditLogs)
-      .orderBy('createdAt', descending: true)
-      .limit(100)
-      .snapshots()
-      .map((s) => s.docs.map(AuditEntry.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () async {
+      final docs = await ds.list(TeleCollections.auditLogs, limit: 100);
+      final list = docs.map(AuditEntry.fromFirestore).toList()
+        ..sort((a, b) => (b.createdAt ?? DateTime(0))
+            .compareTo(a.createdAt ?? DateTime(0)));
+      return list;
+    },
+    interval: const Duration(seconds: 45),
+  );
 });
 
 /// Lead totals per team, for the cross-team overview.
 final allContactsGlobalProvider = StreamProvider<List<Contact>>((ref) {
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colContacts)
-      .snapshots()
-      .map((s) => s.docs.map(Contact.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colContacts, limit: 500)
+        .then((docs) => docs.map(Contact.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });

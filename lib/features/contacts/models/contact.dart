@@ -3,6 +3,7 @@ import 'package:equatable/equatable.dart';
 
 import 'call_status.dart';
 
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/models/app_user.dart';
 
 /// Contact lifecycle stage.
@@ -99,8 +100,8 @@ class Contact extends Equatable {
   bool get isFollowUpDue =>
       followUpAt != null && followUpAt!.isBefore(DateTime.now());
 
-  factory Contact.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Contact.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Contact(
       id: doc.id,
       name: data['name'] as String? ?? '',
@@ -161,11 +162,11 @@ class Contact extends Equatable {
         'lifetimeValue': lifetimeValue,
         'lastActivityAt': lastActivityAt != null
             ? Timestamp.fromDate(lastActivityAt!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
         'customFields': customFields,
         'activityCount': activityCount,
         'assignedTo': assignedTo,
@@ -278,8 +279,8 @@ class Activity extends Equatable {
   final Map<String, dynamic> metadata;
   final DateTime? timestamp;
 
-  factory Activity.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Activity.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Activity(
       id: doc.id,
       type: data['type'] as String? ?? 'note',
@@ -307,7 +308,7 @@ class Activity extends Equatable {
         'metadata': metadata,
         'timestamp': timestamp != null
             ? Timestamp.fromDate(timestamp!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
       };
 
   @override

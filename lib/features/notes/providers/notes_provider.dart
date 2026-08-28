@@ -2,7 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/providers/auth_provider.dart';
 
 /// A note or an attached document.
@@ -43,8 +44,8 @@ class CrmNote {
 
   bool get isDocument => (fileUrl ?? '').isNotEmpty;
 
-  factory CrmNote.fromFirestore(DocumentSnapshot doc) {
-    final d = doc.data() as Map<String, dynamic>? ?? {};
+  factory CrmNote.fromFirestore(DataDoc doc) {
+    final d = doc.data;
     return CrmNote(
       id: doc.id,
       body: d['body'] as String? ?? '',
@@ -72,26 +73,26 @@ class CrmNote {
         'fileName': fileName,
         'fileSize': fileSize,
         'pinned': pinned,
-        'createdAt': FieldValue.serverTimestamp(),
+        'createdAt': const ServerTimestamp(),
       };
 }
 
 class NotesService {
-  NotesService(this._db);
-  final FirebaseFirestore _db;
+  NotesService(this._ds);
+  final RemoteDataSource _ds;
 
   Future<void> add(CrmNote note) =>
-      _db.collection(AppConstants.colNotes).add(note.toFirestore());
+      _ds.set(AppConstants.colNotes, null, note.toFirestore());
 
   Future<void> delete(String id) =>
-      _db.collection(AppConstants.colNotes).doc(id).delete();
+      _ds.delete(AppConstants.colNotes, id);
 
   Future<void> togglePin(String id, bool pinned) =>
-      _db.collection(AppConstants.colNotes).doc(id).update({'pinned': pinned});
+      _ds.update(AppConstants.colNotes, id, {'pinned': pinned});
 }
 
 final notesServiceProvider = Provider<NotesService>((ref) {
-  return NotesService(ref.watch(firestoreProvider));
+  return NotesService(ref.watch(remoteDataServiceProvider));
 });
 
 /// Notes and documents for one record, pinned first then newest.
@@ -100,29 +101,33 @@ final notesServiceProvider = Provider<NotesService>((ref) {
 final notesForProvider =
     StreamProvider.family<List<CrmNote>, String>((ref, parentId) {
   if (parentId.isEmpty) return Stream.value(const <CrmNote>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colNotes)
-      .where('parentId', isEqualTo: parentId)
-      .snapshots()
-      .map((s) {
-    final list = s.docs.map(CrmNote.fromFirestore).toList()
-      ..sort((a, b) {
-        if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
-        return (b.createdAt ?? DateTime(0))
-            .compareTo(a.createdAt ?? DateTime(0));
-      });
-    return list;
-  });
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () async {
+      final docs = await ds.list(
+        AppConstants.colNotes,
+        where: [WhereEq('parentId', parentId)],
+        limit: 100,
+      );
+      final list = docs.map(CrmNote.fromFirestore).toList()
+        ..sort((a, b) {
+          if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+          return (b.createdAt ?? DateTime(0))
+              .compareTo(a.createdAt ?? DateTime(0));
+        });
+      return list;
+    },
+    interval: const Duration(seconds: 30),
+  );
 });
 
 final teamNotesProvider = StreamProvider<List<CrmNote>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <CrmNote>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colNotes)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(CrmNote.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colNotes, where: [WhereEq('teamId', teamId)], limit: 200)
+        .then((docs) => docs.map(CrmNote.fromFirestore).toList()),
+  );
 });

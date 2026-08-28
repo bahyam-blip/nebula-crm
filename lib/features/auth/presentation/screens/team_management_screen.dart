@@ -1,11 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/app_user.dart';
 import '../../providers/auth_provider.dart';
 import '../../../../core/constants/app_constants.dart';
-import '../../../../core/services/firestore_service.dart';
+import '../../../../core/services/remote/data_api.dart';
+import '../../../../core/services/remote/data_codec.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/formatters.dart';
@@ -18,20 +18,25 @@ final teamMembersProvider = StreamProvider<List<AppUser>>((ref) async* {
     yield [];
     return;
   }
-  final db = FirebaseFirestore.instance;
-  yield* db
-      .collection(AppConstants.colUsers)
-      .where('teamId', isEqualTo: currentUser.teamId)
-      .snapshots()
-      .map((snap) => snap.docs.map((d) => AppUser.fromFirestore(d)).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  yield* ds.watchList(
+    () => ds
+        .list(AppConstants.colUsers,
+            where: [WhereEq('teamId', currentUser.teamId!)], limit: 200)
+        .then((docs) => docs.map(AppUser.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });
 
 /// All users across all teams — superAdmin only.
 final allUsersProvider = StreamProvider<List<AppUser>>((ref) {
-  return FirebaseFirestore.instance
-      .collection(AppConstants.colUsers)
-      .snapshots()
-      .map((snap) => snap.docs.map((d) => AppUser.fromFirestore(d)).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colUsers, limit: 500)
+        .then((docs) => docs.map(AppUser.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });
 
 class TeamManagementScreen extends ConsumerWidget {
@@ -95,12 +100,9 @@ class TeamManagementScreen extends ConsumerWidget {
     BuildContext context,
   ) async {
     try {
-      await FirebaseFirestore.instance
-          .collection(AppConstants.colUsers)
-          .doc(user.id)
-          .update({
+      await ref.read(remoteDataServiceProvider).update('users', user.id, {
         'role': newRole.name,
-        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': const ServerTimestamp(),
       });
       if (!context.mounted) return;
       context.showSuccess('${user.displayName} is now ${newRole.label}');
@@ -138,10 +140,7 @@ class TeamManagementScreen extends ConsumerWidget {
     );
     if (confirmed != true) return;
     try {
-      await FirebaseFirestore.instance
-          .collection(AppConstants.colUsers)
-          .doc(user.id)
-          .delete();
+      await ref.read(remoteDataServiceProvider).delete('users', user.id);
       if (!context.mounted) return;
       context.showSuccess('User removed');
     } catch (e) {

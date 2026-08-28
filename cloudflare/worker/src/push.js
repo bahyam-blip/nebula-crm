@@ -98,60 +98,44 @@ export async function getAccessToken(env) {
   return tokenCache.value;
 }
 
-/** Pull the device tokens recorded on a user document. */
+/** Pull the device tokens recorded on a user document (D1). */
 export async function deviceTokensFor(env, accessToken, uid) {
-  const url =
-    `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}` +
-    `/databases/(default)/documents/users/${encodeURIComponent(uid)}`;
-
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) return [];
-
-  const doc = await res.json();
-  const field = doc?.fields?.fcmTokens?.arrayValue?.values || [];
-  return field.map((v) => v.stringValue).filter(Boolean);
+  if (!env.DB) return [];
+  try {
+    const row = await env.DB
+      .prepare("SELECT json FROM docs WHERE col = 'users' AND id = ?")
+      .bind(uid)
+      .first();
+    if (!row) return [];
+    const data = JSON.parse(row.json);
+    return Array.isArray(data.fcmTokens) ? data.fcmTokens.filter(Boolean) : [];
+  } catch (e) {
+    console.warn(`[push:d1] token lookup failed for ${uid}: ${e.message}`);
+    return [];
+  }
 }
 
-/** Everyone on a team, optionally narrowed to a role. */
+/** Everyone on a team, optionally narrowed to a role (D1). */
 export async function teamMemberIds(env, accessToken, teamId, role) {
-  const url =
-    `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}` +
-    `/databases/(default)/documents:runQuery`;
-
-  const body = {
-    structuredQuery: {
-      from: [{ collectionId: 'users' }],
-      where: {
-        fieldFilter: {
-          field: { fieldPath: 'teamId' },
-          op: 'EQUAL',
-          value: { stringValue: teamId },
-        },
-      },
-      limit: 500,
-    },
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) return [];
-
-  const rows = await res.json();
-  return rows
-    .filter((r) => r.document)
-    .filter((r) => {
-      if (!role) return true;
-      return r.document.fields?.role?.stringValue === role;
-    })
-    .map((r) => r.document.name.split('/').pop());
+  if (!env.DB) return [];
+  try {
+    const { results } = await env.DB
+      .prepare(
+        `SELECT id, json FROM docs WHERE col = 'users' AND team_id = ? LIMIT 500`
+      )
+      .bind(teamId)
+      .all();
+    return (results || [])
+      .map((r) => {
+        try { return { id: r.id, role: JSON.parse(r.json).role }; } catch { return null; }
+      })
+      .filter(Boolean)
+      .filter((u) => !role || u.role === role)
+      .map((u) => u.id);
+  } catch (e) {
+    console.warn(`[push:d1] team lookup failed for ${teamId}: ${e.message}`);
+    return [];
+  }
 }
 
 /**

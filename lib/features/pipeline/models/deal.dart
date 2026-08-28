@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
 import '../../../core/constants/app_constants.dart' show AppConstants;
+import '../../../core/services/remote/data_codec.dart';
 
 /// Sales pipeline stage — kept as string for Firestore flexibility.
 typedef DealStage = String;
@@ -65,8 +66,8 @@ class Deal extends Equatable {
   bool get isWon => stage == 'won';
   bool get isLost => stage == 'lost';
 
-  factory Deal.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Deal.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Deal(
       id: doc.id,
       title: data['title'] as String? ?? '',
@@ -118,8 +119,8 @@ class Deal extends Equatable {
         'weightedValue': weightedValue,
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
         'closedReason': closedReason,
       };
 

@@ -1,11 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firebase_boot.dart';
-import '../../../../core/services/firestore_service.dart';
+import '../../../../core/services/remote/data_api.dart';
+import '../../../../core/services/remote/data_codec.dart';
 import '../../../../core/services/storage_service.dart';
 import 'package:go_router/go_router.dart';
 
@@ -364,13 +364,9 @@ Future<void> _changeAvatar(
         );
 
     await withFirestoreRetry(
-      () => ref
-          .read(firestoreProvider)
-          .collection(AppConstants.colUsers)
-          .doc(uid)
-          .update({
+      () => ref.read(remoteDataServiceProvider).update('users', uid, {
         'photoUrl': url,
-        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': const ServerTimestamp(),
       }),
     );
 

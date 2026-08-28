@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/services/remote/data_codec.dart';
+
 /// Role of a chat message sender.
 enum ChatRole { user, assistant, system, tool }
 
@@ -48,8 +50,8 @@ class ChatMessage extends Equatable {
   final String? modelUsed;
   final List<String> citations;
 
-  factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory ChatMessage.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return ChatMessage(
       id: doc.id,
       role: parseChatRole(data['role'] as String?),
@@ -70,7 +72,7 @@ class ChatMessage extends Equatable {
         'content': content,
         'timestamp': timestamp != null
             ? Timestamp.fromDate(timestamp!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
         'metadata': metadata,
         'attachments': attachments,
         'isStreaming': isStreaming,
@@ -205,8 +207,8 @@ class Insight extends Equatable {
     return 'Low confidence';
   }
 
-  factory Insight.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Insight.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Insight(
       id: doc.id,
       type: InsightType.values.firstWhere(
@@ -250,7 +252,7 @@ class Insight extends Equatable {
         'metadata': metadata,
         'generatedAt': generatedAt != null
             ? Timestamp.fromDate(generatedAt!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
         'expiresAt':
             expiresAt != null ? Timestamp.fromDate(expiresAt!) : null,
       };

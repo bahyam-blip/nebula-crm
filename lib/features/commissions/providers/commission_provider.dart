@@ -2,23 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/models/app_user.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../telecalling/providers/telecalling_provider.dart';
 import '../models/commission.dart';
 
 class CommissionService {
-  CommissionService(this._db);
-  final FirebaseFirestore _db;
-
-  DocumentReference<Map<String, dynamic>> _settingsRef(String teamId) =>
-      _db.collection(AppConstants.colSettings).doc(teamId);
+  CommissionService(this._ds);
+  final RemoteDataSource _ds;
 
   Future<CommissionSettings> loadSettings(String teamId) async {
     try {
-      final doc = await _settingsRef(teamId).get();
-      return CommissionSettings.fromMap(doc.data());
+      final doc = await _ds.get(AppConstants.colSettings, teamId);
+      return CommissionSettings.fromMap(doc?.data ?? const {});
     } catch (_) {
       return const CommissionSettings();
     }
@@ -29,9 +27,10 @@ class CommissionService {
     CommissionSettings settings,
     String actorId,
   ) async {
-    await _settingsRef(teamId).set(
+    await _ds.set(
+      AppConstants.colSettings,
+      teamId,
       {...settings.toMap(), 'updatedBy': actorId},
-      SetOptions(merge: true),
     );
   }
 
@@ -50,16 +49,16 @@ class CommissionService {
 
     // One commission per contact: re-marking a lead converted must not pay
     // twice.
-    final existing = await _db
-        .collection(AppConstants.colCommissions)
-        .where('contactId', isEqualTo: contactId)
-        .limit(1)
-        .get();
-    if (existing.docs.isNotEmpty) return;
+    final existing = await _ds.list(
+      AppConstants.colCommissions,
+      where: [WhereEq('contactId', contactId)],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return;
 
     final settings = await loadSettings(teamId);
 
-    await _db.collection(AppConstants.colCommissions).add(
+    await _ds.set(AppConstants.colCommissions, null, 
           Commission(
             id: '',
             teamId: teamId,
@@ -75,16 +74,16 @@ class CommissionService {
   }
 
   Future<void> setStatus(String id, CommissionStatus status) =>
-      _db.collection(AppConstants.colCommissions).doc(id).update({
+      _ds.update(AppConstants.colCommissions, id, {
         'status': status.name,
         'settledAt': status == CommissionStatus.paid
-            ? FieldValue.serverTimestamp()
+            ? const ServerTimestamp()
             : null,
       });
 }
 
 final commissionServiceProvider = Provider<CommissionService>((ref) {
-  return CommissionService(ref.watch(firestoreProvider));
+  return CommissionService(ref.watch(remoteDataServiceProvider));
 });
 
 final commissionSettingsProvider =
@@ -98,17 +97,20 @@ final commissionSettingsProvider =
 final teamCommissionsProvider = StreamProvider<List<Commission>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <Commission>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colCommissions)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) {
-    final list = s.docs.map(Commission.fromFirestore).toList()
-      ..sort((a, b) =>
-          (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
-    return list;
-  });
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () async {
+      final docs = await ds.list(
+        AppConstants.colCommissions,
+        where: [WhereEq('teamId', teamId)],
+        limit: 300,
+      );
+      final list = docs.map(Commission.fromFirestore).toList()
+        ..sort((a, b) =>
+            (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+      return list;
+    },
+  );
 });
 
 /// Just mine, for the earnings screen.

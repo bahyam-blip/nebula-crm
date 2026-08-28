@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/services/remote/data_codec.dart';
 import '../../contacts/models/call_status.dart';
 
 /// A single call attempt made by a telecaller against a contact.
@@ -35,8 +36,8 @@ class CallLog extends Equatable {
   final DateTime? followUpAt;
   final DateTime? createdAt;
 
-  factory CallLog.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
+  factory CallLog.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return CallLog(
       id: doc.id,
       contactId: data['contactId'] as String? ?? '',
@@ -65,7 +66,7 @@ class CallLog extends Equatable {
             followUpAt != null ? Timestamp.fromDate(followUpAt!) : null,
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
       };
 
   @override
@@ -98,8 +99,8 @@ class AuditEntry extends Equatable {
   final Map<String, dynamic> metadata;
   final DateTime? createdAt;
 
-  factory AuditEntry.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
+  factory AuditEntry.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return AuditEntry(
       id: doc.id,
       action: data['action'] as String? ?? '',

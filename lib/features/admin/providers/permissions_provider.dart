@@ -1,8 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
 import '../../auth/models/app_user.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -142,35 +141,35 @@ final grantedPermissionsProvider =
     StreamProvider<Map<String, MonitorPermissions>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const {});
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colSettings)
-      .doc(teamId)
-      .snapshots()
-      .map((doc) {
-    final raw = (doc.data() ?? const {})['monitorPermissions']
-        as Map<String, dynamic>?;
-    if (raw == null) return <String, MonitorPermissions>{};
-    return raw.map((k, v) =>
-        MapEntry(k, MonitorPermissions.fromList(v as List<dynamic>?)));
-  });
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () async {
+      final doc = await ds.get(AppConstants.colSettings, teamId);
+      final raw = (doc?.data ?? const {})['monitorPermissions']
+          as Map<String, dynamic>?;
+      if (raw == null) return <String, MonitorPermissions>{};
+      return raw.map((k, v) =>
+          MapEntry(k, MonitorPermissions.fromList(v as List<dynamic>?)));
+    },
+    interval: const Duration(seconds: 60),
+  );
 });
 
 class PermissionService {
-  PermissionService(this._db);
-  final FirebaseFirestore _db;
+  PermissionService(this._ds);
+  final RemoteDataSource _ds;
 
   Future<void> grant({
     required String teamId,
     required String userId,
     required MonitorPermissions permissions,
   }) async {
-    await _db.collection(AppConstants.colSettings).doc(teamId).set({
+    await _ds.set(AppConstants.colSettings, teamId, {
       'monitorPermissions': {userId: permissions.toList()},
-    }, SetOptions(merge: true));
+    });
   }
 }
 
 final permissionServiceProvider = Provider<PermissionService>((ref) {
-  return PermissionService(ref.watch(firestoreProvider));
+  return PermissionService(ref.watch(remoteDataServiceProvider));
 });

@@ -9,6 +9,16 @@ account_id = "af3007244dc00e001004045fd488b42b"
 binding = "MEDIA"
 bucket_name = "nebula-crm1"
 
+# ── CRM database (D1) ─────────────────────────────────────────────────
+# The whole CRM database lives here since the Firestore migration. The
+# CI workflow fills D1_DATABASE_ID with the real database UUID at deploy
+# time (create-if-missing, then `wrangler d1 info`), so this file never
+# carries an account-specific id.
+[[d1_databases]]
+binding = "DB"
+database_name = "nebula-crm-db"
+database_id = "D1_DATABASE_ID"
+
 # ── AI mailer cron ────────────────────────────────────────────────────
 # Every 30 min the worker plans new owner tasks and delivers due emails:
 #   small audiences  → MailerCloud Email API (email-api.mailercloud.com),
@@ -29,6 +39,7 @@ crons = ["*/30 * * * *"]
 
 [vars]
 FIREBASE_PROJECT_ID = "nebula-crm-70f58"
+DEFAULT_TEAM_ID = "default-team"
 
 # ── AI mailer settings (non-secret — edit freely) ─────────────────────
 # The mailer needs this SECRET to send (pushed automatically by the deploy

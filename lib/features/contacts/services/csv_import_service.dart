@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../models/call_status.dart';
 import '../models/contact.dart';
 
@@ -84,11 +86,9 @@ class CsvParseResult {
 }
 
 class CsvImportService {
-  CsvImportService(this._db);
+  CsvImportService(this._ds);
 
-  final FirebaseFirestore _db;
-
-  /// Firestore caps a batch at 500 writes.
+  /// Cap writes per batch request so one import never stalls a round trip.
   static const int _batchLimit = 400;
 
   // ── Parsing ──────────────────────────────────────────────────
@@ -401,14 +401,15 @@ class CsvImportService {
 
   /// Existing phone/email keys for a team, used to skip duplicates.
   Future<Set<String>> existingKeys(String teamId) async {
-    final snap = await _db
-        .collection(AppConstants.colContacts)
-        .where('teamId', isEqualTo: teamId)
-        .get();
+    final docs = await _ds.list(
+      AppConstants.colContacts,
+      where: [WhereEq('teamId', teamId)],
+      limit: 500,
+    );
 
     final keys = <String>{};
-    for (final d in snap.docs) {
-      final data = d.data();
+    for (final d in docs) {
+      final data = d.data;
       final phone = (data['phone'] as String?) ?? '';
       final email = (data['email'] as String?) ?? '';
       if (phone.isNotEmpty) keys.add('p:${normalisePhone(phone)}');
@@ -487,7 +488,7 @@ class CsvImportService {
         'ownerId': assignee,
         'assignedTo': assignee,
         'assignedAt':
-            assignee == null ? null : FieldValue.serverTimestamp(),
+            assignee == null ? null : const ServerTimestamp(),
         'assignedBy': assignee == null ? null : importedBy,
         'teamId': teamId,
         'tags': tags,
@@ -499,22 +500,21 @@ class CsvImportService {
         'lifetimeValue': 0,
         'activityCount': 0,
         'openDealsCount': 0,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'lastActivityAt': FieldValue.serverTimestamp(),
+        'createdAt': const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
+        'lastActivityAt': const ServerTimestamp(),
       });
 
       created++;
     }
 
-    // Commit in chunks under the 500-write batch cap.
+    // Commit in chunks so one request never carries 500+ writes.
     for (var i = 0; i < batchQueue.length; i += _batchLimit) {
       final end = (i + _batchLimit).clamp(0, batchQueue.length);
-      final batch = _db.batch();
-      for (final data in batchQueue.sublist(i, end)) {
-        batch.set(_db.collection(AppConstants.colContacts).doc(), data);
-      }
-      await batch.commit();
+      await _ds.batch([
+        for (final data in batchQueue.sublist(i, end))
+          BatchOp.set(AppConstants.colContacts, data),
+      ]);
       onProgress?.call(end, batchQueue.length);
     }
 

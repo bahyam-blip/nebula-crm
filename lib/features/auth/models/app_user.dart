@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/services/remote/data_codec.dart';
+
 /// User role within a team.
 ///
 /// Hierarchy:
@@ -159,8 +161,8 @@ class AppUser extends Equatable {
   final DateTime? createdAt;
   final UserPreferences preferences;
 
-  factory AppUser.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory AppUser.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return AppUser(
       id: doc.id,
       email: data['email'] as String? ?? '',
@@ -192,10 +194,10 @@ class AppUser extends Equatable {
         'title': title,
         'lastActiveAt': lastActiveAt != null
             ? Timestamp.fromDate(lastActiveAt!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
         'preferences': preferences.toMap(),
       };
 

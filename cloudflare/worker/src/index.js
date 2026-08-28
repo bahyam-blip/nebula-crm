@@ -20,6 +20,7 @@ import {
   sendToTokens,
 } from './push.js';
 import { handleMail, runMailCron, mailConfigState } from './emailer/pipeline.js';
+import { handleDataRequest } from './data_http.js';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -208,6 +209,14 @@ export default {
     const claims = await verifyIdToken(bearer, env.FIREBASE_PROJECT_ID);
     if (!claims) return json({ error: 'invalid or expired token' }, 401);
     const uid = claims.sub;
+
+    // ── CRM database (D1) — the Firestore replacement ──
+    // Google Sign-In stays on Firebase; every byte of CRM data now lives in
+    // Cloudflare D1 behind these routes. The token still proves identity;
+    // the Worker enforces team/role rules (see src/data.js).
+    if (path.startsWith('/v1/data/') || path === '/v1/admin/migrate-from-firestore') {
+      return handleDataRequest(request, env, { path, claims });
+    }
 
     // ── AI mailer (Sarvam + MailerCloud) ──
     // Every signed-in teammate can use the AI mailer: the Firebase ID token

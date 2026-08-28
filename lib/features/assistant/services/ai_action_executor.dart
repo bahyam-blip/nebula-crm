@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/ai_agent_service.dart';
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/models/app_user.dart';
 import '../../contacts/models/call_status.dart';
 import '../../contacts/models/contact.dart';
@@ -166,7 +167,7 @@ class AiActionExecutor {
     final rawDue = action.args['due'] as String?;
     if (rawDue != null) due = DateTime.tryParse(rawDue);
 
-    await _ref.read(firestoreProvider).collection('tasks').add({
+    await _ref.read(remoteDataServiceProvider).set('tasks', null, {
       'title': title,
       'description': '',
       'status': 'pending',
@@ -176,8 +177,8 @@ class AiActionExecutor {
       'createdBy': me.id,
       'teamId': me.teamId,
       'dueDate': due == null ? null : Timestamp.fromDate(due),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt': const ServerTimestamp(),
+      'updatedAt': const ServerTimestamp(),
     });
     return AiResult('Task created for ${assignee.displayName}.');
   }
@@ -187,7 +188,7 @@ class AiActionExecutor {
     if (name == null || name.isEmpty) {
       return const AiResult('What is their name?', ok: false);
     }
-    await _ref.read(firestoreProvider).collection(AppConstants.colContacts).add({
+    await _ref.read(remoteDataServiceProvider).set(AppConstants.colContacts, null, {
       'name': name,
       'phone': action.args['phone'],
       'email': action.args['email'],
@@ -199,9 +200,9 @@ class AiActionExecutor {
       'teamId': me.teamId,
       'source': 'ai_assistant',
       'tags': <String>[],
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'lastActivityAt': FieldValue.serverTimestamp(),
+      'createdAt': const ServerTimestamp(),
+      'updatedAt': const ServerTimestamp(),
+      'lastActivityAt': const ServerTimestamp(),
     });
     return AiResult('Added $name to your contacts.');
   }

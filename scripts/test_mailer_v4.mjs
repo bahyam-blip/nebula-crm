@@ -9,9 +9,45 @@
  *   node scripts/test_mailer_v4.mjs
  */
 import { generateKeyPairSync } from 'node:crypto';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+/** Real-SQLite stand-in for Cloudflare D1 (the CRM database since the
+ * Firestore migration). Runs the actual schema.sql so drift breaks tests,
+ * not production. */
+function makeD1() {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(readFileSync(join(here, '../cloudflare/worker/schema.sql'), 'utf8'));
+  return {
+    __sqlite: sqlite,
+    prepare(sql) {
+      let args = [];
+      const b = {
+        bind(...a) { args = a; return b; },
+        async first() { return sqlite.prepare(sql).get(...args) ?? null; },
+        async all() { return { results: sqlite.prepare(sql).all(...args) }; },
+        async run() { const i = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(i.changes) } }; },
+      };
+      return b;
+    },
+    async batch(stmts) { for (const s of stmts) await s.run(); return {}; },
+  };
+}
+
+async function seedDoc(db, col, id, data) {
+  const now = Date.now();
+  await db.prepare(
+    `INSERT INTO docs (col, id, team_id, json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(col, id) DO UPDATE SET json = excluded.json`
+  ).bind(col, id, typeof data.teamId === 'string' ? data.teamId : null,
+         JSON.stringify(data), now, now).run();
+}
 
 let passed = 0;
 let failed = 0;
@@ -168,14 +204,24 @@ function fsToPlain(fields) {
 const { handleMail, runPipeline, mailConfigState } = await import(
   '../cloudflare/worker/src/emailer/pipeline.js'
 );
+const { createStore } = await import('../cloudflare/worker/src/emailer/state.js');
 const { learnFromResults, getMemory, memoryContext } = await import(
   '../cloudflare/worker/src/emailer/memory.js'
 );
 
 /* ── Harness ────────────────────────────────────────────────────── */
 
-function makeEnv() {
+async function makeEnv() {
+  const db = makeD1();
+  for (const [i, c] of contactsInCrm.entries()) {
+    await seedDoc(db, 'contacts', `c${i + 1}`, {
+      name: c.name, email: c.email, status: c.status, company: c.company,
+      tags: [], segments: [], createdAt: '2026-08-01T10:00:00.000Z',
+      teamId: 'default-team',
+    });
+  }
   return {
+    DB: db,
     FIREBASE_PROJECT_ID: 'nebula-crm-70f58',
     FIREBASE_SERVICE_ACCOUNT: JSON.stringify(serviceAccount),
     MAILERCLOUD_API_KEY: 'mc_test_key',
@@ -205,11 +251,16 @@ async function call(env, method, path, body, uid = 'user_123') {
 }
 const drain = (waits) => Promise.allSettled(waits.map((p) => Promise.resolve(p)));
 
+/** The same fail-soft store the worker would build for this env (D1 first). */
+function storeOf(env) {
+  return createStore(env);
+}
+
 /* ── Tests ──────────────────────────────────────────────────────── */
 
 console.log('\n— 1. Role gate removed: ANY signed-in user can use the mailer —');
 {
-  const env = makeEnv();
+  const env = await makeEnv();
   // No users/{uid} lookup happens at all any more; uid is just audit info.
   const { res, json } = await call(env, 'GET', '/v1/mail/status', null, 'someRandomSalesRepUid');
   ok(res.status === 200, 'GET /status is 200 for a plain user uid (was 403)', `got ${res.status} ${JSON.stringify(json).slice(0, 120)}`);
@@ -222,7 +273,7 @@ console.log('\n— 1. Role gate removed: ANY signed-in user can use the mailer �
 
 console.log('\n— 2. Business memory: teach (AI distill + structured facts) —');
 {
-  const env = makeEnv();
+  const env = await makeEnv();
   sarvamScript = [
     {
       match: (t) => t.includes('maintain the marketing memory'),
@@ -257,14 +308,14 @@ console.log('\n— 2. Business memory: teach (AI distill + structured facts) —
   ok(bad.res.status === 400, 'empty teach body → 400');
 
   // memoryContext feeds prompts
-  const mem2 = await getMemory(env.NEBULA_EMAIL_KV);
+  const mem2 = await getMemory(storeOf(env));
   const ctx = memoryContext(mem2);
   ok(ctx.includes('coffee roastery') && ctx.includes('CREATIVE PLAYBOOK'), 'memoryContext renders facts + playbook');
 }
 
 console.log('\n— 3. Task lifecycle: plan → write → send → write-back → events —');
 {
-  const env = makeEnv();
+  const env = await makeEnv();
   captured.sends.length = 0; captured.campaigns.length = 0; captured.activities.length = 0; captured.batches.length = 0;
   const dueAt = new Date(Date.now() - 60_000).toISOString();       // seq 1: due now
   const futureAt = new Date(Date.now() + 3 * 86400_000).toISOString(); // seq 2: later
@@ -318,20 +369,24 @@ console.log('\n— 3. Task lifecycle: plan → write → send → write-back →
   ok(captured.batches.length >= 1, 'audience synced to MailerCloud list');
   ok(captured.templates.length === 1, 'template saved to MailerCloud library');
 
-  // campaign doc written back to CRM with extras
-  const doc = captured.campaigns.find((c) => c.id.startsWith(`ai_${taskId}`));
-  ok(!!doc, 'campaign doc written to Firestore campaigns/');
-  ok(doc.fields.source === 'ai-mailer' && doc.fields.metrics.sent === 1, 'campaign doc: source + real sent count', JSON.stringify(doc.fields.metrics));
-  ok(!!captured.activities[0], 'activity timeline entry written');
+  // campaign doc written back to the CRM database (D1) with extras
+  const campRow = await env.DB.__sqlite.prepare(
+    `SELECT id, json FROM docs WHERE col = 'campaigns' AND id LIKE 'ai_${taskId}%'`).get();
+  ok(!!campRow, 'campaign doc written to D1 campaigns/');
+  const campJson = campRow ? JSON.parse(campRow.json) : {};
+  ok(campJson.source === 'ai-mailer' && campJson.metrics?.sent === 1, 'campaign doc: source + real sent count', JSON.stringify(campJson.metrics));
+  const actRow = await env.DB.__sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM docs WHERE col = 'activities'").get();
+  ok((actRow?.n ?? 0) >= 1, 'activity timeline entry written');
 
   // memory learned the campaign focus
-  const memAfter = await getMemory(env.NEBULA_EMAIL_KV);
+  const memAfter = await getMemory(storeOf(env));
   ok(memAfter.notes.some((n) => n.includes('monsoon')), 'memory.notes captured campaign focus');
 }
 
 console.log('\n— 4. Cancel: planned future email never sends —');
 {
-  const env = makeEnv();
+  const env = await makeEnv();
   const futureAt = new Date(Date.now() + 5 * 86400_000).toISOString();
   sarvamScript = [
     { match: (t) => t.includes('build a marketing brief'), reply: {
@@ -367,8 +422,8 @@ console.log('\n— 4. Cancel: planned future email never sends —');
 
 console.log('\n— 5. Lock retry: task starts even while another run holds the lock —');
 {
-  const env = makeEnv();
-  const store = env.NEBULA_EMAIL_KV;
+  const env = await makeEnv();
+  const store = storeOf(env);
   await store.put('mail:lock', String(Date.now())); // pretend a run is in progress
   sarvamScript = [
     { match: (t) => t.includes('build a marketing brief'), reply: {
@@ -401,8 +456,8 @@ console.log('\n— 5. Lock retry: task starts even while another run holds the l
 
 console.log('\n— 6. Analytics learnings merge into memory (dedupe + weights) —');
 {
-  const env = makeEnv();
-  const kv = env.NEBULA_EMAIL_KV;
+  const env = await makeEnv();
+  const kv = storeOf(env);
   const learnings = {
     recommendations: ['Lead with the roast date in subject lines'],
     best_subject_styles: ['short questions'],
@@ -430,7 +485,7 @@ console.log('\n— 6. Analytics learnings merge into memory (dedupe + weights) �
 
 console.log('\n— 7. Status reflects memory + dry-run config still open to all —');
 {
-  const env = makeEnv();
+  const env = await makeEnv();
   // teach one fact so the status endpoint can surface business understanding
   sarvamScript = []; // structured facts only — no Sarvam call needed
   await call(env, 'POST', '/v1/mail/memory', { facts: { business_type: 'Handmade jewellery brand' } });
@@ -447,8 +502,8 @@ console.log('\n— 7. Status reflects memory + dry-run config still open to all 
 
 console.log('\n— 8. Dry-run safety: pipeline plans but never sends —');
 {
-  const env = makeEnv();
-  await env.NEBULA_EMAIL_KV.put('mail:dry_run_override', 'true');
+  const env = await makeEnv();
+  await storeOf(env).put('mail:dry_run_override', 'true');
   captured.sends.length = 0;
   sarvamScript = [
     { match: (t) => t.includes('build a marketing brief'), reply: {
@@ -469,16 +524,16 @@ console.log('\n— 8. Dry-run safety: pipeline plans but never sends —');
   const t = (await call(env, 'GET', '/v1/mail/tasks')).json.tasks.find((x) => x.id === created.json.task.id);
   ok(t.emails[0].status === 'dry_run', 'due email marked dry_run (nothing delivered)');
   ok(captured.sends.length === 0, 'zero provider sends in dry-run mode');
-  await env.NEBULA_EMAIL_KV.delete('mail:dry_run_override');
+  await storeOf(env).delete('mail:dry_run_override');
 }
 
 console.log('\n— 9. Crash-proofing: state-layer failures must never 1101 the routes —');
 {
-  // Simulate the production outage: Firestore state reads blow up (429 /
-  // network / transient Google error) while OAuth + everything else works.
-  const env = makeEnv();
-  delete env.NEBULA_EMAIL_KV; // force the Firestore state backend
-  failStateFetch = true;
+  // Simulate the production outage: the state database starts throwing
+  // (quota wall / network / transient provider error) while the rest of the
+  // system (MailerCloud send path, OAuth) keeps working.
+  const env = await makeEnv();
+  env.DB.prepare = () => { throw new Error('simulated transient failure (429/network)'); };
 
   const st = await call(env, 'GET', '/v1/mail/status');
   ok(st.res.status === 200, 'GET /status stays 200 when the state store throws (was Cloudflare 1101)',
@@ -489,11 +544,10 @@ console.log('\n— 9. Crash-proofing: state-layer failures must never 1101 the r
   const tst = await call(env, 'POST', '/v1/mail/test', { to: 'owner@example.com', name: 'Nebula Owner' });
   ok(tst.res.status === 200 && tst.json.ok === true, 'POST /test still sends one real email with the store down');
   ok(captured.sends.length === before + 1, 'provider saw exactly one send');
-  failStateFetch = false;
 }
 {
   // Corrupt / half-written state must read as empty, not crash.
-  const env = makeEnv();
+  const env = await makeEnv();
   env.NEBULA_EMAIL_KV._map.set('mail:last_run', '{not json!!');
   env.NEBULA_EMAIL_KV._map.set('biz:brief', '<<<');
   env.NEBULA_EMAIL_KV._map.set('mail:task:index', 'garbage[');

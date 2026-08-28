@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/services/remote/data_codec.dart';
+
 /// Where a task sits in its lifecycle (spec §8).
 enum TaskStatus { pending, inProgress, completed, archived }
 
@@ -168,8 +170,8 @@ class CrmTask extends Equatable {
       remindAt != null &&
       remindAt!.isBefore(DateTime.now());
 
-  factory CrmTask.fromFirestore(DocumentSnapshot doc) {
-    final d = doc.data() as Map<String, dynamic>? ?? {};
+  factory CrmTask.fromFirestore(DataDoc doc) {
+    final d = doc.data;
     return CrmTask(
       id: doc.id,
       title: d['title'] as String? ?? 'Untitled',
@@ -217,8 +219,8 @@ class CrmTask extends Equatable {
         'audienceEveryone': audienceEveryone,
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
       };
 
   @override

@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/models/app_user.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../models/task.dart';
@@ -9,73 +10,67 @@ import '../models/task.dart';
 const String kTasksCollection = 'tasks';
 
 class TaskService {
-  TaskService(this._db);
+  TaskService(this._ds);
 
-  final FirebaseFirestore _db;
-
-  CollectionReference<Map<String, dynamic>> get _col =>
-      _db.collection(kTasksCollection);
+  final RemoteDataSource _ds;
 
   Future<String> create(CrmTask task) async {
-    final ref = await _col.add(task.toFirestore());
-    return ref.id;
+    return _ds.set(kTasksCollection, null, task.toFirestore());
   }
 
   Future<void> setStatus(String id, TaskStatus status) {
-    return _col.doc(id).update({
+    return _ds.update(kTasksCollection, id, {
       'status': status.name,
       'completedAt': status == TaskStatus.completed
-          ? FieldValue.serverTimestamp()
+          ? const ServerTimestamp()
           : null,
       // Completing a task settles its reminder too, so it stops nagging.
       if (status == TaskStatus.completed) 'acknowledged': true,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': const ServerTimestamp(),
     });
   }
 
   Future<void> acknowledge(String id) {
-    return _col.doc(id).update({
+    return _ds.update(kTasksCollection, id, {
       'acknowledged': true,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': const ServerTimestamp(),
     });
   }
 
   Future<void> reassign(String id, String? userId, String userName) {
-    return _col.doc(id).update({
+    return _ds.update(kTasksCollection, id, {
       'assignedTo': userId,
       'assignedToName': userName,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': const ServerTimestamp(),
     });
   }
 
   Future<void> snooze(String id, Duration by) {
-    return _col.doc(id).update({
+    return _ds.update(kTasksCollection, id, {
       'remindAt': Timestamp.fromDate(DateTime.now().add(by)),
       'acknowledged': false,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': const ServerTimestamp(),
     });
   }
 
-  Future<void> delete(String id) => _col.doc(id).delete();
+  Future<void> delete(String id) => _ds.delete(kTasksCollection, id);
 }
 
 final taskServiceProvider = Provider<TaskService>((ref) {
-  return TaskService(ref.watch(firestoreProvider));
+  return TaskService(ref.watch(remoteDataServiceProvider));
 });
 
-/// All tasks for the current team.
-///
-/// One `where` and no `orderBy`, so no composite index is required;
-/// ordering happens in [visibleTasksProvider].
+/// All tasks for the current team (server-side team scoping; client-side
+/// ordering in [visibleTasksProvider]).
 final teamTasksProvider = StreamProvider<List<CrmTask>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <CrmTask>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(kTasksCollection)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(CrmTask.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(kTasksCollection, where: [WhereEq('teamId', teamId)], limit: 300)
+        .then((docs) => docs.map(CrmTask.fromFirestore).toList()),
+  );
 });
 
 enum TaskScope { mine, all }
@@ -177,17 +172,21 @@ final taskCountsProvider = Provider<({int open, int overdue, int today})>((ref) 
 /// Tasks attached to one contact, for the customer timeline (spec §7).
 final contactTasksProvider =
     StreamProvider.family<List<CrmTask>, String>((ref, contactId) {
-  return ref
-      .watch(firestoreProvider)
-      .collection(kTasksCollection)
-      .where('relatedContactId', isEqualTo: contactId)
-      .snapshots()
-      .map((s) {
-    final list = s.docs.map(CrmTask.fromFirestore).toList()
-      ..sort((a, b) =>
-          (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
-    return list;
-  });
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () async {
+      final docs = await ds.list(
+        kTasksCollection,
+        where: [WhereEq('relatedContactId', contactId)],
+        limit: 100,
+      );
+      final list = docs.map(CrmTask.fromFirestore).toList()
+        ..sort((a, b) =>
+            (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+      return list;
+    },
+    interval: const Duration(seconds: 30),
+  );
 });
 
 /// Teammates available as assignees.
@@ -198,10 +197,11 @@ final assignableUsersProvider = Provider<List<AppUser>>((ref) {
 final teamMembersForTasksProvider = StreamProvider<List<AppUser>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <AppUser>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection('users')
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(AppUser.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list('users', where: [WhereEq('teamId', teamId)], limit: 200)
+        .then((docs) => docs.map(AppUser.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });

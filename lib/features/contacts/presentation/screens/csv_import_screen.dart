@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/services/firebase_boot.dart';
-import '../../../../core/services/firestore_service.dart';
+import '../../../../core/services/remote/data_api.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../auth/models/app_user.dart';
@@ -22,12 +22,13 @@ final teamCallersProvider = StreamProvider<List<AppUser>>((ref) async* {
     yield const [];
     return;
   }
-  final db = ref.watch(firestoreProvider);
-  yield* db
-      .collection('users')
-      .where('teamId', isEqualTo: me.teamId)
-      .snapshots()
-      .map((s) => s.docs.map(AppUser.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  yield* ds.watchList(
+    () => ds
+        .list('users', where: [WhereEq('teamId', me.teamId!)], limit: 200)
+        .then((docs) => docs.map(AppUser.fromFirestore).toList()),
+    interval: const Duration(seconds: 60),
+  );
 });
 
 class CsvImportScreen extends ConsumerStatefulWidget {
@@ -114,7 +115,7 @@ class _CsvImportScreenState extends ConsumerState<CsvImportScreen> {
 
     setState(() => _importing = true);
     try {
-      final service = CsvImportService(ref.read(firestoreProvider));
+      final service = CsvImportService(ref.read(remoteDataServiceProvider));
       final summary = await withFirestoreRetry(
         () => service.import(
           rows: parsed.validRows,

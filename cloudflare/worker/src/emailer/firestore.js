@@ -1,12 +1,10 @@
 /**
- * Firestore REST access for the mailer.
+ * CRM data access for the mailer — now backed by Cloudflare D1.
  *
- * Reuses the service-account access token from push.js (its scope already
- * includes https://www.googleapis.com/auth/datastore). The email list lives
- * HERE — the contacts collection is the single source of truth; MailerCloud
- * is only a sending relay, synced from this data.
+ * The email list lives HERE — the contacts docs are the single source of
+ * truth; MailerCloud is only a sending relay, synced from this data.
  *
- * Reads  : contacts (keyset-paginated), users/{uid} role
+ * Reads  : contacts (team-filtered, paged), users/{uid} role
  * Writes : campaigns/{id}  — the SAME collection the Flutter marketing
  *          module reads, so every AI campaign shows up natively in the app.
  *          The Dart parser ignores unknown fields, so mailer-specific keys
@@ -14,155 +12,98 @@
  *        : activities/{id} — one timeline entry per campaign.
  */
 
-import { getAccessToken } from '../push.js';
-import { fetchWithBackoff } from './http.js';
-
-/* ── Firestore Value helpers (JS → REST wire format) ───────────── */
-
-export function fsValue(v) {
-  if (v === null || v === undefined) return { nullValue: null };
-  if (typeof v === 'boolean') return { booleanValue: v };
-  if (typeof v === 'number') {
-    return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
-  }
-  if (typeof v === 'string') {
-    // ISO timestamps → timestampValue so the app reads them as Timestamps.
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) return { timestampValue: v };
-    return { stringValue: v };
-  }
-  if (Array.isArray(v)) {
-    return { arrayValue: { values: v.map(fsValue) } };
-  }
-  if (typeof v === 'object') {
-    const fields = {};
-    for (const [k, val] of Object.entries(v)) fields[k] = fsValue(val);
-    return { mapValue: { fields } };
-  }
-  return { stringValue: String(v) };
-}
-
-function fromFsValue(v) {
-  if (!v || typeof v !== 'object') return null;
-  if ('stringValue' in v) return v.stringValue;
-  if ('integerValue' in v) return parseInt(v.integerValue, 10);
-  if ('doubleValue' in v) return v.doubleValue;
-  if ('booleanValue' in v) return v.booleanValue;
-  if ('timestampValue' in v) return v.timestampValue;
-  if ('nullValue' in v) return null;
-  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromFsValue);
-  if ('mapValue' in v) {
-    const out = {};
-    for (const [k, val] of Object.entries(v.mapValue.fields || {})) out[k] = fromFsValue(val);
-    return out;
-  }
-  return null;
-}
-
-/** Flatten a REST document into plain JS (what the Dart models would see). */
-export function fsDoc(doc) {
-  const out = { __id: doc.name?.split('/').pop(), __name: doc.name };
-  for (const [k, v] of Object.entries(doc.fields || {})) out[k] = fromFsValue(v);
-  return out;
-}
-
-function base(env) {
-  return `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)`;
-}
-
-async function call(env, path, { method = 'GET', body, mask } = {}) {
-  const token = await getAccessToken(env);
-  const url = new URL(`${base(env)}${path}`);
-  for (const m of mask || []) url.searchParams.append('updateMask.fieldPaths', m);
-  const res = await fetchWithBackoff(url, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text().catch(() => '');
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
-  if (!res.ok) {
-    const msg = json?.error?.message || text.slice(0, 250);
-    const err = new Error(`Firestore ${res.status} ${path.split('?')[0]} → ${msg}`);
-    err.status = res.status;
-    throw err;
-  }
-  return json;
-}
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /* ── Contacts (the CRM email list) ──────────────────────────────── */
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
 /**
- * Stream the whole contacts collection, newest id last (keyset pagination on
- * __name__ needs no composite index). Returns MailerCloud-ready rows:
+ * Stream the whole contacts collection. Returns MailerCloud-ready rows:
  *   { email, first_name, last_name, company_name, phone, tags[], _segment, _created }
- * Only contacts with a valid email are returned. teamId filter optional.
+ * Only contacts with a valid email are returned. teamId filter optional
+ * (MAIL_TEAM_ID); superAdmin-style "all teams" when unset.
  */
 export async function fetchCrmContacts(env, { max = 5000 } = {}) {
-  const docs = [];
-  let after = null;
-
-  while (docs.length < max) {
-    const sq = {
-      structuredQuery: {
-        from: [{ collectionId: 'contacts' }],
-        orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
-        limit: 300,
-      },
-    };
-    if (after) sq.structuredQuery.startAt = { values: [{ referenceValue: after }] };
-
-    const rows = await call(env, '/documents:runQuery', { method: 'POST', body: sq });
-    const batch = rows.filter((r) => r.document);
-    if (batch.length === 0) break;
-    for (const r of batch) docs.push(r.document);
-    after = batch[batch.length - 1].document.name;
-    if (batch.length < 300) break;
-  }
-
+  if (!env.DB) return [];
   const teamFilter = env.MAIL_TEAM_ID || '';
   const out = [];
   const seen = new Set();
+  let afterId = null;
 
-  for (const d of docs) {
-    const c = fsDoc(d);
-    const email = String(c.email || '').trim().toLowerCase();
-    if (!EMAIL_RE.test(email) || seen.has(email)) continue;
-    if (teamFilter && String(c.teamId || '') !== teamFilter) continue;
+  // Keyset pagination on (team_id, id) keeps pages stable and cheap.
+  while (out.length < max) {
+    const pageSize = Math.min(300, max - out.length + 100);
+    let sql = "SELECT id, json FROM docs WHERE col = 'contacts'";
+    const args = [];
+    if (teamFilter) {
+      sql += ' AND team_id = ?';
+      args.push(teamFilter);
+    }
+    if (afterId) {
+      sql += ' AND id > ?';
+      args.push(afterId);
+    }
+    sql += ' ORDER BY id ASC LIMIT ?';
+    args.push(pageSize);
 
-    const name = String(c.name || '');
-    const tags = [
-      ...(Array.isArray(c.tags) ? c.tags : []),
-      ...(Array.isArray(c.segments) ? c.segments : []),
-    ].map(String).filter(Boolean).slice(0, 5);
+    const { results } = await env.DB.prepare(sql).bind(...args).all();
+    const rows = results || [];
+    if (!rows.length) break;
 
-    out.push({
-      email,
-      first_name: name.split(' ')[0] || '',
-      last_name: name.includes(' ') ? name.split(' ').slice(1).join(' ') : '',
-      company_name: String(c.company || ''),
-      phone: String(c.phone || ''),
-      tags,
-      _segment: String(c.status || 'lead').toLowerCase(),
-      _created: c.createdAt || '',
-      _leadScore: typeof c.leadScore === 'number' ? c.leadScore : null,
-    });
-    seen.add(email);
+    for (const row of rows) {
+      afterId = row.id;
+      let c;
+      try { c = JSON.parse(row.json); } catch { continue; }
+      const email = String(c.email || '').trim().toLowerCase();
+      if (!EMAIL_RE.test(email) || seen.has(email)) continue;
+
+      const name = String(c.name || '');
+      const tags = [
+        ...(Array.isArray(c.tags) ? c.tags : []),
+        ...(Array.isArray(c.segments) ? c.segments : []),
+      ].map(String).filter(Boolean).slice(0, 5);
+
+      out.push({
+        email,
+        first_name: name.split(' ')[0] || '',
+        last_name: name.includes(' ') ? name.split(' ').slice(1).join(' ') : '',
+        company_name: String(c.company || ''),
+        phone: String(c.phone || ''),
+        tags,
+        _segment: String(c.status || 'lead').toLowerCase(),
+        _created: isoOf(c.createdAt) || '',
+        _leadScore: typeof c.leadScore === 'number' ? c.leadScore : null,
+      });
+      seen.add(email);
+      if (out.length >= max) break;
+    }
+    if (rows.length < pageSize) break;
   }
   return out;
+}
+
+/** Storage marker | ISO string → ISO string. */
+function isoOf(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object' && v.__type === 'ts') return v.v;
+  return '';
 }
 
 /* ── Users / roles ──────────────────────────────────────────────── */
 
 /** Role of a user, for canManageCampaigns-style permission checks. */
 export async function getUserRole(env, uid) {
+  if (!env.DB) return null;
   try {
-    const doc = await call(env, `/documents/users/${encodeURIComponent(uid)}`);
-    return fsDoc(doc).role || 'viewer';
+    const row = await env.DB
+      .prepare("SELECT json FROM docs WHERE col = 'users' AND id = ?")
+      .bind(uid)
+      .first();
+    if (!row) return null;
+    const data = JSON.parse(row.json);
+    return data.role || 'viewer';
   } catch (e) {
-    console.warn(`[mailer:fs] role lookup failed for ${uid}: ${e.message}`);
+    console.warn(`[mailer:d1] role lookup failed for ${uid}: ${e.message}`);
     return null;
   }
 }
@@ -179,82 +120,108 @@ export function canManageCampaigns(role) {
  * than duplicates: campaigns/ai_{taskId}_{seq}.
  */
 export async function upsertCampaignDoc(env, { id, fields }) {
-  const body = { fields: {} };
-  for (const [k, v] of Object.entries(fields)) body.fields[k] = fsValue(v);
+  if (!env.DB) return null;
   try {
-    // PATCH on a specific name = create-or-replace.
-    return await call(env, `/documents/campaigns/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body,
-    });
+    const now = Date.now();
+    const existing = await env.DB
+      .prepare("SELECT json, created_at FROM docs WHERE col = 'campaigns' AND id = ?")
+      .bind(id)
+      .first();
+    const prev = existing ? JSON.parse(existing.json) : null;
+    const payload = { ...(prev || {}), ...fields, updatedAt: new Date(now).toISOString() };
+    if (!payload.createdAt && !prev?.createdAt) payload.createdAt = payload.updatedAt;
+    const teamId = typeof payload.teamId === 'string' ? payload.teamId : null;
+    await env.DB
+      .prepare(
+        `INSERT INTO docs (col, id, team_id, json, created_at, updated_at)
+         VALUES ('campaigns', ?, ?, ?, ?, ?)
+         ON CONFLICT(col, id) DO UPDATE SET team_id = excluded.team_id, json = excluded.json, updated_at = excluded.updated_at`
+      )
+      .bind(id, teamId, JSON.stringify(payload), existing?.created_at ?? now, now)
+      .run();
+    return { id };
   } catch (e) {
-    console.warn(`[mailer:fs] campaign doc write failed (non-fatal): ${e.message}`);
+    console.warn(`[mailer:d1] campaign doc write failed (non-fatal): ${e.message}`);
     return null;
   }
 }
 
 /** Update just metrics/status on a campaign doc after an analytics pull. */
 export async function updateCampaignMetrics(env, id, { metrics, status }) {
-  const fields = {};
-  if (metrics) fields.metrics = metrics;
-  if (status) fields.status = status;
-  const body = { fields: {} };
-  for (const [k, v] of Object.entries(fields)) body.fields[k] = fsValue(v);
+  if (!env.DB) return false;
   try {
-    await call(env, `/documents/campaigns/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body,
-      mask: Object.keys(fields),
-    });
+    const existing = await env.DB
+      .prepare("SELECT json, created_at FROM docs WHERE col = 'campaigns' AND id = ?")
+      .bind(id)
+      .first();
+    if (!existing) return false;
+    const prev = JSON.parse(existing.json);
+    const payload = {
+      ...prev,
+      ...(metrics ? { metrics } : {}),
+      ...(status ? { status } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    await env.DB
+      .prepare("UPDATE docs SET json = ?, updated_at = ? WHERE col = 'campaigns' AND id = ?")
+      .bind(JSON.stringify(payload), Date.now(), id)
+      .run();
     return true;
   } catch (e) {
-    console.warn(`[mailer:fs] metrics update failed for ${id}: ${e.message}`);
+    console.warn(`[mailer:d1] metrics update failed for ${id}: ${e.message}`);
     return false;
   }
 }
 
 /** Timeline entry so the 360° view shows the send. */
 export async function logActivity(env, { title, description, campaignId, metadata }) {
-  const body = {
-    fields: fsValue({
+  if (!env.DB) return;
+  try {
+    const now = new Date();
+    const payload = {
       type: 'email',
       ownerId: 'ai-mailer',
       campaignId: campaignId || null,
       title: title || 'AI email campaign',
       description: description || '',
       metadata: metadata || {},
-      timestamp: new Date().toISOString(),
-    }).mapValue.fields,
-  };
-  try {
-    await call(env, '/documents/activities', { method: 'POST', body });
+      timestamp: { __type: 'ts', v: now.toISOString() },
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    await env.DB
+      .prepare(
+        `INSERT INTO docs (col, id, team_id, json, created_at, updated_at)
+         VALUES ('activities', ?, ?, ?, ?, ?)`
+      )
+      .bind(crypto.randomUUID(), null, JSON.stringify(payload), now.getTime(), now.getTime())
+      .run();
   } catch (e) {
-    console.warn(`[mailer:fs] activity log failed (non-fatal): ${e.message}`);
+    console.warn(`[mailer:d1] activity log failed (non-fatal): ${e.message}`);
   }
 }
 
 /** Find campaign docs previously created by the mailer (metrics write-back). */
 export async function findMailerCampaigns(env, { withinDays = 30 } = {}) {
-  const sq = {
-    structuredQuery: {
-      from: [{ collectionId: 'campaigns' }],
-      where: {
-        fieldFilter: {
-          field: { fieldPath: 'source' },
-          op: 'EQUAL',
-          value: { stringValue: 'ai-mailer' },
-        },
-      },
-      limit: 100,
-    },
-  };
-  const rows = await call(env, '/documents:runQuery', { method: 'POST', body: sq }).catch(() => []);
-  const cutoff = Date.now() - withinDays * 86400000;
-  return rows
-    .filter((r) => r.document)
-    .map((r) => fsDoc(r.document))
-    .filter((c) => {
-      const t = Date.parse(c.createdAt || c.updatedAt || '');
-      return !Number.isFinite(t) || t >= cutoff;
-    });
+  if (!env.DB) return [];
+  try {
+    const { results } = await env.DB
+      .prepare(
+        "SELECT id, json FROM docs WHERE col = 'campaigns' AND json_extract(json, '$.source') = 'ai-mailer' LIMIT 100"
+      )
+      .all();
+    const cutoff = Date.now() - withinDays * 86400000;
+    return (results || [])
+      .map((r) => {
+        try { return JSON.parse(r.json); } catch { return null; }
+      })
+      .filter(Boolean)
+      .filter((c) => {
+        const t = Date.parse(isoOf(c.createdAt) || isoOf(c.updatedAt) || '');
+        return !Number.isFinite(t) || t >= cutoff;
+      });
+  } catch (e) {
+    console.warn(`[mailer:d1] findMailerCampaigns failed (non-fatal): ${e.message}`);
+    return [];
+  }
 }

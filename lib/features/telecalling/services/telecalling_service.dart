@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/models/app_user.dart';
 import '../../contacts/models/contact.dart';
 import '../../contacts/models/call_status.dart';
@@ -14,9 +16,9 @@ class TeleCollections {
 
 /// Writes for the calling workflow: dispositions, reassignment, rebalancing.
 class TelecallingService {
-  TelecallingService(this._db);
+  TelecallingService(this._ds);
 
-  final FirebaseFirestore _db;
+  final RemoteDataSource _ds;
 
   static const int _batchLimit = 400;
 
@@ -35,41 +37,35 @@ class TelecallingService {
     DateTime? followUpAt,
     int durationSeconds = 0,
   }) async {
-    final batch = _db.batch();
-
-    final logRef = _db.collection(TeleCollections.callLogs).doc();
-    batch.set(logRef, {
-      'contactId': contact.id,
-      'contactName': contact.name,
-      'callerId': caller.id,
-      'callerName': caller.displayName,
-      'teamId': caller.teamId,
-      'outcome': outcome.name,
-      'notes': notes,
-      'durationSeconds': durationSeconds,
-      'followUpAt':
-          followUpAt != null ? Timestamp.fromDate(followUpAt) : null,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    final contactRef =
-        _db.collection(AppConstants.colContacts).doc(contact.id);
-    batch.update(contactRef, {
-      'callStatus': outcome.name,
-      'callAttempts': FieldValue.increment(1),
-      'lastCallAt': FieldValue.serverTimestamp(),
-      'lastCallOutcome': outcome.name,
-      'lastCallBy': caller.id,
-      'followUpAt':
-          followUpAt != null ? Timestamp.fromDate(followUpAt) : null,
-      'lastActivityAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      // A converted lead graduates out of the calling funnel.
-      if (outcome == CallStatus.converted)
-        'status': ContactStatus.customer.name,
-    });
-
-    await batch.commit();
+    await _ds.batch([
+      BatchOp.set(TeleCollections.callLogs, {
+        'contactId': contact.id,
+        'contactName': contact.name,
+        'callerId': caller.id,
+        'callerName': caller.displayName,
+        'teamId': caller.teamId,
+        'outcome': outcome.name,
+        'notes': notes,
+        'durationSeconds': durationSeconds,
+        'followUpAt':
+            followUpAt != null ? Timestamp.fromDate(followUpAt) : null,
+        'createdAt': const ServerTimestamp(),
+      }),
+      BatchOp.update(AppConstants.colContacts, contact.id, {
+        'callStatus': outcome.name,
+        'callAttempts': const Inc(1),
+        'lastCallAt': const ServerTimestamp(),
+        'lastCallOutcome': outcome.name,
+        'lastCallBy': caller.id,
+        'followUpAt':
+            followUpAt != null ? Timestamp.fromDate(followUpAt) : null,
+        'lastActivityAt': const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
+        // A converted lead graduates out of the calling funnel.
+        if (outcome == CallStatus.converted)
+          'status': ContactStatus.customer.name,
+      }),
+    ]);
   }
 
   // ── Assignment ───────────────────────────────────────────────
@@ -82,17 +78,16 @@ class TelecallingService {
   }) async {
     for (var i = 0; i < contactIds.length; i += _batchLimit) {
       final end = (i + _batchLimit).clamp(0, contactIds.length);
-      final batch = _db.batch();
-      for (final id in contactIds.sublist(i, end)) {
-        batch.update(_db.collection(AppConstants.colContacts).doc(id), {
-          'assignedTo': toUserId,
-          'ownerId': toUserId,
-          'assignedBy': actor.id,
-          'assignedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-      await batch.commit();
+      await _ds.batch([
+        for (final id in contactIds.sublist(i, end))
+          BatchOp.update(AppConstants.colContacts, id, {
+            'assignedTo': toUserId,
+            'ownerId': toUserId,
+            'assignedBy': actor.id,
+            'assignedAt': const ServerTimestamp(),
+            'updatedAt': const ServerTimestamp(),
+          }),
+      ]);
     }
 
     await _audit(
@@ -118,22 +113,20 @@ class TelecallingService {
 
     for (var i = 0; i < contactIds.length; i += _batchLimit) {
       final end = (i + _batchLimit).clamp(0, contactIds.length);
-      final batch = _db.batch();
-      for (var j = i; j < end; j++) {
-        final assignee = userIds[j % userIds.length];
-        tally[assignee] = (tally[assignee] ?? 0) + 1;
-        batch.update(
-          _db.collection(AppConstants.colContacts).doc(contactIds[j]),
-          {
-            'assignedTo': assignee,
-            'ownerId': assignee,
-            'assignedBy': actor.id,
-            'assignedAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          },
-        );
-      }
-      await batch.commit();
+      await _ds.batch([
+        for (var j = i; j < end; j++)
+          () {
+            final assignee = userIds[j % userIds.length];
+            tally[assignee] = (tally[assignee] ?? 0) + 1;
+            return BatchOp.update(AppConstants.colContacts, contactIds[j], {
+              'assignedTo': assignee,
+              'ownerId': assignee,
+              'assignedBy': actor.id,
+              'assignedAt': const ServerTimestamp(),
+              'updatedAt': const ServerTimestamp(),
+            });
+          }(),
+      ]);
     }
 
     await _audit(
@@ -194,17 +187,16 @@ class TelecallingService {
 
     for (var i = 0; i < moves.length; i += _batchLimit) {
       final slice = moves.entries.skip(i).take(_batchLimit);
-      final batch = _db.batch();
-      for (final e in slice) {
-        batch.update(_db.collection(AppConstants.colContacts).doc(e.key), {
-          'assignedTo': e.value,
-          'ownerId': e.value,
-          'assignedBy': actor.id,
-          'assignedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-      await batch.commit();
+      await _ds.batch([
+        for (final e in slice)
+          BatchOp.update(AppConstants.colContacts, e.key, {
+            'assignedTo': e.value,
+            'ownerId': e.value,
+            'assignedBy': actor.id,
+            'assignedAt': const ServerTimestamp(),
+            'updatedAt': const ServerTimestamp(),
+          }),
+      ]);
     }
 
     await _audit(
@@ -227,7 +219,7 @@ class TelecallingService {
     String? targetId,
     Map<String, dynamic> metadata = const {},
   }) async {
-    await _db.collection(TeleCollections.auditLogs).add({
+    await _ds.set(TeleCollections.auditLogs, null, {
       'action': action,
       'actorId': actor.id,
       'actorName': actor.displayName,
@@ -235,7 +227,7 @@ class TelecallingService {
       'targetId': targetId,
       'summary': summary,
       'metadata': metadata,
-      'createdAt': FieldValue.serverTimestamp(),
+      'createdAt': const ServerTimestamp(),
     });
   }
 

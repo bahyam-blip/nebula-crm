@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/services/remote/data_codec.dart';
+
 /// How the workspace pays out on a subscription sale.
 ///
 /// Owned by the super admin. Stored once per team so a rate change applies
@@ -52,7 +54,7 @@ class CommissionSettings {
         'commissionValue': commissionValue,
         'currency': currency,
         'updatedBy': updatedBy,
-        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': const ServerTimestamp(),
       };
 }
 
@@ -113,8 +115,8 @@ class Commission {
   final DateTime? createdAt;
   final DateTime? settledAt;
 
-  factory Commission.fromFirestore(DocumentSnapshot doc) {
-    final d = doc.data() as Map<String, dynamic>? ?? {};
+  factory Commission.fromFirestore(DataDoc doc) {
+    final d = doc.data;
     return Commission(
       id: doc.id,
       teamId: d['teamId'] as String? ?? '',
@@ -141,7 +143,7 @@ class Commission {
         'contactName': contactName,
         'status': status.name,
         'note': note,
-        'createdAt': FieldValue.serverTimestamp(),
+        'createdAt': const ServerTimestamp(),
       };
 }
 

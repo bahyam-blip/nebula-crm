@@ -2,7 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/services/firestore_service.dart';
+import '../../../core/services/remote/data_api.dart';
+import '../../../core/services/remote/data_codec.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../contacts/models/contact.dart';
 import '../../pipeline/models/deal.dart';
@@ -34,8 +35,8 @@ class Company {
   final String? ownerId;
   final DateTime? createdAt;
 
-  factory Company.fromFirestore(DocumentSnapshot doc) {
-    final d = doc.data() as Map<String, dynamic>? ?? {};
+  factory Company.fromFirestore(DataDoc doc) {
+    final d = doc.data;
     return Company(
       id: doc.id,
       name: d['name'] as String? ?? '',
@@ -61,7 +62,7 @@ class Company {
         'ownerId': ownerId,
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
       };
 }
 
@@ -95,12 +96,12 @@ class CompanyRollup {
 final companiesProvider = StreamProvider<List<Company>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <Company>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colCompanies)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(Company.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colCompanies, where: [WhereEq('teamId', teamId)], limit: 200)
+        .then((docs) => docs.map(Company.fromFirestore).toList()),
+  );
 });
 
 /// Every account, derived from contacts and deals as well as saved records.
@@ -138,23 +139,23 @@ final companyRollupsProvider = Provider<List<CompanyRollup>>((ref) {
 final allTeamContactsProvider = StreamProvider<List<Contact>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <Contact>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colContacts)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(Contact.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colContacts, where: [WhereEq('teamId', teamId)], limit: 500)
+        .then((docs) => docs.map(Contact.fromFirestore).toList()),
+  );
 });
 
 final allTeamDealsProvider = StreamProvider<List<Deal>>((ref) {
   final teamId = ref.watch(currentTeamIdProvider);
   if (teamId.isEmpty) return Stream.value(const <Deal>[]);
-  return ref
-      .watch(firestoreProvider)
-      .collection(AppConstants.colDeals)
-      .where('teamId', isEqualTo: teamId)
-      .snapshots()
-      .map((s) => s.docs.map(Deal.fromFirestore).toList());
+  final ds = ref.watch(remoteDataServiceProvider);
+  return ds.watchList(
+    () => ds
+        .list(AppConstants.colDeals, where: [WhereEq('teamId', teamId)], limit: 500)
+        .then((docs) => docs.map(Deal.fromFirestore).toList()),
+  );
 });
 
 extension _FirstOrNull<T> on Iterable<T> {

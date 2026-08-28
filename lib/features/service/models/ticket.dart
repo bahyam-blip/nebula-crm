@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/services/remote/data_codec.dart';
+
 /// Ticket priority levels.
 enum TicketPriority { low, medium, high, urgent }
 
@@ -108,8 +110,8 @@ class Ticket extends Equatable {
     return 'within';
   }
 
-  factory Ticket.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Ticket.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Ticket(
       id: doc.id,
       subject: data['subject'] as String? ?? '',
@@ -162,8 +164,8 @@ class Ticket extends Equatable {
         'csatScore': csatScore,
         'createdAt': createdAt != null
             ? Timestamp.fromDate(createdAt!)
-            : FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+            : const ServerTimestamp(),
+        'updatedAt': const ServerTimestamp(),
       };
 
   Ticket copyWith({
@@ -268,8 +270,8 @@ class Article extends Equatable {
     return (helpful / total) * 100;
   }
 
-  factory Article.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory Article.fromFirestore(DataDoc doc) {
+    final data = doc.data;
     return Article(
       id: doc.id,
       title: data['title'] as String? ?? '',
@@ -303,7 +305,7 @@ class Article extends Equatable {
         'publishedAt': publishedAt != null
             ? Timestamp.fromDate(publishedAt!)
             : null,
-        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': const ServerTimestamp(),
       };
 
   @override

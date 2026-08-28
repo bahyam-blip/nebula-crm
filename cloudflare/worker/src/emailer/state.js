@@ -1,108 +1,64 @@
 /**
  * Unified state store for the AI mailer.
  *
- * History: the mailer originally required a Workers KV namespace
- * (NEBULA_EMAIL_KV). That was a manual setup step nobody completed, and the
- * whole mailer stayed inert because of it. This module removes that blocker:
- *
- *   - If the KV binding exists, it is used (fastest path).
- *   - Otherwise the store transparently falls back to Firestore
- *     (`mail_state/{key}` documents) through the service account the Worker
- *     already holds. No extra setup, no extra secrets.
+ *   - D1 (env.DB) is the primary backend: mail state lives in the same
+ *     database as the rest of the CRM (col = 'mail_state'). No extra setup,
+ *     no external quota, no rate walls.
+ *   - Workers KV (NEBULA_EMAIL_KV) remains supported for parity with old
+ *     deployments that bound it.
+ *   - If neither binding exists the mailer stays inert (backend 'none').
  *
  * The exported object mimics the tiny slice of the KV API the mailer uses:
  *   get(key)                     → string | null
  *   put(key, value, {ttl})       → void   (ttl in seconds, best-effort)
  *   delete(key)                  → void
  *
- * Keys may contain [A-Za-z0-9:_-]; they become Firestore document ids with
- * percent-encoding (Firestore forbids "/" and leading "__").
+ * Every call is fail-soft (see createStore): a transient database error
+ * degrades to null / a logged skip instead of crashing mail routes.
  */
 
-import { getAccessToken } from '../push.js';
-import { fetchWithBackoff } from './http.js';
+/* ── D1 backend (primary) ───────────────────────────────────────── */
 
-const COLLECTION = 'mail_state';
+const STATE_COL = 'mail_state';
 
-function docId(key) {
-  return encodeURIComponent(String(key));
-}
-
-/* ── Firestore backend ──────────────────────────────────────────── */
-
-function fsBase(env) {
-  return `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)`;
-}
-
-async function fsCall(env, path, { method = 'GET', body } = {}) {
-  const token = await getAccessToken(env);
-  const res = await fetchWithBackoff(
-    `${fsBase(env)}${path}`,
-    {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    },
-    2
-  );
-  const text = await res.text().catch(() => '');
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
-  if (!res.ok) {
-    // A missing document on a read is normal — surface as null, not throw.
-    if (res.status === 404 && method === 'GET') return null;
-    throw new Error(`mail_state ${res.status} ${path.split('?')[0]} → ${json?.error?.message || text.slice(0, 200)}`);
-  }
-  return json;
-}
-
-function fromValue(v) {
-  if (!v || typeof v !== 'object') return null;
-  if ('stringValue' in v) return v.stringValue;
-  if ('integerValue' in v) return v.integerValue;
-  if ('booleanValue' in v) return v.booleanValue;
-  return null;
-}
-
-function toFields(value, ttlSeconds) {
-  const fields = { value: { stringValue: String(value) } };
-  if (ttlSeconds && Number.isFinite(ttlSeconds)) {
-    fields.expireAt = {
-      timestampValue: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
-    };
-  }
-  return fields;
-}
-
-function readDoc(json) {
-  const value = fromValue(json?.fields?.value);
-  if (value === null) return null;
-  const exp = json?.fields?.expireAt?.timestampValue;
-  if (exp && Date.parse(exp) < Date.now()) return null; // soft TTL
-  return value;
-}
-
-const firestoreStore = {
-  name: 'firestore',
+const d1Store = {
+  name: 'd1',
   async get(env, key) {
-    const json = await fsCall(env, `/documents/${COLLECTION}/${docId(key)}`);
-    return json ? readDoc(json) : null;
+    const row = await env.DB
+      .prepare("SELECT json FROM docs WHERE col = ? AND id = ?")
+      .bind(STATE_COL, key)
+      .first();
+    if (!row) return null;
+    try {
+      const doc = JSON.parse(row.json);
+      // Soft TTL mirrors the old expireAt behaviour.
+      if (doc.expireAt && Date.parse(doc.expireAt) < Date.now()) return null;
+      return typeof doc.value === 'string' ? doc.value : JSON.stringify(doc.value);
+    } catch {
+      return null;
+    }
   },
   async put(env, key, value, opts = {}) {
-    await fsCall(env, `/documents/${COLLECTION}/${docId(key)}`, {
-      method: 'PATCH',
-      body: { fields: toFields(value, opts.expirationTtl) },
-    });
+    const now = Date.now();
+    const doc = { value: String(value) };
+    if (opts.expirationTtl && Number.isFinite(opts.expirationTtl)) {
+      doc.expireAt = new Date(now + opts.expirationTtl * 1000).toISOString();
+    }
+    await env.DB
+      .prepare(
+        `INSERT INTO docs (col, id, team_id, json, created_at, updated_at)
+         VALUES (?, ?, NULL, ?, ?, ?)
+         ON CONFLICT(col, id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`
+      )
+      .bind(STATE_COL, key, JSON.stringify(doc), now, now)
+      .run();
   },
   async delete(env, key) {
-    await fsCall(env, `/documents/${COLLECTION}/${docId(key)}`, { method: 'DELETE' });
+    await env.DB.prepare('DELETE FROM docs WHERE col = ? AND id = ?').bind(STATE_COL, key).run();
   },
 };
 
-/* ── KV backend (used when the optional binding exists) ─────────── */
+/* ── KV backend (optional) ──────────────────────────────────────── */
 
 const kvStore = {
   name: 'kv',
@@ -119,6 +75,13 @@ const kvStore = {
 
 /* ── Factory ────────────────────────────────────────────────────── */
 
+/** Which backend would be used right now? */
+export function stateBackendName(env) {
+  if (env.DB) return 'd1';
+  if (env.NEBULA_EMAIL_KV) return 'kv';
+  return 'none';
+}
+
 /** JSON.parse that never throws — corrupt/half-written state reads as fallback. */
 export function safeParse(raw, fallback) {
   if (raw === null || raw === undefined) return fallback;
@@ -130,21 +93,13 @@ export function safeParse(raw, fallback) {
   }
 }
 
-/** True when the Worker has what the Firestore fallback needs. */
-export function stateBackendName(env) {
-  if (env.NEBULA_EMAIL_KV) return 'kv';
-  if (env.FIREBASE_SERVICE_ACCOUNT && env.FIREBASE_PROJECT_ID) return 'firestore';
-  return 'none';
-}
-
 /**
  * Fail-soft store.
  *
  * The state layer is ADVISORY: tasks, memory, locks, analytics cache. A
- * transient Google-side failure (429 rate limit, 5xx, token hiccup) used to
- * propagate out of getAccessToken/fsCall and crash every /v1/mail/* route
- * with Cloudflare error 1101 — the whole email system went down because one
- * Firestore read sneezed. The store now degrades instead:
+ * transient database failure used to propagate and crash every /v1/mail/*
+ * route with Cloudflare error 1101 — the whole email system went down
+ * because one read sneezed. The store now degrades instead:
  *
  *   get    → error is logged and returned as null (caller sees "no state")
  *   put/delete → best-effort, error logged, flow continues
@@ -154,7 +109,7 @@ export function stateBackendName(env) {
  * stop a send (e.g. the send request itself) do NOT go through this store.
  */
 export function createStore(env) {
-  const backend = env.NEBULA_EMAIL_KV ? kvStore : firestoreStore;
+  const backend = env.DB ? d1Store : kvStore;
   const store = {
     backend: backend.name,
     lastError: null,

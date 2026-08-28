@@ -1,8 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_constants.dart';
-import 'firestore_service.dart';
+import 'remote/data_api.dart';
+import 'remote/data_codec.dart';
 
 /// Repairs documents created before the workspace model settled.
 ///
@@ -16,9 +16,9 @@ import 'firestore_service.dart';
 /// Runs only for a super admin, only once per install, and skips documents
 /// that already carry the right team.
 class DataMigration {
-  DataMigration(this._db);
+  DataMigration(this._ds);
 
-  final FirebaseFirestore _db;
+  final RemoteDataSource _ds;
 
   static const _collections = [
     AppConstants.colContacts,
@@ -57,24 +57,21 @@ class DataMigration {
     for (final collection in _collections) {
       var updated = 0;
       try {
-        // Super admin rules permit an unscoped read, which is exactly why
+        // Super admin reads are unscoped server-side, which is exactly why
         // this has to be a super-admin-only operation.
-        final snap = await _db.collection(collection).get();
+        final docs = await _ds.list(collection, limit: 500);
 
-        final stale = snap.docs.where((d) {
-          final data = d.data();
-          final existing = data['teamId'];
+        final stale = docs.where((d) {
+          final existing = d.data['teamId'];
           return existing == null || existing == '' || existing != teamId;
         }).toList();
 
-        // Firestore caps a batch at 500 writes.
         for (var i = 0; i < stale.length; i += 400) {
           final end = (i + 400).clamp(0, stale.length);
-          final batch = _db.batch();
-          for (final doc in stale.sublist(i, end)) {
-            batch.update(doc.reference, {'teamId': teamId});
-          }
-          await batch.commit();
+          await _ds.batch([
+            for (final doc in stale.sublist(i, end))
+              BatchOp.update(collection, doc.id, {'teamId': teamId}),
+          ]);
           updated += end - i;
         }
       } catch (_) {
@@ -85,8 +82,8 @@ class DataMigration {
     }
 
     try {
-      await _db.collection(AppConstants.colSystem).doc(_markerDoc).set({
-        'ranAt': FieldValue.serverTimestamp(),
+      await _ds.set('system', _markerDoc, {
+        'ranAt': const ServerTimestamp(),
         'ranBy': actorId,
         'teamId': teamId,
         'results': results,
@@ -98,5 +95,5 @@ class DataMigration {
 }
 
 final dataMigrationProvider = Provider<DataMigration>((ref) {
-  return DataMigration(ref.watch(firestoreProvider));
+  return DataMigration(ref.watch(remoteDataServiceProvider));
 });

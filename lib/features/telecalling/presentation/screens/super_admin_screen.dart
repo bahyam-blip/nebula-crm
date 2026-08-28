@@ -1,10 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firebase_boot.dart';
-import '../../../../core/services/firestore_service.dart';
+import '../../../../core/services/remote/data_api.dart';
+import '../../../../core/services/remote/data_codec.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/formatters.dart';
@@ -197,17 +197,13 @@ class _PeopleTab extends ConsumerWidget {
 
     try {
       await withFirestoreRetry(() async {
-        await ref
-            .read(firestoreProvider)
-            .collection(AppConstants.colUsers)
-            .doc(target.id)
-            .update({
+        await ref.read(remoteDataServiceProvider).update('users', target.id, {
           'role': picked.name,
           // Reset to the new role's baseline. Carrying old grants across a
           // demotion is exactly how someone keeps powers they should have
           // just lost.
           'capabilities': defaultCapabilityIdsFor(picked),
-          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedAt': const ServerTimestamp(),
         });
         await ref.read(telecallingServiceProvider).recordAudit(
               action: 'user.role_change',

@@ -1,10 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/firebase_boot.dart';
-import '../../../../core/services/firestore_service.dart';
+import '../../../../core/services/remote/data_api.dart';
+import '../../../../core/services/remote/data_codec.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../models/app_user.dart';
@@ -47,14 +47,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     setState(() => _saving = true);
     try {
       await withFirestoreRetry(
-        () => ref
-            .read(firestoreProvider)
-            .collection(AppConstants.colUsers)
-            .doc(user.id)
-            .update({
+        () => ref.read(remoteDataServiceProvider).update('users', user.id, {
           'displayName': _name.text.trim(),
           'phone': _phone.text.trim(),
-          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedAt': const ServerTimestamp(),
         }),
       );
       if (!mounted) return;
