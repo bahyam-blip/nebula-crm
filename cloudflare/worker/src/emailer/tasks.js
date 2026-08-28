@@ -12,23 +12,25 @@
  * capped) so the app can show real progress instead of a spinner.
  */
 
+import { safeParse } from './state.js';
+
 const TTL = 60 * 60 * 24 * 180; // keep tasks 180 days
 const MAX_EVENTS = 30;
 
 export async function putTask(kv, task) {
   await kv.put(`mail:task:${task.id}`, JSON.stringify(task), { expirationTtl: TTL });
-  const index = JSON.parse((await kv.get('mail:task:index')) || '[]');
+  const index = safeParse(await kv.get('mail:task:index'), []);
   if (!index.includes(task.id)) index.unshift(task.id);
   await kv.put('mail:task:index', JSON.stringify(index.slice(0, 200)));
 }
 
 export async function getTask(kv, id) {
   const raw = await kv.get(`mail:task:${id}`);
-  return raw ? JSON.parse(raw) : null;
+  return safeParse(raw, null);
 }
 
 export async function listTasks(kv) {
-  const index = JSON.parse((await kv.get('mail:task:index')) || '[]');
+  const index = safeParse(await kv.get('mail:task:index'), []);
   const out = [];
   for (const id of index) {
     const t = await getTask(kv, id);
@@ -39,7 +41,7 @@ export async function listTasks(kv) {
 
 export async function deleteTask(kv, id) {
   await kv.delete(`mail:task:${id}`);
-  const index = JSON.parse((await kv.get('mail:task:index')) || '[]').filter((x) => x !== id);
+  const index = safeParse(await kv.get('mail:task:index'), []).filter((x) => x !== id);
   await kv.put('mail:task:index', JSON.stringify(index));
 }
 

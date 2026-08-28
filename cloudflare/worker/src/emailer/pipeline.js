@@ -63,7 +63,7 @@ import { buildBusinessBrief, planTask } from './planner.js';
 import { writeEmail, renderHtml, saveTemplate } from './copywriter.js';
 import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled } from './analytics.js';
 import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, progressOf } from './tasks.js';
-import { createStore, stateBackendName } from './state.js';
+import { createStore, stateBackendName, safeParse } from './state.js';
 import { getMemory, saveMemory, resetMemory, teach, learnFromResults, memoryContext, syncBriefToMemory } from './memory.js';
 
 const CORS = {
@@ -148,13 +148,13 @@ export async function mailConfigState(env, store = null) {
 async function loadSuppressions(store) {
   if (!store) return new Set();
   const raw = await store.get(SUPPRESSION_KEY);
-  const list = raw ? JSON.parse(raw) : [];
+  const list = safeParse(raw, []);
   return new Set(list.map((s) => s.email));
 }
 
 async function addSuppressions(store, entries) {
   if (!store || !entries?.length) return;
-  const list = JSON.parse((await store.get(SUPPRESSION_KEY)) || '[]');
+  const list = safeParse(await store.get(SUPPRESSION_KEY), []);
   const seen = new Set(list.map((s) => s.email));
   for (const e of entries) {
     if (!seen.has(e.email)) {
@@ -168,6 +168,20 @@ async function addSuppressions(store, entries) {
 /* ══════════════════════ HTTP router ══════════════════════ */
 
 export async function handleMail(request, env, { url, uid, ctx = { waitUntil: () => {} } }) {
+  // Top-level guard: the app depends on these routes answering with JSON.
+  // An uncaught throw here becomes Cloudflare error 1101 (HTML, no status
+  // payload) and the whole Email tab breaks with no clue why. Any unexpected
+  // exception now comes back as a structured 500 the app and the owner can
+  // actually read.
+  try {
+    return await handleMailInner(request, env, { url, uid, ctx });
+  } catch (e) {
+    console.error(`[mailer] unhandled error on ${url.pathname}:`, e?.stack || e);
+    return json({ ok: false, error: `mailer error: ${e?.message || e}` }, 500);
+  }
+}
+
+async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () => {} } }) {
   const store = stateBackendName(env) !== 'none' ? createStore(env) : null;
 
   // EVERY signed-in teammate can use the AI mailer. The token was already
@@ -182,12 +196,13 @@ export async function handleMail(request, env, { url, uid, ctx = { waitUntil: ()
 
   // ── Status works even when unconfigured (shows what is missing) ──
   if (sub === '/status' && request.method === 'GET') {
-    const last = store ? JSON.parse((await store.get('mail:last_run')) || 'null') : null;
-    const brief = store ? JSON.parse((await store.get('biz:brief')) || 'null') : null;
+    const last = store ? safeParse(await store.get('mail:last_run'), null) : null;
+    const brief = store ? safeParse(await store.get('biz:brief'), null) : null;
     const mem = await getMemory(store);
     const suppressions = store ? (await loadSuppressions(store)).size : 0;
     return json({
       ...state,
+      state_error: store?.lastError || null,
       ai_model: env.SARVAM_MODEL || 'sarvam-105b',
       timezone: env.MAIL_TIMEZONE || 'Asia/Calcutta',
       business_understood: mem.facts.business_type || brief

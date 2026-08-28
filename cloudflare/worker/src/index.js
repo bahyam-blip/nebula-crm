@@ -210,10 +210,11 @@ export default {
     const uid = claims.sub;
 
     // ── AI mailer (Sarvam + MailerCloud) ──
-    // Autonomous campaign engine driven by owner instructions. Roles are
-    // enforced inside handleMail (superAdmin/admin/manager, matching the
-    // app's canManageCampaigns). Inert until configured — /v1/mail/status
-    // reports exactly which variables/secrets are still missing.
+    // Every signed-in teammate can use the AI mailer: the Firebase ID token
+    // was already verified above, and role gates here caused hard 403s for
+    // the whole team whenever a user doc was missing or a role drifted
+    // ("only superadmin and admin can manage the email" — fixed). Inert
+    // until configured — /v1/mail/status reports exactly what is missing.
     if (path.startsWith('/v1/mail/')) {
       const url = new URL(request.url);
       return handleMail(request, env, { url, uid, ctx });

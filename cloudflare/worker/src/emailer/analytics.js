@@ -12,6 +12,7 @@
 
 import { sarvamChat } from './sarvam.js';
 import { findMailerCampaigns, updateCampaignMetrics } from './firestore.js';
+import { safeParse } from './state.js';
 
 const DAYS = 21;
 const CAMPAIGN_STATUSES = { scheduled: 'running', running: 'completed' };
@@ -136,7 +137,7 @@ export async function collectAnalytics(mc, env, kv) {
 
 export async function getLatestAnalytics(kv) {
   const raw = kv ? await kv.get('mail:analytics') : null;
-  return raw ? JSON.parse(raw) : null;
+  return safeParse(raw, null);
 }
 
 /** True when a refresh is due (throttled by MAIL_ANALYTICS_INTERVAL_HOURS). */

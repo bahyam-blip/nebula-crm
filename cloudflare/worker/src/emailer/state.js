@@ -119,6 +119,17 @@ const kvStore = {
 
 /* ── Factory ────────────────────────────────────────────────────── */
 
+/** JSON.parse that never throws — corrupt/half-written state reads as fallback. */
+export function safeParse(raw, fallback) {
+  if (raw === null || raw === undefined) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.warn('[mailer:state] corrupt JSON in state read — using fallback');
+    return fallback;
+  }
+}
+
 /** True when the Worker has what the Firestore fallback needs. */
 export function stateBackendName(env) {
   if (env.NEBULA_EMAIL_KV) return 'kv';
@@ -126,12 +137,52 @@ export function stateBackendName(env) {
   return 'none';
 }
 
+/**
+ * Fail-soft store.
+ *
+ * The state layer is ADVISORY: tasks, memory, locks, analytics cache. A
+ * transient Google-side failure (429 rate limit, 5xx, token hiccup) used to
+ * propagate out of getAccessToken/fsCall and crash every /v1/mail/* route
+ * with Cloudflare error 1101 — the whole email system went down because one
+ * Firestore read sneezed. The store now degrades instead:
+ *
+ *   get    → error is logged and returned as null (caller sees "no state")
+ *   put/delete → best-effort, error logged, flow continues
+ *
+ * The last error is kept on `store.lastError` so /v1/mail/status can surface
+ * it for diagnosis instead of leaving a blind 500. Hard failures that must
+ * stop a send (e.g. the send request itself) do NOT go through this store.
+ */
 export function createStore(env) {
   const backend = env.NEBULA_EMAIL_KV ? kvStore : firestoreStore;
-  return {
+  const store = {
     backend: backend.name,
-    get: (key) => backend.get(env, key),
-    put: (key, value, opts) => backend.put(env, key, value, opts),
-    delete: (key) => backend.delete(env, key),
+    lastError: null,
+    get: async (key) => {
+      try {
+        return await backend.get(env, key);
+      } catch (e) {
+        store.lastError = `${backend.name}.get(${key}) → ${e?.message || e}`;
+        console.warn(`[mailer:state] ${store.lastError} — degrading to null`);
+        return null;
+      }
+    },
+    put: async (key, value, opts) => {
+      try {
+        await backend.put(env, key, value, opts);
+      } catch (e) {
+        store.lastError = `${backend.name}.put(${key}) → ${e?.message || e}`;
+        console.warn(`[mailer:state] ${store.lastError} — write skipped`);
+      }
+    },
+    delete: async (key) => {
+      try {
+        await backend.delete(env, key);
+      } catch (e) {
+        store.lastError = `${backend.name}.delete(${key}) → ${e?.message || e}`;
+        console.warn(`[mailer:state] ${store.lastError} — delete skipped`);
+      }
+    },
   };
+  return store;
 }

@@ -42,6 +42,7 @@ function kvMock() {
 }
 
 const captured = { campaigns: [], activities: [], sends: [], templates: [], batches: [] };
+let failStateFetch = false; // regression toggle: make Firestore state reads throw
 let contactsInCrm = [
   { name: 'Asha Rao', email: 'asha@example.com', status: 'lead', company: 'Acme' },
   { name: 'Vik Singh', email: 'vik@example.com', status: 'customer', company: 'Globex' },
@@ -119,7 +120,10 @@ globalThis.fetch = async (url, init = {}) => {
       captured.activities.push(fsToPlain(JSON.parse(body).fields));
       return jsonRes(200, { name: 'x/activities/a1' });
     }
-    if (u.includes('/documents/mail_state/')) return jsonRes(404, { error: { message: 'not found' } });
+    if (u.includes('/documents/mail_state/')) {
+      if (failStateFetch) throw new Error('simulated transient failure (429/network)');
+      return jsonRes(404, { error: { message: 'not found' } });
+    }
     return jsonRes(200, {});
   }
   return realFetch(url, init);
@@ -466,6 +470,37 @@ console.log('\n— 8. Dry-run safety: pipeline plans but never sends —');
   ok(t.emails[0].status === 'dry_run', 'due email marked dry_run (nothing delivered)');
   ok(captured.sends.length === 0, 'zero provider sends in dry-run mode');
   await env.NEBULA_EMAIL_KV.delete('mail:dry_run_override');
+}
+
+console.log('\n— 9. Crash-proofing: state-layer failures must never 1101 the routes —');
+{
+  // Simulate the production outage: Firestore state reads blow up (429 /
+  // network / transient Google error) while OAuth + everything else works.
+  const env = makeEnv();
+  delete env.NEBULA_EMAIL_KV; // force the Firestore state backend
+  failStateFetch = true;
+
+  const st = await call(env, 'GET', '/v1/mail/status');
+  ok(st.res.status === 200, 'GET /status stays 200 when the state store throws (was Cloudflare 1101)',
+    `got ${st.res.status}`);
+  ok(!!st.json.state_error, 'status surfaces state_error for diagnosis', JSON.stringify(st.json.state_error || '').slice(0, 120));
+
+  const before = captured.sends.length;
+  const tst = await call(env, 'POST', '/v1/mail/test', { to: 'owner@example.com', name: 'Nebula Owner' });
+  ok(tst.res.status === 200 && tst.json.ok === true, 'POST /test still sends one real email with the store down');
+  ok(captured.sends.length === before + 1, 'provider saw exactly one send');
+  failStateFetch = false;
+}
+{
+  // Corrupt / half-written state must read as empty, not crash.
+  const env = makeEnv();
+  env.NEBULA_EMAIL_KV._map.set('mail:last_run', '{not json!!');
+  env.NEBULA_EMAIL_KV._map.set('biz:brief', '<<<');
+  env.NEBULA_EMAIL_KV._map.set('mail:task:index', 'garbage[');
+  const st = await call(env, 'GET', '/v1/mail/status');
+  ok(st.res.status === 200 && st.json.last_run === null, 'status survives corrupt last_run/brief JSON');
+  const tl = await call(env, 'GET', '/v1/mail/tasks');
+  ok(tl.res.status === 200 && tl.json.count === 0, 'tasks list survives corrupt index JSON');
 }
 
 console.log(`\n════════════════════════════════════════`);
