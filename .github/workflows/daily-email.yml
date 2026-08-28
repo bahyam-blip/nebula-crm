@@ -1,0 +1,77 @@
+name: Daily Marketing Email
+
+# Sends a daily product update email through MailerCloud.
+#
+# The cron triggers at 10:00 AM IST (04:30 UTC) every day. It calls the
+# Cloudflare Worker's /v1/mailercloud/send-daily endpoint, which:
+#   1. Reads CRM data (contacts, pipeline, activity) from Firestore
+#   2. Uses the Sarvam AI to generate email content about the business
+#   3. Creates and schedules a campaign in MailerCloud
+#
+# The Worker holds the MAILERCLOUD_API_KEY as a secret, so this workflow
+# never touches the key directly. It only needs CRON_SECRET to authenticate
+# the server-to-server call.
+#
+# You can also trigger it manually from the Actions tab ("Run workflow").
+
+on:
+  schedule:
+    # 04:30 UTC = 10:00 AM IST
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-daily-email:
+    name: Trigger daily MailerCloud campaign
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger Worker to send daily campaign
+        env:
+          # CRON_SECRET is a shared secret between this workflow and the
+          # Worker. Generate one with: openssl rand -hex 32
+          # Then add it as both a GitHub secret (CRON_SECRET) and a
+          # Worker secret (CRON_SECRET).
+          WORKER_URL: ${{ secrets.WORKER_URL || 'https://nebula-crm-storage.nebula-crm.workers.dev' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET is not set. Add it as a GitHub secret."
+            exit 1
+          fi
+
+          echo "Triggering daily campaign at $(date -u '+%Y-%m-%dT%H:%M:%SZ')..."
+
+          CODE=$(curl -s -o /tmp/result.json -w "%{http_code}" \
+            -X POST \
+            "$WORKER_URL/v1/mailercloud/send-daily?secret=$CRON_SECRET" \
+            -H "Content-Type: application/json")
+
+          BODY=$(cat /tmp/result.json)
+          echo "::warning::Worker responded HTTP $CODE"
+
+          # Pretty-print the result if it's JSON, otherwise show raw.
+          echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY"
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Daily campaign failed with HTTP $CODE"
+            exit 1
+          fi
+
+          # Extract key fields for the GitHub Actions summary.
+          SUBJECT=$(echo "$BODY" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('subject',''))" 2>/dev/null || echo "")
+          CAMPAIGN_ID=$(echo "$BODY" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('campaignId',''))" 2>/dev/null || echo "")
+          RECIPIENTS=$(echo "$BODY" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('recipients',''))" 2>/dev/null || echo "")
+
+          echo "## Daily Email Sent" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Campaign ID:** $CAMPAIGN_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Subject:** $SUBJECT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Recipients:** $RECIPIENTS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_STEP_SUMMARY
+          echo ""
+          echo "Daily marketing email sent successfully."
