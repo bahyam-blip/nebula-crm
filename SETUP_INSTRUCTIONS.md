@@ -187,30 +187,43 @@ Sarvam AI understands your business, writes the templates, syncs your Firestore 
 into MailerCloud, and schedules the sends. Campaigns are written into the same Firestore
 `campaigns` collection the app already renders — opens & clicks flow back automatically.
 
-### One-time setup (5 minutes)
+### One-time setup (2 minutes)
 
-1. **Create the KV namespace** (stores tasks, locks, analytics cache):
-   ```bash
-   cd cloudflare/worker
-   npx wrangler kv namespace create NEBULA_EMAIL_KV
-   ```
-   Paste the returned `id` into `wrangler.toml` and **uncomment** the
-   `[[kv_namespaces]]` block.
+The email engine ships ready. It stores its state (tasks, locks, analytics
+cache) in **Firestore** automatically — no KV namespace, no extra secrets
+beyond the two below.
 
-2. **Add GitHub secrets** (Repo → Settings → Secrets → Actions):
+1. **Add GitHub secrets** (Repo → Settings → Secrets and variables → Actions → New repository secret):
    | Secret | Where to get it |
    |---|---|
    | `MAILERCLOUD_API_KEY` | app.mailercloud.com → Account → API Integrations |
    | `MAILERCLOUD_SENDER_EMAIL` | A **verified** sender in MailerCloud |
    (SARVAM_AI_API and FIREBASE_SERVICE_ACCOUNT are already set.)
 
-3. **Edit `cloudflare/worker/wrangler.toml` vars**: fill `MAIL_BUSINESS_PROFILE`
-   and `MAIL_WEBSITE_URL` (this is how the AI learns your business), and set
-   `MAIL_DRY_RUN = "true"` until you have reviewed a preview.
+2. **Re-run the "Deploy Storage Worker" workflow** (Actions → Deploy Storage
+   Worker → Run workflow). Its summary page shows a readiness table — when
+   every row is green, the system is live. The workflow pushes the secrets
+   to the Worker for you.
 
-4. **Push to main** — the deploy workflow ships everything and pushes the new secrets.
+3. **Optional** — edit `cloudflare/worker/wrangler.toml` vars to give the AI
+   more context: `MAIL_BUSINESS_PROFILE`, `MAIL_WEBSITE_URL`, `MAIL_CTA_URL`
+   (the AI also infers the business from your CRM data and task instructions,
+   so these can stay empty).
 
-### Using it
+4. **Optional** — a Workers KV namespace is no longer required. If you prefer
+   it, uncomment the `[[kv_namespaces]]` block in `wrangler.toml` after
+   `npx wrangler kv namespace create NEBULA_EMAIL_KV`.
+
+### Using it (no terminal needed)
+
+Open the app → **More → AI Email Campaigns** (or the ✨ icon on the Campaigns
+screen). Type what you want, e.g. *"Send 3 emails this week to leads about
+our monsoon sale — build urgency but keep it classy"*, and press **Launch AI
+campaign**. The task card tracks the AI live: planned → written → scheduled.
+Toggle **LIVE / Safety mode** right on the status card. Every campaign also
+appears in the normal Campaigns screen with opens & clicks flowing back.
+
+Terminal equivalent:
 
 ```bash
 WORKER="https://nebula-crm-storage.<your-subdomain>.workers.dev"
@@ -227,6 +240,8 @@ curl "$WORKER/v1/mail/analytics?refresh=1" -H "Authorization: Bearer $TOKEN"
 curl "$WORKER/v1/mail/status"    -H "Authorization: Bearer $TOKEN"   # config & health
 curl -X POST "$WORKER/v1/mail/sync"   -H "Authorization: Bearer $TOKEN"   # contacts → MailerCloud only
 curl -X POST "$WORKER/v1/mail/run?force=1" -H "Authorization: Bearer $TOKEN"  # run pipeline now
+curl -X POST "$WORKER/v1/mail/config" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"dry_run":true}'          # owner safety switch
 ```
 
 ### How it behaves

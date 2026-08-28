@@ -30,6 +30,7 @@ import '../../features/pipeline/presentation/screens/deal_form_screen.dart';
 import '../../features/marketing/presentation/screens/campaigns_screen.dart';
 import '../../features/marketing/presentation/screens/campaign_detail_screen.dart';
 import '../../features/marketing/presentation/screens/campaign_builder_screen.dart';
+import '../../features/marketing/presentation/screens/ai_emailer_screen.dart';
 import '../../features/service/presentation/screens/tickets_screen.dart';
 import '../../features/service/presentation/screens/ticket_detail_screen.dart';
 import '../../features/service/presentation/screens/knowledge_base_screen.dart';
@@ -204,6 +205,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const CampaignsScreen(),
       ),
       GoRoute(
+        path: '/ai-emailer',
+        name: 'aiEmailer',
+        builder: (_, __) => const AiEmailerScreen(),
+      ),
+      GoRoute(
         path: '/campaigns/new',
         name: 'campaignBuilder',
         builder: (_, __) => const CampaignBuilderScreen(),
@@ -331,6 +337,12 @@ class _MoreScreen extends StatelessWidget {
         label: 'Campaigns',
         route: '/campaigns',
         color: AppColors.accent,
+      ),
+      _MenuItem(
+        icon: Icons.forward_to_inbox,
+        label: 'AI Email Campaigns',
+        route: '/ai-emailer',
+        color: AppColors.tertiary,
       ),
       _MenuItem(
         icon: Icons.headset_mic,

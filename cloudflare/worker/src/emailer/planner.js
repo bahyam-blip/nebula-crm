@@ -56,19 +56,56 @@ async function websiteText(env) {
   }
 }
 
-/** Step 1 — understand the business (cached ~7 days in KV). */
-export async function buildBusinessBrief(env, kv, force = false) {
+/**
+ * Step 1 — understand the business (cached ~7 days in the state store).
+ *
+ * Context priority: owner profile → website text → CRM data. Even when the
+ * owner never filled MAIL_BUSINESS_PROFILE, the brief is inferred from what
+ * the CRM itself knows (contact companies, segments, tags) and from the
+ * owner's recent campaign instructions — so the AI always has a business
+ * to write for.
+ */
+export async function buildBusinessBrief(env, kv, { crmStats = null, recentInstructions = [], force = false } = {}) {
   if (!force && kv) {
     const cached = await kv.get('biz:brief');
     if (cached) return JSON.parse(cached);
   }
 
   const site = await websiteText(env);
+  const profileGiven = !!(env.MAIL_BUSINESS_PROFILE && env.MAIL_BUSINESS_PROFILE.trim());
+  const hasCrmContext = !!crmStats && (crmStats.total || 0) > 0;
+
+  const crmContext = hasCrmContext
+    ? [
+        'CRM AUDIENCE DATA (who this business already sells/serves):',
+        JSON.stringify({
+          contacts: crmStats.total,
+          lifecycle_segments: crmStats.segments,
+          top_companies: (crmStats.top_companies || []).slice(0, 8),
+          top_tags: (crmStats.top_tags || []).slice(0, 8),
+        }),
+      ].join('\n')
+    : '';
+
+  const instructionContext = recentInstructions.length
+    ? ['RECENT CAMPAIGN INSTRUCTIONS FROM THE OWNER (what they ask the AI to email about):',
+       ...recentInstructions.slice(0, 5).map((s) => `- ${String(s).slice(0, 220)}`)].join('\n')
+    : '';
+
+  const inferred = !profileGiven && !site && (hasCrmContext || recentInstructions.length);
+
   const user = [
     'Analyse this business and build a marketing brief for its email campaigns.',
     `Business name: ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}`,
-    `Owner-provided profile: ${env.MAIL_BUSINESS_PROFILE || '(not provided — infer from website below)'}`,
+    profileGiven
+      ? `Owner-provided profile: ${env.MAIL_BUSINESS_PROFILE}`
+      : 'Owner-provided profile: (not provided — infer the business from the context below)',
     site ? `Website content (truncated):\n${site}` : '',
+    crmContext,
+    instructionContext,
+    inferred
+      ? 'The business type MUST be inferred primarily from the CRM data and owner instructions above.'
+      : '',
     '',
     BRIEF_SCHEMA_PROMPT,
   ].filter(Boolean).join('\n');
@@ -83,6 +120,7 @@ export async function buildBusinessBrief(env, kv, force = false) {
   );
 
   brief.generatedAt = new Date().toISOString();
+  brief.source = profileGiven ? 'owner-profile' : site ? 'website' : inferred ? 'crm-inferred' : 'guess';
   if (kv) await kv.put('biz:brief', JSON.stringify(brief), { expirationTtl: 60 * 60 * 24 * 7 });
   return brief;
 }

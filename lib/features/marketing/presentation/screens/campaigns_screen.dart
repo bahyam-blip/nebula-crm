@@ -19,7 +19,16 @@ class CampaignsScreen extends ConsumerWidget {
     final campaigns = ref.watch(campaignsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Campaigns')),
+      appBar: AppBar(
+        title: const Text('Campaigns'),
+        actions: [
+          IconButton(
+            tooltip: 'AI Email — let the AI run campaigns',
+            icon: const Icon(Icons.auto_awesome, size: 20),
+            onPressed: () => context.push('/ai-emailer'),
+          ),
+        ],
+      ),
       body: campaigns.when(
         data: (list) {
           if (list.isEmpty) {

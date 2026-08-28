@@ -116,6 +116,38 @@ jobs:
             | npx --yes wrangler@latest secret put FIREBASE_SERVICE_ACCOUNT 2>&1 | tail -3
           echo "::warning::FIREBASE_SERVICE_ACCOUNT stored as a Worker secret"
 
+      # The AI mailer stays inert until BOTH MailerCloud secrets exist in
+      # THIS repo's Actions secrets. Surface readiness where the owner will
+      # actually see it: the run summary page.
+      - name: AI mailer readiness summary
+        if: always()
+        env:
+          MAILERCLOUD_API_KEY_SET: ${{ secrets.MAILERCLOUD_API_KEY != '' }}
+          MAILERCLOUD_SENDER_EMAIL_SET: ${{ secrets.MAILERCLOUD_SENDER_EMAIL != '' }}
+          SARVAM_AI_API_SET: ${{ secrets.SARVAM_AI_API != '' }}
+        run: |
+          {
+            echo "## 📧 AI Email system — readiness"
+            echo ""
+            echo "| Requirement | Status |"
+            echo "|---|---|"
+            echo "| SARVAM_AI_API secret | $([ '$SARVAM_AI_API_SET' = 'true' ] && echo '✅ set' || echo '❌ missing') |"
+            echo "| FIREBASE_SERVICE_ACCOUNT secret | ✅ set |"
+            echo "| MAILERCLOUD_API_KEY secret | $([ '$MAILERCLOUD_API_KEY_SET' = 'true' ] && echo '✅ set' || echo '❌ **missing — email sending is disabled**') |"
+            echo "| MAILERCLOUD_SENDER_EMAIL secret | $([ '$MAILERCLOUD_SENDER_EMAIL_SET' = 'true' ] && echo '✅ set' || echo '❌ **missing — email sending is disabled**') |"
+            echo "| Worker state (tasks/locks) | ✅ Firestore (no KV setup needed) |"
+            echo ""
+            if [ '$MAILERCLOUD_API_KEY_SET' != 'true' ] || [ '$MAILERCLOUD_SENDER_EMAIL_SET' != 'true' ]; then
+              echo "### ⚠️ To switch the email system ON"
+              echo "1. Repo → **Settings → Secrets and variables → Actions → New repository secret**"
+              echo "2. Add \`MAILERCLOUD_API_KEY\` (app.mailercloud.com → Account → API Integrations)"
+              echo "3. Add \`MAILERCLOUD_SENDER_EMAIL\` (a **verified** sender in MailerCloud)"
+              echo "4. Re-run this workflow (Run workflow button) — the AI Email screen in the app will then go live."
+            else
+              echo "✅ All set — open the app → More → **AI Email Campaigns**, give the AI a task, and it plans/writes/schedules real emails."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy worker
         working-directory: cloudflare/worker
         env:

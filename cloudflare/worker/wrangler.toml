@@ -17,10 +17,10 @@ bucket_name = "nebula-crm1"
 crons = ["*/30 * * * *"]
 
 # ── AI mailer state (tasks, dedup lock, analytics cache) ──────────────
-# ONE-TIME SETUP (see SETUP_INSTRUCTIONS → "AI mailer"):
+# OPTIONAL. The mailer stores its state in Firestore by default (it already
+# holds the Firebase service account) — no KV setup is required anymore.
+# If you prefer Workers KV, create a namespace and uncomment the block:
 #   npx wrangler kv namespace create NEBULA_EMAIL_KV
-# then paste the returned id below and uncomment the block. Until then the
-# mailer stays disabled and everything else keeps working.
 # [[kv_namespaces]]
 # binding = "NEBULA_EMAIL_KV"
 # id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
@@ -29,9 +29,14 @@ crons = ["*/30 * * * *"]
 FIREBASE_PROJECT_ID = "nebula-crm-70f58"
 
 # ── AI mailer settings (non-secret — edit freely) ─────────────────────
-# The mailer stays INERT until all of these are satisfied:
-#   KV namespace bound above + secrets: SARVAM_API_KEY (already set),
-#   MAILERCLOUD_API_KEY, MAILERCLOUD_SENDER_EMAIL.
+# The mailer needs these SECRETS to send (pushed automatically by the
+# deploy workflow from GitHub secrets — check that workflow's summary for
+# readiness):
+#   SARVAM_API_KEY, MAILERCLOUD_API_KEY, MAILERCLOUD_SENDER_EMAIL,
+#   FIREBASE_SERVICE_ACCOUNT
+# The AI also learns your business from MAIL_BUSINESS_PROFILE / website
+# below; when both are empty it infers it from your CRM data + your task
+# instructions (see /v1/mail/status → business_understood).
 MAIL_BUSINESS_NAME = "Nebula CRM"
 MAIL_BUSINESS_PROFILE = ""          # e.g. "Nebula CRM is an AI-powered CRM for Indian sales teams: contacts, telecalling, deals, campaigns."
 MAIL_WEBSITE_URL = ""               # the AI reads this page to understand the business
@@ -41,7 +46,7 @@ MAIL_LOGO_URL = ""
 MAIL_TIMEZONE = "Asia/Calcutta"
 MAIL_TEAM_ID = ""                   # optional: only sync contacts of this team (empty = all)
 MAIL_MAX_SYNC = "5000"              # cap on contacts pulled from Firestore per run
-MAIL_DRY_RUN = "true"               # "true" = plan & generate but NEVER send. Flip to "false" only after a /v1/mail/preview review.
+MAIL_DRY_RUN = "false"              # live mode. The owner can flip this any time from the app (AI Email screen) or POST /v1/mail/config {"dry_run":true}.
 MAIL_LOOKAHEAD_HOURS = "26"         # create scheduled campaigns up to this many hours ahead
 MAIL_ANALYTICS_INTERVAL_HOURS = "20"
 MC_CREATE_TEMPLATES = "true"        # save every AI template into MailerCloud's template library
