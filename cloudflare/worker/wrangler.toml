@@ -9,8 +9,42 @@ account_id = "af3007244dc00e001004045fd488b42b"
 binding = "MEDIA"
 bucket_name = "nebula-crm1"
 
+# ── AI mailer cron ────────────────────────────────────────────────────
+# Every 30 min the worker plans new owner tasks and creates scheduled
+# MailerCloud campaigns (delivery happens at the AI-chosen minute). The
+# mailer no-ops cheaply until configured — see SETUP_INSTRUCTIONS.
+[triggers]
+crons = ["*/30 * * * *"]
+
+# ── AI mailer state (tasks, dedup lock, analytics cache) ──────────────
+# ONE-TIME SETUP (see SETUP_INSTRUCTIONS → "AI mailer"):
+#   npx wrangler kv namespace create NEBULA_EMAIL_KV
+# then paste the returned id below and uncomment the block. Until then the
+# mailer stays disabled and everything else keeps working.
+# [[kv_namespaces]]
+# binding = "NEBULA_EMAIL_KV"
+# id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+
 [vars]
 FIREBASE_PROJECT_ID = "nebula-crm-70f58"
+
+# ── AI mailer settings (non-secret — edit freely) ─────────────────────
+# The mailer stays INERT until all of these are satisfied:
+#   KV namespace bound above + secrets: SARVAM_API_KEY (already set),
+#   MAILERCLOUD_API_KEY, MAILERCLOUD_SENDER_EMAIL.
+MAIL_BUSINESS_NAME = "Nebula CRM"
+MAIL_BUSINESS_PROFILE = ""          # e.g. "Nebula CRM is an AI-powered CRM for Indian sales teams: contacts, telecalling, deals, campaigns."
+MAIL_WEBSITE_URL = ""               # the AI reads this page to understand the business
+MAIL_CTA_URL = ""                   # button link in every email (falls back to MAIL_WEBSITE_URL)
+MAIL_BRAND_COLOR = "#6C8CFF"        # electric indigo — matches the app theme
+MAIL_LOGO_URL = ""
+MAIL_TIMEZONE = "Asia/Calcutta"
+MAIL_TEAM_ID = ""                   # optional: only sync contacts of this team (empty = all)
+MAIL_MAX_SYNC = "5000"              # cap on contacts pulled from Firestore per run
+MAIL_DRY_RUN = "true"               # "true" = plan & generate but NEVER send. Flip to "false" only after a /v1/mail/preview review.
+MAIL_LOOKAHEAD_HOURS = "26"         # create scheduled campaigns up to this many hours ahead
+MAIL_ANALYTICS_INTERVAL_HOURS = "20"
+MC_CREATE_TEMPLATES = "true"        # save every AI template into MailerCloud's template library
 
 [observability]
 enabled = true

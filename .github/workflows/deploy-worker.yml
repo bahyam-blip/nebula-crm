@@ -75,6 +75,32 @@ jobs:
             | npx --yes wrangler@latest secret put SARVAM_API_KEY 2>&1 | tail -3
           echo "::warning::SARVAM_API_KEY stored as a Worker secret"
 
+      - name: Push MailerCloud key as a Worker secret (AI mailer)
+        working-directory: cloudflare/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: af3007244dc00e001004045fd488b42b
+          MAILERCLOUD_API_KEY: ${{ secrets.MAILERCLOUD_API_KEY }}
+          MAILERCLOUD_SENDER_EMAIL: ${{ secrets.MAILERCLOUD_SENDER_EMAIL }}
+        run: |
+          # Both values come from app.mailercloud.com (API key: Account →
+          # API Integrations; sender: a VERIFIED sender email). Until they
+          # are set the AI mailer stays disabled and everything else works.
+          if [ -z "$MAILERCLOUD_API_KEY" ]; then
+            echo "::warning::MAILERCLOUD_API_KEY not set - AI mailer disabled (/v1/mail/status explains)."
+            exit 0
+          fi
+          printf '%s' "$MAILERCLOUD_API_KEY" \
+            | npx --yes wrangler@latest secret put MAILERCLOUD_API_KEY 2>&1 | tail -3
+          if [ -n "$MAILERCLOUD_SENDER_EMAIL" ]; then
+            printf '%s' "$MAILERCLOUD_SENDER_EMAIL" \
+              | npx --yes wrangler@latest secret put MAILERCLOUD_SENDER_EMAIL 2>&1 | tail -3
+            echo "::warning::MAILERCLOUD_SENDER_EMAIL stored as a Worker secret"
+          else
+            echo "::warning::MAILERCLOUD_SENDER_EMAIL not set - add it to enable sending."
+          fi
+          echo "::warning::MAILERCLOUD_API_KEY stored as a Worker secret"
+
       - name: Push Firebase service account as a Worker secret
         working-directory: cloudflare/worker
         env:

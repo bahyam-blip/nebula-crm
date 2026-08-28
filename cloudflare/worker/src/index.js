@@ -19,6 +19,7 @@ import {
   teamMemberIds,
   sendToTokens,
 } from './push.js';
+import { handleMail, runMailCron, mailConfigState } from './emailer/pipeline.js';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -164,7 +165,15 @@ function mayWrite(key, uid) {
 // ── Handler ──────────────────────────────────────────────────────
 
 export default {
-  async fetch(request, env) {
+  /** ── Cron entrypoint (every 30 min via wrangler.toml [triggers]) ──
+   * Drives the AI mailer: refresh analytics, plan new owner tasks, create
+   * scheduled MailerCloud campaigns. No-ops cheaply when the mailer is
+   * not configured yet (see SETUP_INSTRUCTIONS → "AI mailer"). */
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runMailCron(env));
+  },
+
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -199,6 +208,16 @@ export default {
     const claims = await verifyIdToken(bearer, env.FIREBASE_PROJECT_ID);
     if (!claims) return json({ error: 'invalid or expired token' }, 401);
     const uid = claims.sub;
+
+    // ── AI mailer (Sarvam + MailerCloud) ──
+    // Autonomous campaign engine driven by owner instructions. Roles are
+    // enforced inside handleMail (superAdmin/admin/manager, matching the
+    // app's canManageCampaigns). Inert until configured — /v1/mail/status
+    // reports exactly which variables/secrets are still missing.
+    if (path.startsWith('/v1/mail/')) {
+      const url = new URL(request.url);
+      return handleMail(request, env, { url, uid, ctx });
+    }
 
     // ── AI proxy ──
     // Sarvam's key lives here as a Worker secret. It must never ship in the

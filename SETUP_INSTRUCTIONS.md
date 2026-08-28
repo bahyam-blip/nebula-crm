@@ -176,3 +176,69 @@ flutter run
 ## 📞 Need help?
 
 Open an issue: https://github.com/bahyam-blip/nebula-crm/issues
+
+---
+
+## 📧 AI Mailer (Sarvam + MailerCloud)
+
+The Cloudflare Worker now includes an **autonomous email campaign engine**. You give it
+plain-language tasks ("Send 3 emails this week to 500 leads about our monsoon sale");
+Sarvam AI understands your business, writes the templates, syncs your Firestore contacts
+into MailerCloud, and schedules the sends. Campaigns are written into the same Firestore
+`campaigns` collection the app already renders — opens & clicks flow back automatically.
+
+### One-time setup (5 minutes)
+
+1. **Create the KV namespace** (stores tasks, locks, analytics cache):
+   ```bash
+   cd cloudflare/worker
+   npx wrangler kv namespace create NEBULA_EMAIL_KV
+   ```
+   Paste the returned `id` into `wrangler.toml` and **uncomment** the
+   `[[kv_namespaces]]` block.
+
+2. **Add GitHub secrets** (Repo → Settings → Secrets → Actions):
+   | Secret | Where to get it |
+   |---|---|
+   | `MAILERCLOUD_API_KEY` | app.mailercloud.com → Account → API Integrations |
+   | `MAILERCLOUD_SENDER_EMAIL` | A **verified** sender in MailerCloud |
+   (SARVAM_AI_API and FIREBASE_SERVICE_ACCOUNT are already set.)
+
+3. **Edit `cloudflare/worker/wrangler.toml` vars**: fill `MAIL_BUSINESS_PROFILE`
+   and `MAIL_WEBSITE_URL` (this is how the AI learns your business), and set
+   `MAIL_DRY_RUN = "true"` until you have reviewed a preview.
+
+4. **Push to main** — the deploy workflow ships everything and pushes the new secrets.
+
+### Using it
+
+```bash
+WORKER="https://nebula-crm-storage.<your-subdomain>.workers.dev"
+TOKEN="<Firebase ID token of a superAdmin/admin/manager>"   # from the app: user.getIdToken()
+
+# Give the AI a task (it plans, writes, schedules — check progress with GET)
+curl -X POST "$WORKER/v1/mail/tasks" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"instruction":"Send 2 emails this week to leads about our monsoon sale. Build urgency but keep it classy."}'
+
+curl "$WORKER/v1/mail/tasks"     -H "Authorization: Bearer $TOKEN"   # progress & status
+curl "$WORKER/v1/mail/preview?task=Introduce our CRM" -H "Authorization: Bearer $TOKEN" | jq .html -r > sample.html
+curl "$WORKER/v1/mail/analytics?refresh=1" -H "Authorization: Bearer $TOKEN"
+curl "$WORKER/v1/mail/status"    -H "Authorization: Bearer $TOKEN"   # config & health
+curl -X POST "$WORKER/v1/mail/sync"   -H "Authorization: Bearer $TOKEN"   # contacts → MailerCloud only
+curl -X POST "$WORKER/v1/mail/run?force=1" -H "Authorization: Bearer $TOKEN"  # run pipeline now
+```
+
+### How it behaves
+
+- **Audience = your Firestore `contacts`** (only rows with a valid email; optional
+  `MAIL_TEAM_ID` filter). The AI targets segments by `status` (lead, customer, mql…).
+- **Sends happen on MailerCloud** as *scheduled campaigns* (up to 26 h ahead), so the
+  email lands at the AI-chosen minute. Cron checks every 30 min.
+- **Every campaign appears in the app's Marketing screen** with live metrics
+  (sent / opens / clicks / unsubscribes) written back from MailerCloud.
+- **The AI learns**: each analytics pull turns numbers into directives that feed the
+  next planning & copywriting prompts.
+- **Safety**: `MAIL_DRY_RUN = "true"` (default) plans & writes copy but sends nothing;
+  role-gated endpoints (superAdmin/admin/manager); run-lock prevents double sends;
+  template/analytics failures are non-fatal; mailer stays inert until all config is present.
