@@ -59,7 +59,9 @@ class RemoteDataSource {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw const DataApiException(401, 'not signed in');
     final token = await user.getIdToken();
-    if (token.isEmpty) throw const DataApiException(401, 'empty id token');
+    if (token == null || token.isEmpty) {
+      throw const DataApiException(401, 'empty id token');
+    }
     return token;
   }
 
@@ -172,7 +174,7 @@ class RemoteDataSource {
   // ── Realtime-ish helpers ──
 
   /// Single-value variant of [watchList] — for profile/settings streams.
-  Stream<T> watch(
+  Stream<T> watch<T>(
     Future<T> Function() fetch, {
     Duration interval = const Duration(seconds: 30),
   }) {

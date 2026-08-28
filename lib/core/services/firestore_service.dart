@@ -128,7 +128,7 @@ class FirestoreService {
   }
 
   Stream<Deal?> watchDeal(String id) {
-    return _ds.watchList<Deal?>(
+    return _ds.watch<Deal?>(
       () async {
         final doc = await _ds.get(AppConstants.colDeals, id);
         return doc == null ? null : Deal.fromFirestore(doc);
