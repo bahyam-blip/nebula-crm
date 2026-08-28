@@ -63,14 +63,9 @@ async function handleDataRequestInner(request, env, { path, claims }) {
     return json(await bootstrapUser(env, db, { claims, body: b }));
   }
 
-  // From here on the caller needs a profile (created by bootstrap).
-  const user = await me();
-  if (!user) return json({ error: 'profile missing — call /v1/data/bootstrap first' }, 409);
-  if (b.teamId && b.teamId !== user.teamId && !isSuperAdmin(user)) {
-    return deny('cross-team request');
-  }
-
-  // ── Migration (superAdmin; or bootstrap mode before any users exist) ──
+  // ── Migration (must run BEFORE profiles exist) ──────────────────
+  // Allowed in bootstrap mode (users table empty) or by a superAdmin once
+  // migrated. Skips itself once the 'migrated_at' marker exists.
   if (path === '/v1/admin/migrate-from-firestore' && request.method === 'POST') {
     const count = await db.prepare('SELECT COUNT(*) AS n FROM docs WHERE col = ?').bind('users').first();
     const emptyStart = (count?.n ?? 0) === 0;
@@ -79,13 +74,21 @@ async function handleDataRequestInner(request, env, { path, claims }) {
     if (!emptyStart && marker && !force) {
       return json({ ok: true, skipped: true, reason: 'already migrated — pass force=1 to re-run', migratedAt: marker.v });
     }
-    if (!emptyStart && !isSuperAdmin(user)) return deny('migration needs a superAdmin');
+    const user0 = await me();
+    if (!emptyStart && !(user0 && isSuperAdmin(user0))) return deny('migration needs a superAdmin');
     const result = await migrateFromFirestore(env, db).catch((e) => ({ error: e.message }));
     if (result.error) return json({ ok: false, error: result.error }, 500);
     const at = new Date().toISOString();
     await db.prepare('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v')
       .bind('migrated_at', at).run();
     return json({ ok: true, migratedAt: at, ...result });
+  }
+
+  // From here on the caller needs a profile (created by bootstrap).
+  const user = await me();
+  if (!user) return json({ error: 'profile missing — call /v1/data/bootstrap first' }, 409);
+  if (b.teamId && b.teamId !== user.teamId && !isSuperAdmin(user)) {
+    return deny('cross-team request');
   }
 
   switch (path) {
