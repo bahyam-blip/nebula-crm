@@ -10,6 +10,7 @@ import '../../../../core/utils/extensions.dart';
 import '../../../../core/widgets/common_widgets.dart';
 import '../../providers/mail_provider.dart';
 import '../../services/mail_api_service.dart';
+import 'business_profile_screen.dart';
 
 /// AI Email — give the owner's instruction to the AI, it plans, writes,
 /// syncs CRM contacts to MailerCloud and schedules real campaigns. Every
@@ -240,11 +241,17 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
     final tasks = ref.watch(mailTasksProvider);
     final analytics = ref.watch(mailAnalyticsProvider);
     final memory = ref.watch(mailMemoryProvider);
+    final business = ref.watch(mailBusinessProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI Email'),
         actions: [
+          IconButton(
+            tooltip: 'Business Profile — your email brand',
+            onPressed: _busy ? null : _openBusinessProfile,
+            icon: const Icon(Icons.business_center_outlined, size: 20),
+          ),
           IconButton(
             tooltip: 'Business Brain — what the AI knows',
             onPressed: _busy ? null : _openMemorySheet,
@@ -273,11 +280,20 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
           ref.invalidate(mailTasksProvider);
           ref.invalidate(mailAnalyticsProvider);
           ref.invalidate(mailMemoryProvider);
+          ref.invalidate(mailBusinessProvider);
         },
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
           children: [
+            // ── Business branding (who the emails come FROM) ──
+            business.when(
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (p) => _BrandingCard(profile: p, onEdit: _openBusinessProfile),
+            ),
+            const SizedBox(height: 14),
+
             status.when(
               loading: () => const Center(
                   child: Padding(
@@ -421,6 +437,18 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
 
   /* ── Business Brain: view + teach ── */
 
+  void _openBusinessProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BusinessProfileScreen()),
+    ).then((_) {
+      // Returning from the profile: the brand (and AI memory) may have changed.
+      ref.invalidate(mailBusinessProvider);
+      ref.invalidate(mailMemoryProvider);
+      ref.invalidate(mailStatusProvider);
+    });
+  }
+
   void _openMemorySheet() {
     ref.invalidate(mailMemoryProvider);
     showModalBottomSheet<void>(
@@ -535,6 +563,99 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
         hintText: hint,
         alignLabelWithHint: true,
         border: const OutlineInputBorder(),
+      ),
+    );
+  }
+}
+
+/* ── Business branding card ── */
+
+/// Shows WHO the emails are sent as. Unbranded → a nudge to set up the
+/// business profile (the #1 thing that makes the mailer feel like the
+/// owner's own company instead of a tool).
+class _BrandingCard extends StatelessWidget {
+  const _BrandingCard({required this.profile, required this.onEdit});
+  final BusinessProfile profile;
+  final VoidCallback onEdit;
+
+  Color get _brandColor {
+    final hex = profile.brandColor.replaceAll('#', '');
+    if (hex.length == 6) {
+      final v = int.tryParse(hex, radix: 16);
+      if (v != null) return Color(0xFF000000 | v);
+    }
+    return AppColors.primary;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final branded = profile.effectiveSenderName.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: branded
+              ? _brandColor.withValues(alpha: 0.5)
+              : AppColors.warning.withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        children: [
+          if (profile.logoUrl.isNotEmpty)
+            CircleAvatar(
+              radius: 20,
+              backgroundImage: NetworkImage(profile.logoUrl),
+              onBackgroundImageError: (_, __) {},
+            )
+          else
+            CircleAvatar(
+              radius: 20,
+              backgroundColor:
+                  branded ? _brandColor : AppColors.warning.withValues(alpha: 0.25),
+              child: Text(
+                branded ? profile.effectiveSenderName[0].toUpperCase() : '!',
+                style: TextStyle(
+                  color: branded ? Colors.white : AppColors.warning,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  branded
+                      ? 'Sending as ${profile.effectiveSenderName}'
+                      : 'Emails still go out as “Nebula CRM”',
+                  style: context.textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  branded
+                      ? 'Branded templates, your footer & signature — tap to edit'
+                      : 'Set up your business brand — every email will carry it',
+                  style: context.textTheme.bodySmall
+                      ?.copyWith(color: AppColors.textSecondary),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            onPressed: onEdit,
+            tooltip: 'Business Profile',
+            icon: Icon(branded ? Icons.edit_outlined : Icons.add_business,
+                size: 20),
+          ),
+        ],
       ),
     );
   }

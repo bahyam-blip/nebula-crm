@@ -476,6 +476,32 @@ jobs:
                   say(f"TRACK PIXEL FAIL HTTP {r.status_code} type={ctype}")
           except Exception as e:
               say(f"/v1/t/o.png probe failed: {e}")
+
+          # 7) Business Profile: the brand emails are sent with. GET must
+          #    always answer; POST must persist + return the resolved brand
+          #    (From name) — the "emails branded as Nebula CRM" bug shipped
+          #    because nothing verified the branding chain.
+          try:
+              r = requests.get(f"{WORKER}/v1/mail/business", headers=AH, timeout=30)
+              if not r.ok:
+                  say(f"BUSINESS PROFILE FAIL GET HTTP {r.status_code}")
+              else:
+                  cur = (r.json().get("profile") or {}).get("business_name", "")
+                  r2 = requests.post(f"{WORKER}/v1/mail/business", headers=AH, timeout=30,
+                                     json={"business_name": cur or "CI Brand Check", "industry": "ci-probe"})
+                  b2 = r2.json() if "json" in r2.headers.get("content-type", "") else {}
+                  brand = b2.get("brand") or {}
+                  if r2.ok and brand.get("fromName"):
+                      # restore the previous name if there was one
+                      if cur and cur != "CI Brand Check":
+                          requests.post(f"{WORKER}/v1/mail/business", headers=AH, timeout=30,
+                                        json={"business_name": cur})
+                      say(f"BUSINESS PROFILE OK (branded={brand.get('branded')} fromName={brand.get('fromName')})")
+                  else:
+                      say(f"BUSINESS PROFILE FAIL POST HTTP {r2.status_code} "
+                          f"detail={json.dumps(b2)[:300]}")
+          except Exception as e:
+              say(f"/v1/mail/business probe failed: {e}")
           PYEOF
           rm -f /tmp/sa.json
 

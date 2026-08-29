@@ -112,12 +112,14 @@ export class MailerCloud {
   /**
    * Create + publish a campaign. scheduledAt: "YYYY-MM-DD HH:MM:SS" in the
    * account timezone → MailerCloud fires at that minute. Omit = send now.
+   * brand (optional) — Business Profile branding: the campaign goes out as
+   * the OWNER'S business (sender display name + permission reminder).
    */
-  async createAndPublishCampaign({ name, subject, html, preheader, listId, scheduledAt }) {
+  async createAndPublishCampaign({ name, subject, html, preheader, listId, scheduledAt, brand = null }) {
     const env = this.env;
     // Same verified identity as the transactional engine (das@aidraft.bond
     // unless overridden): the "from" of a campaign must be a verified sender.
-    const sender = resolveSender(env);
+    const sender = resolveSender(env, brand);
     const body = {
       name: name.slice(0, 150),
       subject,
@@ -125,8 +127,9 @@ export class MailerCloud {
       plain_text: htmlToText(html),
       email_preheader: (preheader || '').slice(0, 150),
       permission_reminder:
+        brand?.permission ||
         env.MAIL_PERMISSION_REMINDER ||
-        `You are receiving this because you subscribed to updates from ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}.`,
+        `You are receiving this because you subscribed to updates from ${brand?.name || env.MAIL_BUSINESS_NAME || 'Nebula CRM'}.`,
       list_ids: [listId],
       sender: {
         sender_email: sender.from,

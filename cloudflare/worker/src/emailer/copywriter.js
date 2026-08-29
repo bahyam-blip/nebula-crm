@@ -2,15 +2,16 @@
  * AI copywriter (Sarvam) + branded responsive HTML email builder.
  *
  * Copy is optimised for opens/clicks using the MailerCloud learnings, then
- * rendered into a mobile-safe template using Nebula CRM's brand (electric
- * indigo #6C8CFF primary, per lib/core/theme/app_colors.dart). Every
- * generated email is also saved into MailerCloud's template library
- * (POST /templates/create).
+ * rendered into one of FIVE mobile-safe templates — always in the OWNER'S
+ * business brand (name, logo, colour, website, signature, footer address)
+ * coming from the Business Profile (business.js). Every generated email is
+ * also saved into MailerCloud's template library (POST /templates/create).
  */
 
 import { sarvamChat } from './sarvam.js';
 import { esc, htmlToText } from './http.js';
 import { memoryContext } from './memory.js';
+import { normalizeStyle } from './business.js';
 
 const COPY_SCHEMA_PROMPT = `Return ONLY a JSON object:
 {
@@ -20,10 +21,12 @@ const COPY_SCHEMA_PROMPT = `Return ONLY a JSON object:
  "intro": "1-2 sentence opening that hooks the reader",
  "sections": [ { "title": "section heading", "body": "2-4 sentences, concrete and useful" } ],
  "cta_text": "max 22 chars, action verb first",
- "closing": "1 line sign-off",
+ "closing": "1 line sign-off (do NOT include the business/team name here — the signature adds it)",
  "ps": "short P.S. hook (can be empty)"
 }
-Rules: no fake statistics, no fake testimonials, no invented customer names, no false scarcity.`;
+Rules: no fake statistics, no fake testimonials, no invented customer names, no false scarcity.
+NEVER write a greeting/salutation (Hi …, Hello …, Dear …) anywhere — the template adds a
+personalized "Hi {{first_name}}," line automatically. Start the intro straight into the hook.`;
 
 /**
  * The creative playbook — what separates an elite email marketer from a
@@ -40,6 +43,8 @@ const CREATIVE_PLAYBOOK = `CRAFT RULES (this is what gets opens and clicks):
 - CTA: one email, ONE action. Verb-first, low-friction ("See it in action" beats "Submit").
 - P.S. is prime real estate: restate the payoff or add urgency honestly (a real deadline only).
 - VOICE: match the brand voice from memory/brief. Write like a sharp human, not a marketer. Short sentences win.
+- IDENTITY: you write FOR the owner's business (see the BUSINESS block) — sign nothing, brand nothing
+  yourself; the template stamps the business name, logo and website. Never mention the CRM tool.
 - AVOID: spam trigger words in subject (FREE!!!, guaranteed, act now), emoji carpets, ALL CAPS words,
   generic filler ("we are pleased to announce"), fake urgency, wall-of-text paragraphs.`;
 
@@ -86,7 +91,7 @@ export async function writeEmail(env, task, planEmail, brief, learnings, memory 
   );
 
   return {
-    subject: String(copy.subject || `News from ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}`).slice(0, 120),
+    subject: String(copy.subject || `News from ${brief?.business_name || 'our business'}`).slice(0, 120),
     preheader: String(copy.preheader || '').slice(0, 150),
     headline: String(copy.headline || 'Hello!'),
     intro: String(copy.intro || ''),
@@ -99,102 +104,341 @@ export async function writeEmail(env, task, planEmail, brief, learnings, memory 
   };
 }
 
-/**
- * Render copy into a branded, responsive HTML email (Nebula dark-premium palette).
- *
- * personalize: injects a `Hi {{first_name}},` salutation. The placeholder is
- * replaced per recipient by MailerCloud's mail merge (POST /email-api) —
- * ONLY use this when the message goes through the personalized endpoint;
- * on the plain /email endpoint the placeholder would be delivered literally.
- *
- * track: { campaignId, base } injects the open-tracking pixel. In merge
- * mode the per-recipient token travels as the {{open_uid}} merge var; for
- * single sends pass tokenFor to inline the real token.
- */
-export function renderHtml(env, copy, { personalize = false, track = null } = {}) {
-  const name = env.MAIL_BUSINESS_NAME || 'Nebula CRM';
-  const brand = env.MAIL_BRAND_COLOR || '#6C8CFF';
-  const logoUrl = env.MAIL_LOGO_URL || '';
-  const ctaUrl = env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '';
-  const website = env.MAIL_WEBSITE_URL || '';
-  const year = new Date().getUTCFullYear();
+/* ═══════════════════════ Template system ═══════════════════════ */
 
-  const sections = copy.sections.map((s) => `
+const BG_PAGE = '#f3f4f6';
+
+/** Shared building blocks ──────────────────────────────────────── */
+
+function headMeta(copy) {
+  return `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>${esc(copy.subject)}</title>`;
+}
+
+function hiddenPreheader(copy) {
+  return `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(copy.preheader)}</div>`;
+}
+
+/** Logo (image or styled business name) on a dark or light surface. */
+function brandMark(brand, { dark = false } = {}) {
+  const color = dark ? '#ffffff' : brand.color;
+  if (brand.logoUrl) {
+    return `<img src="${esc(brand.logoUrl)}" alt="${esc(brand.name)}" width="132" style="display:block;border:0;max-width:132px;height:auto;">`;
+  }
+  return `<div style="font-size:19px;font-weight:700;letter-spacing:.3px;color:${esc(color)};">${esc(brand.name)}</div>`;
+}
+
+function brandLogoRow(brand, { dark = false, pad = '26px 30px 10px 30px' } = {}) {
+  return `<tr><td style="padding:${pad};" align="left">${brandMark(brand, { dark })}</td></tr>`;
+}
+
+function salutationRow(personalize) {
+  if (!personalize) return '';
+  return `<p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.65;color:#374151;">Hi {{first_name}},</p>`;
+}
+
+function sectionsRows(copy) {
+  return copy.sections.map((s) => `
       <tr><td style="padding:18px 8px 0 8px;">
         <h3 style="margin:0 0 8px 0;font-size:17px;line-height:1.35;color:#111827;">${esc(s.title)}</h3>
         <p style="margin:0 0 12px 0;font-size:15px;line-height:1.65;color:#374151;">${esc(s.body)}</p>
       </td></tr>`).join('');
+}
 
-  const logo = logoUrl
-    ? `<img src="${esc(logoUrl)}" alt="${esc(name)}" width="132" style="display:block;border:0;max-width:132px;height:auto;">`
-    : `<div style="font-size:19px;font-weight:700;letter-spacing:.3px;color:${esc(brand)};">${esc(name)}</div>`;
+function psRow(copy) {
+  if (!copy.ps) return '';
+  return `
+      <tr><td style="padding:16px 8px 0 8px;">
+        <p style="margin:0;font-size:13.5px;line-height:1.6;color:#6b7280;border-top:1px solid #e5e7eb;padding-top:14px;"><em>P.S. ${esc(copy.ps)}</em></p>
+      </td></tr>`;
+}
 
-  const cta = ctaUrl ? `
+function signatureBlock(brand, copy) {
+  return `<p style="margin:0 0 4px 0;font-size:15px;color:#374151;">${esc(copy.closing)}</p>
+      <p style="margin:0;font-size:15px;color:#111827;font-weight:600;">${esc(brand.signature)}</p>`;
+}
+
+function footerBlock(brand, year) {
+  const contactBits = [
+    brand.website ? `<a href="${esc(brand.website)}" style="color:#6b7280;text-decoration:underline;">${esc(brand.website)}</a>` : '',
+    brand.address ? esc(brand.address) : '',
+    brand.phone ? esc(brand.phone) : '',
+    brand.contactEmail ? `<a href="mailto:${esc(brand.contactEmail)}" style="color:#6b7280;text-decoration:underline;">${esc(brand.contactEmail)}</a>` : '',
+  ].filter(Boolean).join(' · ');
+  return `<p style="margin:0;font-size:11.5px;line-height:1.6;color:#9ca3af;">${esc(brand.permission)}<br>
+      ${contactBits ? `${contactBits}<br>` : ''}© ${year} ${esc(brand.name)}. All rights reserved.</p>`;
+}
+
+function openPixel(brand, copy, track) {
+  if (!track?.campaignId) return '';
+  const base = String(track.base || brand.publicBaseUrl || 'https://nebula-crm-storage.nebula-crm.workers.dev').replace(/\/+$/, '');
+  const u = track.token || '{{open_uid}}';
+  return `<img src="${base}/v1/t/o.png?c=${encodeURIComponent(track.campaignId)}&u=${encodeURIComponent(u)}" width="1" height="1" alt="" style="display:block;border:0;outline:none;">`;
+}
+
+/** A darker shade of the brand colour for gradients/hovers. */
+function shade(hex, amt = 0.25) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = (v) => Math.max(0, Math.min(255, Math.round(v * (1 - amt))));
+  const r = ch((n >> 16) & 255).toString(16).padStart(2, '0');
+  const g = ch((n >> 8) & 255).toString(16).padStart(2, '0');
+  const b = ch(n & 255).toString(16).padStart(2, '0');
+  return `#${r}${g}${b}`;
+}
+
+/** Tint (mix with white) for soft backgrounds. */
+function tint(hex, amt = 0.9) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return BG_PAGE;
+  const n = parseInt(m[1], 16);
+  const mix = (v) => Math.round(v + (255 - v) * amt);
+  const r = mix((n >> 16) & 255).toString(16).padStart(2, '0');
+  const g = mix((n >> 8) & 255).toString(16).padStart(2, '0');
+  const b = mix(n & 255).toString(16).padStart(2, '0');
+  return `#${r}${g}${b}`;
+}
+
+/* ── Style 1: modern — dark brand hero, light body (default) ──── */
+function tplModern(brand, copy, { personalize, pixel }) {
+  const year = new Date().getUTCFullYear();
+  const hero = `
+    <tr><td bgcolor="${esc(brand.color)}" style="padding:30px 30px 26px 30px;" align="left">
+      ${brandMark(brand, { dark: true })}
+      <h1 style="margin:16px 0 0 0;font-size:25px;line-height:1.28;color:#ffffff;">${esc(copy.headline)}</h1>
+      ${brand.tagline ? `<p style="margin:8px 0 0 0;font-size:13px;color:rgba(255,255,255,.75);">${esc(brand.tagline)}</p>` : ''}
+    </td></tr>`;
+  const cta = brand.ctaUrl ? `
       <tr><td style="padding:26px 8px 6px 8px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-          <td align="center" bgcolor="${esc(brand)}" style="border-radius:8px;">
-            <a href="${esc(ctaUrl)}" style="display:inline-block;padding:13px 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;">${esc(copy.cta_text)}</a>
+          <td align="center" bgcolor="${esc(brand.color)}" style="border-radius:8px;">
+            <a href="${esc(brand.ctaUrl)}" style="display:inline-block;padding:13px 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;">${esc(copy.cta_text)}</a>
           </td>
         </tr></table>
       </td></tr>` : '';
-
-  const ps = copy.ps ? `
-      <tr><td style="padding:16px 8px 0 8px;">
-        <p style="margin:0;font-size:13.5px;line-height:1.6;color:#6b7280;border-top:1px solid #e5e7eb;padding-top:14px;"><em>P.S. ${esc(copy.ps)}</em></p>
-      </td></tr>` : '';
-
-  const permission =
-    env.MAIL_PERMISSION_REMINDER ||
-    `You are receiving this because you subscribed to updates from ${esc(name)}.`;
-
-  const salutation = personalize
-    ? `<p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.65;color:#374151;">Hi {{first_name}},</p>`
-    : '';
-
-  // Open-tracking pixel: per-campaign id + per-recipient token. In merge
-  // mode the token is a merge var ({{open_uid}}) resolved per recipient;
-  // single sends pass `token` already resolved.
-  let pixel = '';
-  if (track?.campaignId) {
-    const base = String(track.base || env.MAIL_PUBLIC_BASE_URL || 'https://nebula-crm-storage.nebula-crm.workers.dev').replace(/\/+$/, '');
-    const u = track.token || '{{open_uid}}';
-    pixel = `<img src="${base}/v1/t/o.png?c=${encodeURIComponent(track.campaignId)}&u=${encodeURIComponent(u)}" width="1" height="1" alt="" style="display:block;border:0;outline:none;">`;
-  }
-
   return `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="x-apple-disable-message-reformatting">
-<title>${esc(copy.subject)}</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f3f4f6;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(copy.preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f4f6" style="margin:0;padding:0;">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:${BG_PAGE};">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${BG_PAGE}" style="margin:0;padding:0;">
 <tr><td align="center" style="padding:24px 12px;">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
-    <tr><td style="padding:26px 30px 10px 30px;" align="left">${logo}</td></tr>
-    <tr><td style="padding:8px 30px 0 30px;">
-      <h1 style="margin:14px 0 10px 0;font-size:24px;line-height:1.3;color:#111827;">${esc(copy.headline)}</h1>
-      ${salutation}
+    ${hero}
+    <tr><td style="padding:22px 30px 0 30px;">
+      ${salutationRow(personalize)}
       <p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.65;color:#374151;">${esc(copy.intro)}</p>
     </td></tr>
-    ${sections}${cta}${ps}
-    <tr><td style="padding:26px 30px 18px 30px;">
-      <p style="margin:0 0 4px 0;font-size:15px;color:#374151;">${esc(copy.closing)}</p>
-      <p style="margin:0;font-size:15px;color:#111827;font-weight:600;">Team ${esc(name)}</p>
-    </td></tr>
+    ${sectionsRows(copy)}${cta}${psRow(copy)}
+    <tr><td style="padding:26px 30px 18px 30px;">${signatureBlock(brand, copy)}</td></tr>
     <tr><td style="padding:0;">${pixel}</td></tr>
-    <tr><td bgcolor="#f9fafb" style="padding:18px 30px;border-top:1px solid #e5e7eb;">
-      <p style="margin:0;font-size:11.5px;line-height:1.6;color:#9ca3af;">${permission}<br>
-      ${website ? `<a href="${esc(website)}" style="color:#6b7280;text-decoration:underline;">${esc(website)}</a><br>` : ''}© ${year} ${esc(name)}. All rights reserved.</p>
-    </td></tr>
+    <tr><td bgcolor="#0f1115" style="padding:18px 30px;">${footerBlock(brand, year).replace(/color:#9ca3af;/g, 'color:#8b91a0;')}</td></tr>
   </table>
 </td></tr>
 </table>
 </body>
 </html>`;
+}
+
+/* ── Style 2: classic — clean light newsletter ────────────────── */
+function tplClassic(brand, copy, { personalize, pixel }) {
+  const year = new Date().getUTCFullYear();
+  const cta = brand.ctaUrl ? `
+      <tr><td style="padding:24px 8px 6px 8px;">
+        <a href="${esc(brand.ctaUrl)}" style="display:inline-block;padding:12px 26px;font-family:Arial,Helvetica,sans-serif;font-size:14.5px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:6px;background-color:${esc(brand.color)};">${esc(copy.cta_text)}</a>
+      </td></tr>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:${BG_PAGE};">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${BG_PAGE}">
+<tr><td align="center" style="padding:24px 12px;">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+    <tr><td style="padding:24px 30px;border-bottom:3px solid ${esc(brand.color)};" align="left">${brandMark(brand)}</td></tr>
+    <tr><td style="padding:24px 30px 0 30px;">
+      <h1 style="margin:0 0 12px 0;font-size:23px;line-height:1.3;color:#111827;">${esc(copy.headline)}</h1>
+      ${salutationRow(personalize)}
+      <p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.7;color:#374151;">${esc(copy.intro)}</p>
+    </td></tr>
+    ${sectionsRows(copy)}${cta}${psRow(copy)}
+    <tr><td style="padding:24px 30px 16px 30px;">${signatureBlock(brand, copy)}</td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
+    <tr><td bgcolor="#f9fafb" style="padding:18px 30px;border-top:1px solid #e5e7eb;">${footerBlock(brand, year)}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/* ── Style 3: bold — promo / offer, huge colour blocks ────────── */
+function tplBold(brand, copy, { personalize, pixel }) {
+  const year = new Date().getUTCFullYear();
+  const dark = shade(brand.color, 0.35);
+  const cta = brand.ctaUrl ? `
+    <tr><td align="center" style="padding:28px 30px 8px 30px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td align="center" bgcolor="#ffffff" style="border-radius:999px;">
+          <a href="${esc(brand.ctaUrl)}" style="display:inline-block;padding:15px 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:800;color:${esc(brand.color)};text-decoration:none;border-radius:999px;">${esc(copy.cta_text)} →</a>
+        </td>
+      </tr></table>
+    </td></tr>` : '';
+  const sections = copy.sections.map((s) => `
+    <tr><td style="padding:14px 30px 0 30px;">
+      <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;color:#111827;">${esc(s.title)}</p>
+      <p style="margin:0 0 10px 0;font-size:14.5px;line-height:1.6;color:#374151;">${esc(s.body)}</p>
+    </td></tr>`).join('');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:${esc(dark)};">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${esc(dark)}">
+<tr><td align="center" style="padding:0;">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:${esc(brand.color)};">
+    <tr><td style="padding:26px 30px 6px 30px;" align="center">${brandMark(brand, { dark: true })}</td></tr>
+    <tr><td align="center" style="padding:18px 34px 0 34px;">
+      <h1 style="margin:0;font-size:31px;line-height:1.22;color:#ffffff;letter-spacing:-.3px;">${esc(copy.headline)}</h1>
+      <p style="margin:12px 0 0 0;font-size:16px;line-height:1.6;color:rgba(255,255,255,.88);">${esc(copy.intro)}</p>
+    </td></tr>
+    ${cta}
+    <tr><td style="padding:20px 0 30px 0;">${salutationRow(personalize).replace('color:#374151', 'color:rgba(255,255,255,.85)').replace('margin:0 0 6px 0;font-size:15.5px', 'margin:0;font-size:14.5px').replace('<p ', '<p align="center" style="padding:0 30px;" ')}</td></tr>
+  </table>
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px 16px 0 0;">
+    ${sections}${psRow(copy)}
+    <tr><td style="padding:22px 30px 14px 30px;">${signatureBlock(brand, copy)}</td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
+    <tr><td bgcolor="#0f1115" style="padding:18px 30px;border-radius:0 0 16px 16px;">${footerBlock(brand, year).replace(/color:#9ca3af;/g, 'color:#8b91a0;')}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/* ── Style 4: minimal — quiet, text-first, hairline rules ─────── */
+function tplMinimal(brand, copy, { personalize, pixel }) {
+  const year = new Date().getUTCFullYear();
+  const sections = copy.sections.map((s) => `
+    <tr><td style="padding:16px 0 0 0;border-top:1px solid #eeeeee;">
+      <p style="margin:14px 0 4px 0;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${esc(brand.color)};">${esc(s.title)}</p>
+      <p style="margin:0 0 8px 0;font-size:15px;line-height:1.7;color:#374151;">${esc(s.body)}</p>
+    </td></tr>`).join('');
+  const cta = brand.ctaUrl ? `
+    <tr><td style="padding:22px 0 4px 0;">
+      <a href="${esc(brand.ctaUrl)}" style="font-size:15px;font-weight:700;color:${esc(brand.color)};text-decoration:none;">${esc(copy.cta_text)} →</a>
+    </td></tr>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:#ffffff;">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff">
+<tr><td align="center" style="padding:36px 20px;">
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
+    <tr><td style="padding:0 0 18px 0;border-bottom:1px solid #111827;" align="left">
+      <span style="font-size:15px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827;">${esc(brand.name)}</span>
+      ${brand.tagline ? `<span style="font-size:12px;color:#6b7280;">&nbsp;· ${esc(brand.tagline)}</span>` : ''}
+    </td></tr>
+    <tr><td style="padding:26px 0 0 0;">
+      <h1 style="margin:0 0 14px 0;font-size:24px;line-height:1.32;color:#111827;font-weight:600;">${esc(copy.headline)}</h1>
+      ${salutationRow(personalize)}
+      <p style="margin:0 0 8px 0;font-size:15.5px;line-height:1.75;color:#374151;">${esc(copy.intro)}</p>
+    </td></tr>
+    ${sections}${cta}${psRow(copy).replace('border-top:1px solid #e5e7eb;', 'border-top:1px solid #eeeeee;')}
+    <tr><td style="padding:24px 0 6px 0;">${signatureBlock(brand, copy)}</td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
+    <tr><td style="padding:26px 0 6px 0;border-top:1px solid #eeeeee;">${footerBlock(brand, year)}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/* ── Style 5: gradient — soft hero card, pill CTA ─────────────── */
+function tplGradient(brand, copy, { personalize, pixel }) {
+  const year = new Date().getUTCFullYear();
+  const soft = tint(brand.color, 0.88);
+  const dark = shade(brand.color, 0.3);
+  const cta = brand.ctaUrl ? `
+      <tr><td style="padding:24px 8px 6px 8px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td align="center" bgcolor="${esc(dark)}" style="border-radius:999px;">
+            <a href="${esc(brand.ctaUrl)}" style="display:inline-block;padding:13px 34px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:999px;">${esc(copy.cta_text)}</a>
+          </td>
+        </tr></table>
+      </td></tr>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:${esc(soft)};">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${esc(soft)}">
+<tr><td align="center" style="padding:28px 12px;">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:linear-gradient(135deg,${esc(brand.color)} 0%,${esc(dark)} 100%);border-radius:18px;">
+    <tr><td style="padding:30px 32px 28px 32px;" align="left">
+      ${brandMark(brand, { dark: true })}
+      <h1 style="margin:18px 0 0 0;font-size:26px;line-height:1.26;color:#ffffff;">${esc(copy.headline)}</h1>
+      <p style="margin:10px 0 0 0;font-size:15.5px;line-height:1.62;color:rgba(255,255,255,.9);">${esc(copy.intro)}</p>
+      ${salutationRow(personalize).replace('color:#374151', 'color:rgba(255,255,255,.85)').replace('margin:0 0 6px 0', 'margin:14px 0 0 0')}
+    </td></tr>
+  </table>
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:0 0 18px 18px;">
+    ${sectionsRows(copy)}${cta}${psRow(copy)}
+    <tr><td style="padding:24px 30px 14px 30px;">${signatureBlock(brand, copy)}</td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
+    <tr><td bgcolor="#f9fafb" style="padding:18px 30px;border-top:1px solid #e5e7eb;border-radius:0 0 18px 18px;">${footerBlock(brand, year)}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+const RENDERERS = {
+  modern: tplModern,
+  classic: tplClassic,
+  bold: tplBold,
+  minimal: tplMinimal,
+  gradient: tplGradient,
+};
+
+/**
+ * Render copy into a branded, responsive HTML email.
+ *
+ * brand   — resolved Business Profile branding (business.js brandFor()).
+ * style   — 'modern' | 'classic' | 'bold' | 'minimal' | 'gradient'
+ *           (legacy planner values are mapped by normalizeStyle).
+ * personalize — injects a `Hi {{first_name}},` salutation. The placeholder is
+ *           replaced per recipient by MailerCloud's mail merge — ONLY use this
+ *           when the message goes through the personalized endpoint.
+ * track   — { campaignId, base, token } injects the open-tracking pixel. In
+ *           merge mode the per-recipient token travels as the {{open_uid}}
+ *           merge var; single sends pass token already resolved.
+ */
+export function renderHtml(env, copy, { personalize = false, track = null, brand = null, style = '' } = {}) {
+  const b = brand || {
+    name: env.MAIL_BUSINESS_NAME || 'Nebula CRM',
+    tagline: '',
+    color: env.MAIL_BRAND_COLOR || '#6C8CFF',
+    logoUrl: env.MAIL_LOGO_URL || '',
+    website: env.MAIL_WEBSITE_URL || '',
+    ctaUrl: env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '',
+    address: '', phone: '', contactEmail: '',
+    signature: `Team ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}`,
+    fromName: env.MAIL_BUSINESS_NAME || 'Nebula CRM',
+    permission: env.MAIL_PERMISSION_REMINDER || `You are receiving this because you subscribed to updates from ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}.`,
+    defaultStyle: 'modern',
+    publicBaseUrl: env.MAIL_PUBLIC_BASE_URL || '',
+  };
+  const chosen = normalizeStyle(style) || normalizeStyle(b.defaultStyle) || 'modern';
+  const pixel = openPixel(b, copy, track);
+  return (RENDERERS[chosen] || tplModern)(b, copy, { personalize, pixel });
 }
 
 /** Save the generated email into MailerCloud's template library (non-fatal). */

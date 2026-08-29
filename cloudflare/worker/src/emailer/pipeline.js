@@ -65,6 +65,7 @@ import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled
 import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, retryTaskState, progressOf } from './tasks.js';
 import { createStore, stateBackendName, safeParse } from './state.js';
 import { getMemory, saveMemory, resetMemory, teach, learnFromResults, memoryContext, syncBriefToMemory } from './memory.js';
+import { getBusinessProfile, saveBusinessProfile, brandFor, profileToFacts, mergeProfilePatch, normalizeStyle, TEMPLATE_STYLES } from './business.js';
 import { openToken } from './track.js';
 
 const CORS = {
@@ -119,7 +120,8 @@ export async function mailConfigState(env, store = null) {
   // ending at the verified account sender (das@aidraft.bond).
 
   const canSend = !!env.MAILERCLOUD_API_KEY;
-  const sender = resolveSender(env);
+  const profile = await getBusinessProfile(store);
+  const sender = resolveSender(env, brandFor(env, profile));
   const warnings = [];
   if (!env.MAILERCLOUD_SENDER_EMAIL && !env.MAIL_SENDER_EMAIL) {
     warnings.push(`MAILERCLOUD_SENDER_EMAIL not set — using built-in default ${sender.from}. Make sure it is a VERIFIED sender in MailerCloud.`);
@@ -138,6 +140,7 @@ export async function mailConfigState(env, store = null) {
     dryRunSource: dry.source,
     state_backend: stateBackendName(env),
     sender: { from: sender.from, fromName: sender.fromName, replyTo: sender.replyTo },
+    brand: { name: brandFor(env, profile).name, branded: brandFor(env, profile).branded },
     delivery_mode: deliveryMode(env),
     transactional_max: transactionalMax(env),
     email_api: EMAIL_API_BASE,
@@ -201,6 +204,8 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     const brief = store ? safeParse(await store.get('biz:brief'), null) : null;
     const mem = await getMemory(store);
     const suppressions = store ? (await loadSuppressions(store)).size : 0;
+    const bp = await getBusinessProfile(store);
+    const bpBrand = brandFor(env, bp);
     return json({
       ...state,
       state_error: store?.lastError || null,
@@ -210,6 +215,10 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
         ? { type: mem.facts.business_type || brief?.business_type, tone: mem.facts.tone || brief?.tone, from: mem.facts.business_type ? 'memory' : (brief?.source || 'ai') }
         : false,
       memory: { facts_known: Object.values(mem.facts).filter((v) => (Array.isArray(v) ? v.length : v)).length, insights: mem.insights.length },
+      business_profile: {
+        business_name: bpBrand.name,
+        branded: bpBrand.branded,
+      },
       last_run: last,
       suppressions,
     });
@@ -228,6 +237,52 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     return json({ ok: true, ...(await mailConfigState(env, store)) });
   }
 
+  // ── Business Profile — the brand every email is sent with ──────
+  // Available even when the pipeline is unconfigured: the owner sets the
+  // brand first, campaigns come later. POST also teaches the AI memory
+  // (owner authority) and drops the cached AI brief so the next plan
+  // immediately speaks as the new brand.
+  if (sub === '/business' && request.method === 'GET') {
+    const profile = await getBusinessProfile(store);
+    const brand = brandFor(env, profile);
+    return json({
+      profile,
+      brand: { name: brand.name, color: brand.color, fromName: brand.fromName, signature: brand.signature, website: brand.website, branded: brand.branded, defaultStyle: brand.defaultStyle },
+      template_styles: TEMPLATE_STYLES,
+    });
+  }
+
+  if (sub === '/business' && request.method === 'POST') {
+    if (!store) return json({ error: 'no state backend (KV or Firestore unavailable)' }, 503);
+    const body = await request.json().catch(() => ({}));
+    const patch = body?.profile && typeof body.profile === 'object' ? body.profile : body;
+    if (!patch || typeof patch !== 'object' || Object.keys(patch).length === 0) {
+      return json({ error: 'send business profile fields to save, e.g. {"business_name":"…"}' }, 400);
+    }
+    if (patch.default_style !== undefined && !normalizeStyle(patch.default_style) && String(patch.default_style).trim() !== '') {
+      return json({ error: `default_style must be one of: ${TEMPLATE_STYLES.join(', ')}` }, 400);
+    }
+    let profile;
+    try {
+      profile = await saveBusinessProfile(store, patch);
+    } catch (e) {
+      return json({ error: e?.message || 'Could not save the business profile.', state_error: store?.lastError || null }, 503);
+    }
+    // Sync the AI: owner-authority facts + rebuild the marketing brief.
+    const facts = profileToFacts(patch);
+    let taught = false;
+    if (Object.keys(facts).length) {
+      try {
+        await teach(env, store, { facts, origin: 'owner' });
+        taught = true;
+      } catch (e) {
+        console.warn(`[mailer] business profile → memory teach failed: ${e.message}`);
+      }
+    }
+    const brand = brandFor(env, profile);
+    return json({ ok: true, profile, taught, brand: { name: brand.name, fromName: brand.fromName, signature: brand.signature, branded: brand.branded } });
+  }
+
   // ── TEST SEND — the go-live check. Sends ONE real email right now via
   //    the transactional Email API. Needs only MAILERCLOUD_API_KEY; works
   //    regardless of dry-run (it is explicit and owner-triggered).
@@ -237,11 +292,13 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     const to = String(body.to || '').trim().toLowerCase();
     if (!EMAIL_RE.test(to)) return json({ error: 'a valid "to" email address is required, e.g. {"to":"you@example.com"}' }, 400);
 
-    const sender = resolveSender(env);
+    const profile = await getBusinessProfile(store);
+    const brand = brandFor(env, profile);
+    const sender = resolveSender(env, brand);
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
-    const bizName = env.MAIL_BUSINESS_NAME || 'Nebula CRM';
+    const bizName = brand.name;
     const copy = {
-      subject: String(body.subject || '').trim() || `Nebula CRM test email — ${stamp}`,
+      subject: String(body.subject || '').trim() || `${bizName} test email — ${stamp}`,
       preheader: 'If this lands in your inbox, the CRM → MailerCloud connection works end to end.',
       headline: 'Your email system works',
       intro: `This is a live test email sent directly from ${bizName} through the MailerCloud Email API at ${EMAIL_API_BASE}/email — the transactional endpoint your CRM uses.`,
@@ -255,16 +312,17 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
           body: 'Open your MailerCloud account and go to Logs — this message should appear there within a minute. Once you see it, every AI-planned campaign from the CRM will deliver through the same verified identity.',
         },
       ],
-      cta_text: 'Open Nebula CRM',
+      cta_text: brand.website ? 'Visit us' : 'Open Nebula CRM',
       closing: 'Happy sending,',
       ps: 'Re-run this test any time from the AI Email screen — it never touches your contact lists.',
     };
-    const html = renderHtml(env, copy);
+    const html = renderHtml(env, copy, { brand });
 
     const res = await sendEmail(env, {
       to: [{ name: String(body.name || '').slice(0, 100), email: to }],
       subject: copy.subject,
       html,
+      brand,
       metadata: {
         messageId: `nebula-test-${Date.now().toString(36)}`,
         custom: { campaign_id: 'nebula-test-send', source: 'nebula-ai-mailer' },
@@ -276,6 +334,8 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
         ok: true,
         sent_to: to,
         from: `${sender.fromName} <${sender.from}>`,
+        subject: copy.subject,
+        branded: brand.branded,
         endpoint: `${EMAIL_API_BASE}/email`,
         provider: res.raw,
         next_step: 'Open MailerCloud → Logs and confirm this message appears there. If it does, the integration is fully connected.',
@@ -426,20 +486,22 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
 
     case sub === '/preview' && request.method === 'GET': {
       const instruction = url.searchParams.get('task') || 'Write one engaging introduction email about our business.';
+      const style = normalizeStyle(url.searchParams.get('style') || '');
       const contacts = await fetchCrmContacts(env, { max: parseInt(env.MAIL_MAX_SYNC || '5000', 10) }).catch(() => []);
       const stats = contactStats(contacts);
-      const brief = await buildBusinessBrief(env, store, { crmStats: stats });
+      const profile = await getBusinessProfile(store);
+      const brief = await buildBusinessBrief(env, store, { crmStats: stats, profile });
       const learnings = (await getLatestAnalytics(store))?.learnings ?? null;
       const pseudoTask = { id: 'preview', instruction, plan: null };
-      const planEmail = { seq: 1, sendAt: new Date().toISOString(), goal: instruction.slice(0, 200), angle: 'highest-open-rate hook for this audience', tone: brief.tone || 'friendly', template_style: 'newsletter' };
+      const planEmail = { seq: 1, sendAt: new Date().toISOString(), goal: instruction.slice(0, 200), angle: 'highest-open-rate hook for this audience', tone: brief.tone || 'friendly', template_style: style || profile?.default_style || 'modern' };
       const mem = await getMemory(store);
       syncBriefToMemory(mem, brief);
       const copy = await writeEmail(env, pseudoTask, planEmail, brief, learnings, mem);
-      return json({ preview: true, dryRun: true, copy, html: renderHtml(env, copy) });
+      return json({ preview: true, dryRun: true, copy, html: renderHtml(env, copy, { brand: brandFor(env, profile), style: style || planEmail.template_style }) });
     }
 
     default:
-      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'POST /v1/mail/tasks/:id/cancel', 'POST /v1/mail/tasks/:id/retry', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config', 'GET/POST /v1/mail/memory', 'POST /v1/mail/memory/reset'] }, 404);
+      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'POST /v1/mail/tasks/:id/cancel', 'POST /v1/mail/tasks/:id/retry', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=&style=', 'GET /v1/mail/status', 'POST /v1/mail/config', 'GET/POST /v1/mail/business', 'GET/POST /v1/mail/memory', 'POST /v1/mail/memory/reset'] }, 404);
   }
 }
 
@@ -526,12 +588,14 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
 
     // 3) Understand the business (state-cached ~7 days) — learns from the
     //    owner profile, the CRM data itself, and past task instructions.
+    const profile = await getBusinessProfile(store);
+    const brand = brandFor(env, profile);
     const tasks = (await listTasks(store)).filter((t) => !onlyTaskId || t.id === onlyTaskId);
     const recentInstructions = tasks
       .slice(0, 5)
       .map((t) => t.instruction)
       .filter(Boolean);
-    const brief = await buildBusinessBrief(env, store, { crmStats: stats, recentInstructions });
+    const brief = await buildBusinessBrief(env, store, { crmStats: stats, recentInstructions, profile });
     const memory = await getMemory(store);
     syncBriefToMemory(memory, brief); // AI-inferred facts fill memory gaps (owner facts always win)
     if (memory.facts.business_type) await saveMemory(store, memory);
@@ -600,6 +664,8 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
             // Transactional sends carry the per-recipient {{open_uid}} merge
             // var; campaign-mode opens come from MailerCloud's own reports.
             track: personalize ? { campaignId: crmCampaignId } : null,
+            brand,
+            style: planEmail.template_style,
           });
 
           if (dryRun) {
@@ -622,9 +688,9 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           const mode = pickDeliveryMode(env, audience.length);
           let delivery;
           if (mode === 'transactional') {
-            delivery = await deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail });
+            delivery = await deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail, brand });
           } else {
-            delivery = await deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId });
+            delivery = await deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId, brand });
           }
 
           mail.campaignId = delivery.campaignId ?? null;
@@ -661,7 +727,7 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
               bodyHtml: html,
               bodyPlainText: plainOf(html),
               ctaLabel: copy.cta_text,
-              ctaUrl: env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '',
+              ctaUrl: brand.ctaUrl || env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '',
               scheduleType: 'once',
               scheduledAt: mail.sendAt,
               metrics: {
@@ -682,7 +748,8 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
               mailercloudTemplateId: mail.templateId,
               mailercloudListId: listId,
               deliveryMode: mode,
-              delivery: delivery.summary || null,
+              deliverySummary: delivery.summary || null,
+              templateStyle: planEmail.template_style,
               aiPlan: { goal: planEmail.goal, angle: planEmail.angle, tone: planEmail.tone, reasoning: String(task.plan.reasoning || '').slice(0, 500) },
             },
           });
@@ -730,11 +797,12 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
 /* ══════════════════════ Delivery engines ══════════════════════ */
 
 /**
- * Transactional engine — MailerCloud Email API, personalized mail merge,
- * 50 recipients per request, per-recipient outcome tracking, auto-
- * suppression of hard bounces/unsubs/spam reports.
+ * Transactional engine — MailerCloud Email API, ONE private message per
+ * recipient (individual 1:1 emails, personalized mail merge with each
+ * contact's name), per-recipient outcome tracking, auto-suppression of
+ * hard bounces/unsubs/spam reports.
  */
-async function deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail }) {
+async function deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail, brand = null }) {
   const suppressed = await loadSuppressions(store);
   const recipients = audience
     .filter((c) => !suppressed.has(c.email))
@@ -742,7 +810,10 @@ async function deliverTransactional(env, store, { copy, html, audience, crmCampa
       name: [c.first_name, c.last_name].filter(Boolean).join(' ').slice(0, 100),
       email: c.email,
       merge_vars: {
-        first_name: c.first_name || 'there',
+        // Personalization: the contact's real name from the CRM — "Hi Rahul,".
+        // Falls back to "there" only when the CRM has no name for the contact.
+        first_name: (c.first_name || '').trim() || 'there',
+        last_name: c.last_name || '',
         company: c.company_name || '',
         // Per-recipient open-tracking token, rendered into the pixel URL.
         open_uid: openToken(crmCampaignId, c.email),
@@ -754,6 +825,7 @@ async function deliverTransactional(env, store, { copy, html, audience, crmCampa
     html,
     text: plainOf(html),
     recipients,
+    brand,
     metadata: {
       messageId: `${crmCampaignId}-${mail.seq}`.slice(0, 100),
       custom: { campaign_id: crmCampaignId, source: 'nebula-ai-mailer' },
@@ -788,15 +860,17 @@ async function deliverTransactional(env, store, { copy, html, audience, crmCampa
 /**
  * Campaign engine — Marketing API scheduled campaign (large audiences):
  * delivery at the AI-chosen minute, opens/clicks/unsubs tracked per campaign.
+ * Sent under the owner's brand (sender name + permission reminder).
  */
-async function deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId }) {
+async function deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId, brand = null }) {
   const campaign = await mc.createAndPublishCampaign({
-    name: `Nebula AI | ${crmCampaignId} | ${copy.subject.slice(0, 60)}`,
+    name: `AI | ${crmCampaignId} | ${copy.subject.slice(0, 60)}`,
     subject: copy.subject,
     html,
     preheader: copy.preheader,
     listId,
     scheduledAt: isoToAccountTime(mail.sendAt, timezone),
+    brand,
   });
   const campaignId = campaign?.id ?? campaign?.data?.id ?? null;
   if (!campaignId) throw new Error('MailerCloud campaign creation returned no id');

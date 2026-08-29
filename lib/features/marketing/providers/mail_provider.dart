@@ -32,3 +32,10 @@ final mailMemoryProvider =
     FutureProvider.autoDispose<MailMemory>((ref) {
   return ref.watch(mailApiProvider).memory();
 });
+
+/// The business profile every email is branded with (name, logo, colors,
+/// signature, website) — edited on the Business Profile screen.
+final mailBusinessProvider =
+    FutureProvider.autoDispose<BusinessProfile>((ref) {
+  return ref.watch(mailApiProvider).businessProfile();
+});

@@ -361,6 +361,183 @@ class MailMemory {
   }
 }
 
+/// The owner's business identity — every email is sent under THIS brand
+/// (From name, logo, footer, signature) and the AI writes all copy for it.
+class BusinessProfile {
+  const BusinessProfile({
+    this.businessName = '',
+    this.tagline = '',
+    this.about = '',
+    this.industry = '',
+    this.logoUrl = '',
+    this.brandColor = '',
+    this.products = const [],
+    this.audience = '',
+    this.tone = '',
+    this.offers = const [],
+    this.website = '',
+    this.address = '',
+    this.phone = '',
+    this.contactEmail = '',
+    this.senderName = '',
+    this.signatureName = '',
+    this.defaultStyle = '',
+    this.updatedAt = '',
+  });
+
+  final String businessName;
+  final String tagline;
+  final String about;
+  final String industry;
+  final String logoUrl;
+  final String brandColor;
+  final List<String> products;
+  final String audience;
+  final String tone;
+  final List<String> offers;
+  final String website;
+  final String address;
+  final String phone;
+  final String contactEmail;
+  final String senderName;
+  final String signatureName;
+  final String defaultStyle;
+  final String updatedAt;
+
+  bool get isEmpty => businessName.isEmpty && tagline.isEmpty && about.isEmpty;
+
+  /// The name emails are actually sent as (sender name > business name).
+  String get effectiveSenderName =>
+      senderName.isNotEmpty ? senderName : (businessName.isNotEmpty ? businessName : '');
+
+  /// The signature block: signature name > "Team <business>".
+  String get effectiveSignature => signatureName.isNotEmpty
+      ? signatureName
+      : (businessName.isNotEmpty ? 'Team $businessName' : '');
+
+  factory BusinessProfile.fromMap(Map<String, dynamic> m) {
+    List<String> strList(dynamic v) =>
+        ((v as List?) ?? const []).map((e) => e.toString()).toList();
+    return BusinessProfile(
+      businessName: (m['business_name'] as String?) ?? '',
+      tagline: (m['tagline'] as String?) ?? '',
+      about: (m['about'] as String?) ?? '',
+      industry: (m['industry'] as String?) ?? '',
+      logoUrl: (m['logo_url'] as String?) ?? '',
+      brandColor: (m['brand_color'] as String?) ?? '',
+      products: strList(m['products']),
+      audience: (m['audience'] as String?) ?? '',
+      tone: (m['tone'] as String?) ?? '',
+      offers: strList(m['offers']),
+      website: (m['website'] as String?) ?? '',
+      address: (m['address'] as String?) ?? '',
+      phone: (m['phone'] as String?) ?? '',
+      contactEmail: (m['contact_email'] as String?) ?? '',
+      senderName: (m['sender_name'] as String?) ?? '',
+      signatureName: (m['signature_name'] as String?) ?? '',
+      defaultStyle: (m['default_style'] as String?) ?? '',
+      updatedAt: (m['updatedAt'] as String?) ?? '',
+    );
+  }
+
+  Map<String, dynamic> toPatch() => {
+        'business_name': businessName,
+        'tagline': tagline,
+        'about': about,
+        'industry': industry,
+        'logo_url': logoUrl,
+        'brand_color': brandColor,
+        'products': products,
+        'audience': audience,
+        'tone': tone,
+        'offers': offers,
+        'website': website,
+        'address': address,
+        'phone': phone,
+        'contact_email': contactEmail,
+        'sender_name': senderName,
+        'signature_name': signatureName,
+        'default_style': defaultStyle,
+      };
+
+  BusinessProfile copyWith({
+    String? businessName,
+    String? tagline,
+    String? about,
+    String? industry,
+    String? logoUrl,
+    String? brandColor,
+    List<String>? products,
+    String? audience,
+    String? tone,
+    List<String>? offers,
+    String? website,
+    String? address,
+    String? phone,
+    String? contactEmail,
+    String? senderName,
+    String? signatureName,
+    String? defaultStyle,
+  }) =>
+      BusinessProfile(
+        businessName: businessName ?? this.businessName,
+        tagline: tagline ?? this.tagline,
+        about: about ?? this.about,
+        industry: industry ?? this.industry,
+        logoUrl: logoUrl ?? this.logoUrl,
+        brandColor: brandColor ?? this.brandColor,
+        products: products ?? this.products,
+        audience: audience ?? this.audience,
+        tone: tone ?? this.tone,
+        offers: offers ?? this.offers,
+        website: website ?? this.website,
+        address: address ?? this.address,
+        phone: phone ?? this.phone,
+        contactEmail: contactEmail ?? this.contactEmail,
+        senderName: senderName ?? this.senderName,
+        signatureName: signatureName ?? this.signatureName,
+        defaultStyle: defaultStyle ?? this.defaultStyle,
+        updatedAt: updatedAt,
+      );
+}
+
+/// Resolved brand info the Worker returns alongside the profile.
+class MailBrand {
+  const MailBrand({
+    this.name = '',
+    this.color = '#6C8CFF',
+    this.fromName = '',
+    this.signature = '',
+    this.website = '',
+    this.branded = false,
+    this.defaultStyle = 'modern',
+    this.templateStyles = const ['modern', 'classic', 'bold', 'minimal', 'gradient'],
+  });
+
+  final String name;
+  final String color;
+  final String fromName;
+  final String signature;
+  final String website;
+  final bool branded;
+  final String defaultStyle;
+  final List<String> templateStyles;
+
+  factory MailBrand.fromMap(Map<String, dynamic> m) => MailBrand(
+        name: (m['name'] as String?) ?? '',
+        color: (m['color'] as String?) ?? '#6C8CFF',
+        fromName: (m['fromName'] as String?) ?? '',
+        signature: (m['signature'] as String?) ?? '',
+        website: (m['website'] as String?) ?? '',
+        branded: m['branded'] as bool? ?? false,
+        defaultStyle: (m['defaultStyle'] as String?) ?? 'modern',
+        templateStyles: ((m['template_styles'] as List?) ??
+                const ['modern', 'classic', 'bold', 'minimal', 'gradient'])
+            .map((e) => e.toString())
+            .toList(),
+      );
+}
+
 /// One learned lesson in the creative playbook.
 class MailInsight {
   const MailInsight({
@@ -528,6 +705,21 @@ class MailApiService {
     final map = await _send('GET', '/v1/mail/memory');
     return MailMemory.fromMap(
         ((map['memory'] as Map?) ?? const {}).cast<String, dynamic>());
+  }
+
+  /// The business profile emails are branded with.
+  Future<BusinessProfile> businessProfile() async {
+    final map = await _send('GET', '/v1/mail/business');
+    return BusinessProfile.fromMap(
+        ((map['profile'] as Map?) ?? const {}).cast<String, dynamic>());
+  }
+
+  /// Save (partial patches merge server-side) the business profile. Returns
+  /// the resolved brand so the UI can confirm "sending as <brand>".
+  Future<MailBrand> saveBusinessProfile(BusinessProfile p) async {
+    final map = await _send('POST', '/v1/mail/business', body: p.toPatch());
+    return MailBrand.fromMap(
+        ((map['brand'] as Map?) ?? const {}).cast<String, dynamic>());
   }
 
   /// Teach the AI: structured facts and/or a free-form note. The note is

@@ -27,7 +27,12 @@ import { fetchWithBackoff } from './http.js';
 
 export const EMAIL_API_BASE = 'https://email-api.mailercloud.com';
 
-/** Batch size per /email-api request (recipients per call). */
+/** How many single-recipient requests run in parallel (rate-limit friendly). */
+export const SEND_CONCURRENCY = 5;
+
+/** Kept for backwards compatibility — the batch endpoint no longer puts
+ *  multiple recipients in one request (privacy bug: every recipient could
+ *  see all the others in the To: header). */
 export const RECIPIENTS_PER_REQUEST = 50;
 
 /* ── Internal status-code table (apidoc.mailercloud.com/errors) ────── */
@@ -89,12 +94,17 @@ export function hintFor(code) {
  *   → MAIL_SENDER_EMAIL      (plain var in wrangler.toml)
  *   → das@aidraft.bond       (the account's verified domain sender)
  */
-export function resolveSender(env) {
+/**
+ * brand (optional) — resolved Business Profile branding (business.js).
+ * The From display name becomes the OWNER'S business ("Aidraft Legal"),
+ * never the CRM's own name, and reply-to honours profile.contact_email.
+ */
+export function resolveSender(env, brand = null) {
   const from = String(env.MAILERCLOUD_SENDER_EMAIL || env.MAIL_SENDER_EMAIL || 'das@aidraft.bond').trim();
   const fromName = String(
-    env.MAILERCLOUD_SENDER_NAME || env.MAIL_FROM_NAME || env.MAIL_BUSINESS_NAME || 'Nebula CRM'
+    brand?.fromName || env.MAILERCLOUD_SENDER_NAME || env.MAIL_FROM_NAME || env.MAIL_BUSINESS_NAME || 'Nebula CRM'
   ).trim();
-  const replyTo = String(env.MAILERCLOUD_REPLY_EMAIL || env.MAIL_REPLY_EMAIL || '').trim();
+  const replyTo = String(brand?.contactEmail || env.MAILERCLOUD_REPLY_EMAIL || env.MAIL_REPLY_EMAIL || '').trim();
   return { from, fromName, replyTo: replyTo || null };
 }
 
@@ -151,8 +161,8 @@ async function emailApiReq(env, path, body, retries = 3) {
  * Send one email to one recipient (or a small explicit list) via /email.
  * Returns { ok, statusCode, message?, raw }.
  */
-export async function sendEmail(env, { to, cc, bcc, subject, html, text, replyTo, metadata }) {
-  const sender = resolveSender(env);
+export async function sendEmail(env, { to, cc, bcc, subject, html, text, replyTo, metadata, brand = null }) {
+  const sender = resolveSender(env, brand);
   const norm = (list) =>
     (list || [])
       .map((r) => (typeof r === 'string' ? { email: r } : r))
@@ -189,16 +199,18 @@ export async function sendEmail(env, { to, cc, bcc, subject, html, text, replyTo
 }
 
 /**
- * Send a personalized batch via /email-api (mail merge).
- * recipients: [{ name, email, merge_vars: {first_name, company, …} }]
- * Placeholders {{first_name}} etc. in subject/html/text are replaced
- * per-recipient by MailerCloud. Batch-level failure with a per-recipient
- * code falls back to single sends so one bad address never blocks the rest.
+ * Send personalized email via /email-api (mail merge) — ONE MESSAGE PER
+ * RECIPIENT. Every recipient gets their own private copy with only their
+ * own address in To: — nobody can ever see who else received it (the old
+ * multi-recipient batch put every address in one To: header, leaking the
+ * whole audience to everyone). Merge vars ({{first_name}} …) are resolved
+ * per recipient by MailerCloud.
  *
+ * recipients: [{ name, email, merge_vars: {first_name, company, …} }]
  * Returns { sent, deferred, failed, failures[], suppressions[] }.
  */
-export async function sendPersonalizedBatch(env, { subject, html, text, recipients, metadata }) {
-  const sender = resolveSender(env);
+export async function sendPersonalizedBatch(env, { subject, html, text, recipients, metadata, brand = null }) {
+  const sender = resolveSender(env, brand);
   const out = { sent: 0, deferred: 0, failed: 0, failures: [], suppressions: [] };
 
   const rows = (recipients || [])
@@ -210,83 +222,43 @@ export async function sendPersonalizedBatch(env, { subject, html, text, recipien
     .filter((r) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email));
   if (!rows.length) return { ...out, failed: recipients?.length || 0, failures: [{ email: '*', statusCode: 9004, message: 'no valid recipients' }] };
 
-  const baseBody = {
-    version: '1.0',
-    email: {
-      from: sender.from,
-      fromName: sender.fromName,
-      subject: String(subject || '').slice(0, 200),
-      html: String(html || ''),
-      text: String(text || htmlToPlain(html)),
-      ...(sender.replyTo ? { replyTo: [sender.replyTo] } : {}),
-    },
-  };
+  const safeSubject = String(subject || '').slice(0, 200);
+  const safeHtml = String(html || '');
+  const safeText = String(text || htmlToPlain(html));
 
-  for (let i = 0; i < rows.length; i += RECIPIENTS_PER_REQUEST) {
-    const slice = rows.slice(i, i + RECIPIENTS_PER_REQUEST);
+  const sendOne = async (r, i) => {
     const body = {
-      ...baseBody,
+      version: '1.0',
       email: {
-        ...baseBody.email,
+        from: sender.from,
+        fromName: sender.fromName,
+        subject: safeSubject,
+        html: safeHtml,
+        text: safeText,
+        ...(sender.replyTo ? { replyTo: [sender.replyTo] } : {}),
         recipients: {
-          to: slice.map((r) => ({
-            name: r.name,
-            email: r.email,
-            ...(Object.keys(r.merge_vars).length ? { merge_vars: r.merge_vars } : {}),
-          })),
+          // Exactly ONE recipient per request — a true 1:1 email.
+          to: [{ name: r.name, email: r.email, ...(Object.keys(r.merge_vars).length ? { merge_vars: r.merge_vars } : {}) }],
         },
       },
       metadata: {
         campaignType: 'promotional',
         timestamp: new Date().toISOString(),
-        messageId: metadata?.messageId ? `${metadata.messageId}-b${i / RECIPIENTS_PER_REQUEST + 1}` : `nebula-${Date.now().toString(36)}-${i}`,
+        messageId: metadata?.messageId
+          ? `${metadata.messageId}-r${i}`.slice(0, 100)
+          : `nebula-${Date.now().toString(36)}-${i}`,
         ...(metadata?.custom ? { custom: metadata.custom } : {}),
       },
     };
+    return emailApiReq(env, '/email-api', body, 3);
+  };
 
-    const res = await emailApiReq(env, '/email-api', body, 3);
-
-    if (res.ok) {
-      out.sent += slice.length;
-      continue;
-    }
-
-    // One bad recipient can fail an entire batch — fall back to singles.
-    // NOTE: singles also go through /email-api so {{merge_vars}} still render;
-    // the plain /email endpoint would deliver the placeholders literally.
-    if (PER_RECIPIENT.has(res.statusCode) && slice.length > 1) {
-      for (const r of slice) {
-        const single = await emailApiReq(
-          env,
-          '/email-api',
-          {
-            version: '1.0',
-            email: {
-              from: sender.from,
-              fromName: sender.fromName,
-              subject: String(subject || '').slice(0, 200),
-              html: String(html || ''),
-              text: String(text || htmlToPlain(html)),
-              ...(sender.replyTo ? { replyTo: [sender.replyTo] } : {}),
-              recipients: {
-                to: [{ name: r.name, email: r.email, ...(Object.keys(r.merge_vars).length ? { merge_vars: r.merge_vars } : {}) }],
-              },
-            },
-            metadata: {
-              campaignType: 'promotional',
-              timestamp: new Date().toISOString(),
-              messageId: `${body.metadata.messageId}-s${Math.floor(Math.random() * 1e6).toString(36)}`,
-              ...(metadata?.custom ? { custom: metadata.custom } : {}),
-            },
-          },
-          2
-        );
-        record(out, r.email, single);
-      }
-      continue;
-    }
-
-    for (const r of slice) record(out, r.email, res);
+  // Small, polite parallelism: MailerCloud allows 50 req/s per IP; we stay
+  // far below it while a 250-recipient audience finishes in seconds.
+  for (let i = 0; i < rows.length; i += SEND_CONCURRENCY) {
+    const slice = rows.slice(i, i + SEND_CONCURRENCY);
+    const results = await Promise.all(slice.map((r, j) => sendOne(r, i + j)));
+    for (let j = 0; j < slice.length; j++) record(out, slice[j].email, results[j]);
   }
 
   return out;

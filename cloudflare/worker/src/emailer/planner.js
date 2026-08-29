@@ -11,6 +11,7 @@
 import { sarvamChat } from './sarvam.js';
 import { fetchWithBackoff } from './http.js';
 import { getMemory, memoryContext } from './memory.js';
+import { profileContext, TEMPLATE_STYLES } from './business.js';
 
 const BRIEF_SCHEMA_PROMPT = `Return ONLY a JSON object:
 {
@@ -36,7 +37,7 @@ const PLAN_SCHEMA_PROMPT = `Return ONLY a JSON object:
      "goal": "what this email should achieve",
      "angle": "the creative angle/hook",
      "tone": "tone for this email",
-     "template_style": "newsletter|announcement|offer|story|tip"
+     "template_style": "modern|classic|bold|minimal|gradient — pick what fits: offer/promo → bold, story → minimal, tip/how-to → gradient, news/announcement → modern, roundup → classic"
    }
  ],
  "reasoning": "why this schedule and these angles will maximise opens & engagement"
@@ -67,14 +68,15 @@ async function websiteText(env) {
  * owner's recent campaign instructions — so the AI always has a business
  * to write for.
  */
-export async function buildBusinessBrief(env, kv, { crmStats = null, recentInstructions = [], force = false } = {}) {
+export async function buildBusinessBrief(env, kv, { crmStats = null, recentInstructions = [], profile = null, force = false } = {}) {
   if (!force && kv) {
     const cached = await kv.get('biz:brief');
     if (cached) return JSON.parse(cached);
   }
 
   const site = await websiteText(env);
-  const profileGiven = !!(env.MAIL_BUSINESS_PROFILE && env.MAIL_BUSINESS_PROFILE.trim());
+  const profileBlock = profileContext(profile);
+  const profileGiven = !!profileBlock || !!(env.MAIL_BUSINESS_PROFILE && env.MAIL_BUSINESS_PROFILE.trim());
   const hasCrmContext = !!crmStats && (crmStats.total || 0) > 0;
 
   const crmContext = hasCrmContext
@@ -95,13 +97,17 @@ export async function buildBusinessBrief(env, kv, { crmStats = null, recentInstr
     : '';
 
   const inferred = !profileGiven && !site && (hasCrmContext || recentInstructions.length);
+  const businessName = profile?.business_name || env.MAIL_BUSINESS_NAME || 'Nebula CRM';
 
   const user = [
     'Analyse this business and build a marketing brief for its email campaigns.',
-    `Business name: ${env.MAIL_BUSINESS_NAME || 'Nebula CRM'}`,
-    profileGiven
-      ? `Owner-provided profile: ${env.MAIL_BUSINESS_PROFILE}`
-      : 'Owner-provided profile: (not provided — infer the business from the context below)',
+    `Business name: ${businessName}`,
+    profileBlock
+      ? `OWNER BUSINESS PROFILE (the brand these emails are sent for — authoritative):
+${profileBlock}`
+      : profileGiven
+        ? `Owner-provided profile: ${env.MAIL_BUSINESS_PROFILE}`
+        : 'Owner-provided profile: (not provided — infer the business from the context below)',
     site ? `Website content (truncated):\n${site}` : '',
     crmContext,
     instructionContext,
@@ -122,7 +128,20 @@ export async function buildBusinessBrief(env, kv, { crmStats = null, recentInstr
   );
 
   brief.generatedAt = new Date().toISOString();
-  brief.source = profileGiven ? 'owner-profile' : site ? 'website' : inferred ? 'crm-inferred' : 'guess';
+  brief.business_name = businessName;
+  brief.source = profileBlock ? 'business-profile' : profileGiven ? 'owner-profile' : site ? 'website' : inferred ? 'crm-inferred' : 'guess';
+
+  // Owner-entered Business Profile fields are authoritative brand facts —
+  // apply them straight onto the brief (memory owner-facts still merge below).
+  if (profile) {
+    if (profile.about) brief.business_type = profile.about;
+    if (profile.industry) brief.industry = profile.industry;
+    if (profile.audience) brief.target_audience = profile.audience;
+    if (profile.tone) brief.tone = profile.tone;
+    if (profile.products?.length) brief.products = profile.products;
+    if (profile.offers?.length) brief.offers = profile.offers;
+    if (profile.tagline) brief.tagline = profile.tagline;
+  }
 
   // Owner-taught Business Memory always outranks AI inference.
   try {
@@ -178,6 +197,7 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     '- Detect the campaign type (promotion, introduction, re-engagement, announcement, newsletter, follow-up) and let it shape the angles.',
     '- Reuse angles from the CREATIVE PLAYBOOK that are marked WINNER. Never repeat subjects of FLOP emails or of the recent campaign focus list.',
     '- The audience.segment MUST be one of the CRM statuses shown in contact_stats.segments, or null for everyone.',
+    `- template_style MUST be one of: ${TEMPLATE_STYLES.join('|')}. Pick per email goal (offer → bold, story → minimal, tip → gradient, announcement → modern, roundup → classic) and vary across emails.`,
     '',
     PLAN_SCHEMA_PROMPT,
   ].filter(Boolean).join('\n');
