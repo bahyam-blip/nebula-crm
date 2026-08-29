@@ -380,7 +380,16 @@ console.log('\n— 3. Task lifecycle: plan → write → send → write-back →
   ok(t.emails[1].status === 'planned', 'email 2 (future) stays planned', t.emails[1].status);
   ok(t.emails[0].subject === 'Your monsoon brew is ready', 'subject recorded');
   ok(t.progress.total === 2 && t.progress.done === 1 && t.progress.pending === 1, 'progress computed', JSON.stringify(t.progress));
-  ok(t.progress.nextSendAt === futureAt, 'nextSendAt surfaces next planned time');
+  // The owner gave no scheduling language, so the 3-day-out email 2 is
+  // pulled back to ~base+48h (30 min + 2 days) — still OUTSIDE the runner's
+  // 26h lookahead, i.e. it can never fire as an immediate second blast.
+  const nextMs = Date.parse(t.progress.nextSendAt || '');
+  const wantMs = Date.now() + (30 * 60 + 48 * 3600) * 1000;
+  ok(
+    Number.isFinite(nextMs) && Math.abs(nextMs - wantMs) < 15 * 60 * 1000,
+    'nextSendAt pulled back to ~+48h30m (outside lookahead)',
+    t.progress.nextSendAt,
+  );
   ok(t.events.some((e) => e.kind === 'plan'), 'event: plan ready');
   ok(t.events.some((e) => e.kind === 'send'), 'event: email sent');
 
@@ -717,6 +726,62 @@ console.log('\n— 12. Task retry: failed campaigns are recoverable —');
   // (d) nothing to retry → 409
   const nothing = await call(env2, 'POST', '/v1/mail/tasks/t_missing/retry', {});
   ok(nothing.res.status === 404, 'retry of unknown task → 404', String(nothing.res.status));
+}
+
+console.log('\n— 13. Open-tracking pixel + REAL analytics totals —');
+{
+  const env = await makeEnv();
+  // (a) Unknown campaign opens are ignored (spam-proof unauthenticated route).
+  const { recordOpen, openStats, openToken } = await import('../cloudflare/worker/src/emailer/track.js');
+  const spam = await recordOpen(env, 'ai_unknown_campaign', 'tok');
+  ok(!spam.ok, 'open for unknown campaign ignored', JSON.stringify(spam));
+
+  // (b) A delivered transactional blast: 3 recipients, 2 accepted, 1 failed.
+  await seedDoc(env.DB, 'campaigns', 'ai_track1_1', {
+    source: 'ai-mailer', name: 'AI | track', channel: 'email', status: 'sent',
+    audienceCount: 3, subject: 'Hi', deliveryMode: 'transactional',
+    delivery: { mode: 'transactional', sent: 2, failed: 1, deferred: 0 },
+    metrics: { sent: 2, delivered: 2, opens: 0, clicks: 0, conversions: 0, bounces: 1, unsubscribes: 0, revenue: 0, failed: 1, deferred: 0 },
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+
+  const tok1 = openToken('ai_track1_1', 'a@x.com');
+  const r1 = await recordOpen(env, 'ai_track1_1', tok1);
+  const r2 = await recordOpen(env, 'ai_track1_1', tok1); // same reader reloads
+  const r3 = await recordOpen(env, 'ai_track1_1', 'tokb');
+  ok(r1.ok && r1.unique, 'first open recorded as unique');
+  ok(r2.ok && !r2.unique, 'repeat open counted once', JSON.stringify(r2));
+  ok(r3.ok && r3.unique, 'second opener unique');
+  const st = await openStats(env, 'ai_track1_1');
+  ok(st.opens === 2, 'openStats counts 2 unique openers', JSON.stringify(st));
+
+  // (c) collectAnalytics: transactional campaigns MUST appear with real
+  // delivered / not_delivered numbers + pixel opens (max vs provider 0s).
+  const mcStub = {
+    campaignOpens: async () => ({ data: [] }),
+    campaignClicks: async () => ({ data: [] }),
+    campaignUnsubs: async () => ({ data: [] }),
+    inboxTracking: async () => ({ data: [] }),
+  };
+  const kv = kvMock();
+  const { collectAnalytics, getLatestAnalytics } = await import('../cloudflare/worker/src/emailer/analytics.js');
+  await collectAnalytics(mcStub, env, kv);
+  const snap = await getLatestAnalytics(kv);
+  ok(!!snap, 'analytics snapshot persisted to KV');
+  const row = snap.campaigns.find((c) => c.crmCampaignId === 'ai_track1_1');
+  ok(!!row, 'transactional campaign included in snapshot (was skipped before)');
+  ok(row.recipients === 3, 'recipients = audience count', String(row.recipients));
+  ok(row.delivered === 2, 'delivered = provider-accepted truth', String(row.delivered));
+  ok(row.not_delivered === 1, 'not_delivered = sent − delivered', String(row.not_delivered));
+  ok(row.opens === 2, 'opens = pixel-tracked uniques', String(row.opens));
+  ok(snap.totals && snap.totals.delivered === 2 && snap.totals.not_delivered === 1 && snap.totals.opens === 2,
+    'totals sum delivered/not_delivered/opens', JSON.stringify(snap.totals));
+
+  // (d) write-back: the CRM campaign doc gains the REAL metrics (never 0s).
+  const back = await env.DB.prepare("SELECT json FROM docs WHERE col = 'campaigns' AND id = 'ai_track1_1'").first();
+  const backMetrics = JSON.parse(back.json).metrics;
+  ok(backMetrics.opens === 2 && backMetrics.delivered === 2 && backMetrics.failed === 1,
+    'write-back keeps delivered/failed and pixel opens', JSON.stringify(backMetrics));
 }
 
 console.log(`\n════════════════════════════════════════`);

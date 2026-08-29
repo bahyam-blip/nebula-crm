@@ -22,7 +22,8 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(currentAppUserValueProvider);
+    final userAsync = ref.watch(currentAppUserProvider);
+    final user = userAsync.valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -30,12 +31,15 @@ class ProfileScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.edit, size: 20),
-            onPressed: () => context.push('/profile/edit'),
+            onPressed: user == null ? null : () => context.push('/profile/edit'),
           ),
         ],
       ),
+      // A failed load must be VISIBLE and retryable — a bare spinner here
+      // read as "the profile page never opens" whenever one network tick
+      // failed, with no way to recover short of killing the app.
       body: user == null
-          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+          ? _LoadingOrError(state: userAsync)
           : ListView(
               padding: const EdgeInsets.all(20),
               children: [
@@ -263,6 +267,50 @@ class ProfileScreen extends ConsumerWidget {
   Color _hexToColor(String hex) {
     final clean = hex.replaceAll('#', '');
     return Color(int.parse('FF$clean', radix: 16));
+  }
+}
+
+/// Spinner while the profile loads; explicit error + retry when a load
+/// failed and there is nothing to show. Never a silent infinite spinner.
+class _LoadingOrError extends ConsumerWidget {
+  const _LoadingOrError({required this.state});
+
+  final AsyncValue<AppUser?> state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!state.hasError) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, size: 40, color: AppColors.textSecondary),
+            const SizedBox(height: 12),
+            Text(
+              'Couldn\'t load your profile',
+              style: context.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${state.error}',
+              textAlign: TextAlign.center,
+              style: context.textTheme.bodySmall
+                  ?.copyWith(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => ref.invalidate(currentAppUserProvider),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Try again'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

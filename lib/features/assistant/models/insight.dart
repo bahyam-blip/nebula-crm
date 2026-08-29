@@ -56,14 +56,14 @@ class ChatMessage extends Equatable {
       id: doc.id,
       role: parseChatRole(data['role'] as String?),
       content: data['content'] as String? ?? '',
-      timestamp: (data['timestamp'] as Timestamp?)?.toDate(),
+      timestamp: flexTs(data['timestamp']),
       metadata: Map<String, dynamic>.from(data['metadata'] as Map? ?? const {}),
       attachments:
-          List<String>.from(data['attachments'] as List? ?? const []),
+          stringList(data['attachments']),
       isStreaming: data['isStreaming'] as bool? ?? false,
       tokensUsed: data['tokensUsed'] as int?,
       modelUsed: data['modelUsed'] as String?,
-      citations: List<String>.from(data['citations'] as List? ?? const []),
+      citations: stringList(data['citations']),
     );
   }
 
@@ -229,8 +229,8 @@ class Insight extends Equatable {
       dismissed: data['dismissed'] as bool? ?? false,
       actedOn: data['actedOn'] as bool? ?? false,
       metadata: Map<String, dynamic>.from(data['metadata'] as Map? ?? const {}),
-      generatedAt: (data['generatedAt'] as Timestamp?)?.toDate(),
-      expiresAt: (data['expiresAt'] as Timestamp?)?.toDate(),
+      generatedAt: flexTs(data['generatedAt']),
+      expiresAt: flexTs(data['expiresAt']),
     );
   }
 

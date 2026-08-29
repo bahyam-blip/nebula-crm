@@ -44,7 +44,7 @@ class CommissionSettings {
       commissionValue: (d['commissionValue'] as num?)?.toDouble() ?? 100,
       currency: d['currency'] as String? ?? 'INR',
       updatedBy: d['updatedBy'] as String? ?? '',
-      updatedAt: (d['updatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: flexTs(d['updatedAt']),
     );
   }
 
@@ -128,8 +128,8 @@ class Commission {
       contactName: d['contactName'] as String? ?? '',
       status: CommissionStatusX.parse(d['status'] as String?),
       note: d['note'] as String?,
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
-      settledAt: (d['settledAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(d['createdAt']),
+      settledAt: flexTs(d['settledAt']),
     );
   }
 

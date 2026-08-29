@@ -58,7 +58,7 @@ class CrmNote {
       fileName: d['fileName'] as String?,
       fileSize: (d['fileSize'] as num?)?.toInt() ?? 0,
       pinned: d['pinned'] as bool? ?? false,
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(d['createdAt']),
     );
   }
 

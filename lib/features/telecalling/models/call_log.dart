@@ -48,8 +48,8 @@ class CallLog extends Equatable {
       callerName: data['callerName'] as String? ?? '',
       notes: data['notes'] as String?,
       durationSeconds: (data['durationSeconds'] as num?)?.toInt() ?? 0,
-      followUpAt: (data['followUpAt'] as Timestamp?)?.toDate(),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      followUpAt: flexTs(data['followUpAt']),
+      createdAt: flexTs(data['createdAt']),
     );
   }
 
@@ -110,7 +110,7 @@ class AuditEntry extends Equatable {
       targetId: data['targetId'] as String?,
       summary: data['summary'] as String? ?? '',
       metadata: (data['metadata'] as Map<String, dynamic>?) ?? const {},
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(data['createdAt']),
     );
   }
 

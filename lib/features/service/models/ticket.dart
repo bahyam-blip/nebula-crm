@@ -125,16 +125,16 @@ class Ticket extends Equatable {
       teamId: data['teamId'] as String?,
       description: data['description'] as String?,
       category: data['category'] as String?,
-      tags: List<String>.from(data['tags'] as List? ?? const []),
-      slaDeadline: (data['slaDeadline'] as Timestamp?)?.toDate(),
-      firstResponseAt: (data['firstResponseAt'] as Timestamp?)?.toDate(),
-      resolvedAt: (data['resolvedAt'] as Timestamp?)?.toDate(),
-      closedAt: (data['closedAt'] as Timestamp?)?.toDate(),
-      attachments: List<String>.from(data['attachments'] as List? ?? const []),
+      tags: stringList(data['tags']),
+      slaDeadline: flexTs(data['slaDeadline']),
+      firstResponseAt: flexTs(data['firstResponseAt']),
+      resolvedAt: flexTs(data['resolvedAt']),
+      closedAt: flexTs(data['closedAt']),
+      attachments: stringList(data['attachments']),
       messageCount: data['messageCount'] as int? ?? 0,
       csatScore: data['csatScore'] as int?,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(data['createdAt']),
+      updatedAt: flexTs(data['updatedAt']),
     );
   }
 
@@ -278,15 +278,15 @@ class Article extends Equatable {
       body: data['body'] as String? ?? '',
       summary: data['summary'] as String?,
       category: data['category'] as String?,
-      tags: List<String>.from(data['tags'] as List? ?? const []),
+      tags: stringList(data['tags']),
       views: data['views'] as int? ?? 0,
       helpful: data['helpful'] as int? ?? 0,
       notHelpful: data['notHelpful'] as int? ?? 0,
       authorId: data['authorId'] as String?,
       authorName: data['authorName'] as String?,
       published: data['published'] as bool? ?? false,
-      publishedAt: (data['publishedAt'] as Timestamp?)?.toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+      publishedAt: flexTs(data['publishedAt']),
+      updatedAt: flexTs(data['updatedAt']),
     );
   }
 

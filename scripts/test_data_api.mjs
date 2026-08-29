@@ -151,8 +151,19 @@ console.log('\n— 3. Codec semantics: sentinels, increments, arrays, timestamps
   const d = got.json.doc.data;
   ok(d.callAttempts === 2, 'increment applies server-side', String(d.callAttempts));
   ok(JSON.stringify(d.tags) === JSON.stringify(['a', 'b']), 'arrayUnion applies server-side', JSON.stringify(d.tags));
-  ok(typeof d.lastCallAt === 'string' && !Number.isNaN(Date.parse(d.lastCallAt)), 'serverTimestamp stamps an ISO time', String(d.lastCallAt));
-  ok(typeof d.updatedAt === 'string' && typeof d.createdAt === 'string', 'server stamps createdAt/updatedAt');
+  // Server times now land as {__type:'ts'} markers — the exact shape the
+  // app's decoder hydrates into real Timestamps (plain ISO strings broke
+  // every `as Timestamp?` cast on the client).
+  ok(
+    d.lastCallAt && d.lastCallAt.__type === 'ts' && !Number.isNaN(Date.parse(d.lastCallAt.v)),
+    'serverTimestamp stamps a ts marker with ISO time',
+    JSON.stringify(d.lastCallAt),
+  );
+  ok(
+    d.updatedAt?.__type === 'ts' && d.createdAt?.__type === 'ts' &&
+      !Number.isNaN(Date.parse(d.updatedAt.v)) && !Number.isNaN(Date.parse(d.createdAt.v)),
+    'server stamps createdAt/updatedAt as ts markers',
+  );
 
   // Timestamp round-trip via marker
   await call(env, {

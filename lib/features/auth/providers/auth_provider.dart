@@ -16,6 +16,15 @@ final currentFirebaseUserProvider = StreamProvider<User?>((ref) {
 /// The first emission runs the idempotent bootstrap (profile create, invite
 /// adoption, workspace claim — all server-side), then the profile is polled
 /// so role/team changes made by an admin show up without a restart.
+///
+/// Two hard-won rules keep this stream healthy (a stall here cascades into
+/// EVERYTHING — profile screen, AI assistant, team scoping):
+///   • Push registration NEVER blocks a value: requestPermission/getToken
+///     can take seconds (or hang without Play services), and awaiting it
+///     inside the fetch kept the first emission hostage.
+///   • Every fetch is timeout-bounded, and a failed tick returns the last
+///     known good profile instead of erroring the stream out — the next
+///     tick self-heals.
 final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
   final user = ref.watch(currentFirebaseUserProvider).valueOrNull;
   if (user == null) return Stream.value(null);
@@ -23,19 +32,38 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
   final ds = ref.watch(remoteDataServiceProvider);
   var pushRegistered = false;
   var bootstrapped = false;
+  AppUser? lastGood;
+
+  Future<AppUser?> guarded(Future<AppUser?> Function() body) =>
+      body().timeout(const Duration(seconds: 20));
 
   return ds.watch<AppUser?>(() async {
-    if (!bootstrapped) {
-      bootstrapped = true;
-      await ds.bootstrap();
+    try {
+      return await guarded(() async {
+        if (!bootstrapped) {
+          bootstrapped = true;
+          await ds.bootstrap();
+        }
+        final doc = await ds.get('users', user.uid);
+        final parsed = doc == null ? null : AppUser.fromFirestore(doc);
+        if (parsed != null) lastGood = parsed;
+
+        // Fire-and-forget: record this handset so teammates can reach it.
+        // Idempotent; runs at most once per stream subscription.
+        if (!pushRegistered) {
+          pushRegistered = true;
+          Future<void>(() => ref.read(pushServiceProvider).registerDevice())
+              .timeout(const Duration(seconds: 45))
+              .catchError((_) {});
+        }
+        return parsed;
+      });
+    } catch (_) {
+      // Self-heal: surface the last known profile and retry on the next
+      // tick. Erroring the stream here froze the profile page and the AI
+      // assistant on a spinner for the whole session.
+      return lastGood;
     }
-    final doc = await ds.get('users', user.uid);
-    // Record this handset so teammates can reach it. Cheap and idempotent.
-    if (!pushRegistered) {
-      pushRegistered = true;
-      await ref.read(pushServiceProvider).registerDevice();
-    }
-    return doc == null ? null : AppUser.fromFirestore(doc);
   }, interval: const Duration(seconds: 60));
 });
 

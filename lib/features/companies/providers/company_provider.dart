@@ -47,7 +47,7 @@ class Company {
       address: d['address'] as String?,
       notes: d['notes'] as String?,
       ownerId: d['ownerId'] as String?,
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(d['createdAt']),
     );
   }
 

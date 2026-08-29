@@ -48,7 +48,7 @@ class Invite {
       invitedBy: d['invitedBy'] as String? ?? '',
       invitedByName: d['invitedByName'] as String? ?? '',
       acceptedBy: d['acceptedBy'] as String?,
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(d['createdAt']),
     );
   }
 

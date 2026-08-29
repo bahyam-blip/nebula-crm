@@ -106,8 +106,12 @@ export async function writeEmail(env, task, planEmail, brief, learnings, memory 
  * replaced per recipient by MailerCloud's mail merge (POST /email-api) —
  * ONLY use this when the message goes through the personalized endpoint;
  * on the plain /email endpoint the placeholder would be delivered literally.
+ *
+ * track: { campaignId, base } injects the open-tracking pixel. In merge
+ * mode the per-recipient token travels as the {{open_uid}} merge var; for
+ * single sends pass tokenFor to inline the real token.
  */
-export function renderHtml(env, copy, { personalize = false } = {}) {
+export function renderHtml(env, copy, { personalize = false, track = null } = {}) {
   const name = env.MAIL_BUSINESS_NAME || 'Nebula CRM';
   const brand = env.MAIL_BRAND_COLOR || '#6C8CFF';
   const logoUrl = env.MAIL_LOGO_URL || '';
@@ -147,6 +151,16 @@ export function renderHtml(env, copy, { personalize = false } = {}) {
     ? `<p style="margin:0 0 6px 0;font-size:15.5px;line-height:1.65;color:#374151;">Hi {{first_name}},</p>`
     : '';
 
+  // Open-tracking pixel: per-campaign id + per-recipient token. In merge
+  // mode the token is a merge var ({{open_uid}}) resolved per recipient;
+  // single sends pass `token` already resolved.
+  let pixel = '';
+  if (track?.campaignId) {
+    const base = String(track.base || env.MAIL_PUBLIC_BASE_URL || 'https://nebula-crm-storage.nebula-crm.workers.dev').replace(/\/+$/, '');
+    const u = track.token || '{{open_uid}}';
+    pixel = `<img src="${base}/v1/t/o.png?c=${encodeURIComponent(track.campaignId)}&u=${encodeURIComponent(u)}" width="1" height="1" alt="" style="display:block;border:0;outline:none;">`;
+  }
+
   return `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
@@ -171,6 +185,7 @@ export function renderHtml(env, copy, { personalize = false } = {}) {
       <p style="margin:0 0 4px 0;font-size:15px;color:#374151;">${esc(copy.closing)}</p>
       <p style="margin:0;font-size:15px;color:#111827;font-weight:600;">Team ${esc(name)}</p>
     </td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
     <tr><td bgcolor="#f9fafb" style="padding:18px 30px;border-top:1px solid #e5e7eb;">
       <p style="margin:0;font-size:11.5px;line-height:1.6;color:#9ca3af;">${permission}<br>
       ${website ? `<a href="${esc(website)}" style="color:#6b7280;text-decoration:underline;">${esc(website)}</a><br>` : ''}© ${year} ${esc(name)}. All rights reserved.</p>

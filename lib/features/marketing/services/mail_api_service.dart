@@ -15,6 +15,10 @@ class MailTaskEmail {
     this.campaignId,
     this.status = 'planned',
     this.error,
+    this.delivered,
+    this.failed,
+    this.deferred,
+    this.recipients = const [],
   });
 
   final int seq;
@@ -24,14 +28,44 @@ class MailTaskEmail {
   final String status;
   final String? error;
 
-  factory MailTaskEmail.fromMap(Map<String, dynamic> m) => MailTaskEmail(
-        seq: (m['seq'] as num?)?.toInt() ?? 0,
-        sendAt: (m['sendAt'] as String?) ?? '',
-        subject: m['subject'] as String?,
-        campaignId: m['campaignId'] as String?,
-        status: (m['status'] as String?) ?? 'planned',
-        error: m['error'] as String?,
-      );
+  /// Provider truth after the send ran: accepted / rejected / retrying.
+  /// Null until the email actually goes out.
+  final int? delivered;
+  final int? failed;
+  final int? deferred;
+  final List<String> recipients;
+
+  bool get hasDelivery => delivered != null || failed != null || deferred != null;
+
+  String get deliveryLabel {
+    final d = delivered ?? 0;
+    final f = failed ?? 0;
+    final x = deferred ?? 0;
+    final parts = <String>['$d delivered'];
+    if (f > 0) parts.add('$f failed');
+    if (x > 0) parts.add('$x pending retry');
+    return parts.join(', ');
+  }
+
+  factory MailTaskEmail.fromMap(Map<String, dynamic> m) {
+    final delivery = (m['delivery'] as Map?)?.cast<String, dynamic>();
+    int? n(String k) =>
+        delivery == null ? null : (delivery[k] as num?)?.toInt();
+    return MailTaskEmail(
+      seq: (m['seq'] as num?)?.toInt() ?? 0,
+      sendAt: (m['sendAt'] as String?) ?? '',
+      subject: m['subject'] as String?,
+      campaignId: m['campaignId'] as String?,
+      status: (m['status'] as String?) ?? 'planned',
+      error: m['error'] as String?,
+      delivered: n('sent'),
+      failed: n('failed'),
+      deferred: n('deferred'),
+      recipients: ((m['recipients'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
 }
 
 /// One AI progress event on a task (what the mailer did and when).
@@ -191,6 +225,7 @@ class MailAnalytics {
     required this.avgClickRate,
     this.bestSendHour,
     this.recommendations = const [],
+    this.totals = const MailTotals(),
   });
 
   final int campaigns;
@@ -198,6 +233,10 @@ class MailAnalytics {
   final double avgClickRate;
   final int? bestSendHour;
   final List<String> recommendations;
+
+  /// Fleet-wide delivery truth the owner asked for: how many emails went
+  /// out, how many were delivered, how many people opened, how many failed.
+  final MailTotals totals;
 
   factory MailAnalytics.fromMap(Map<String, dynamic> m) {
     final list = ((m['campaigns'] as List?) ?? const [])
@@ -213,17 +252,47 @@ class MailAnalytics {
       return vals.reduce((a, b) => a + b) / vals.length;
     }
 
+    int intOf(dynamic v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+
     final learnings = (m['learnings'] as Map?)?.cast<String, dynamic>();
+    final t = ((m['totals'] as Map?) ?? const {}).cast<String, dynamic>();
     return MailAnalytics(
-      campaigns: list.length,
+      campaigns: (t['campaigns'] as num?)?.toInt() ?? list.length,
       avgOpenRate: avg('open_rate'),
       avgClickRate: avg('click_rate'),
       bestSendHour: (learnings?['best_send_hour'] as num?)?.toInt(),
       recommendations: ((learnings?['recommendations'] as List?) ?? const [])
           .map((e) => e.toString())
           .toList(),
+      totals: MailTotals(
+        recipients: intOf(t['recipients']),
+        delivered: intOf(t['delivered']),
+        notDelivered: intOf(t['not_delivered']),
+        opens: intOf(t['opens']),
+        clicks: intOf(t['clicks']),
+        deliveryRate: (t['delivery_rate'] as num?)?.toDouble(),
+      ),
     );
   }
+}
+
+/// Summed delivery numbers across every recent campaign.
+class MailTotals {
+  const MailTotals({
+    this.recipients = 0,
+    this.delivered = 0,
+    this.notDelivered = 0,
+    this.opens = 0,
+    this.clicks = 0,
+    this.deliveryRate,
+  });
+
+  final int recipients;
+  final int delivered;
+  final int notDelivered;
+  final int opens;
+  final int clicks;
+  final double? deliveryRate;
 }
 
 /// The AI mailer's long-term memory about the business — what it sells,

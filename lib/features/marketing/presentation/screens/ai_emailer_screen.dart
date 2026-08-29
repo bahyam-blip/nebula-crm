@@ -957,9 +957,41 @@ class _AnalyticsCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          // The owner-facing truth: did the emails actually land, who opened,
+          // how many bounced. Numbers come from the provider + our own
+          // open-tracking pixel — never invented.
           Row(
             children: [
-              _Stat(label: 'Campaigns', value: '${a.campaigns}', color: AppColors.info),
+              _Stat(
+                label: 'Delivered',
+                value: '${a.totals.delivered}',
+                color: AppColors.success,
+              ),
+              _Stat(
+                label: 'Opened',
+                value: '${a.totals.opens}',
+                color: AppColors.info,
+              ),
+              _Stat(
+                label: 'Not delivered',
+                value: '${a.totals.notDelivered}',
+                color: AppColors.danger,
+              ),
+            ],
+          ),
+          if (a.totals.recipients > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${a.totals.recipients} sent across ${a.campaigns} campaign${a.campaigns == 1 ? '' : 's'}'
+              '${a.totals.deliveryRate != null ? ' · ${a.totals.deliveryRate!.toStringAsFixed(1)}% delivered' : ''}',
+              style: context.textTheme.labelSmall
+                  ?.copyWith(color: AppColors.textTertiary),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _Stat(label: 'Campaigns', value: '${a.campaigns}', color: AppColors.textSecondary),
               _Stat(
                 label: 'Avg open',
                 value: '${a.avgOpenRate.toStringAsFixed(1)}%',
@@ -1176,6 +1208,7 @@ class _TaskCardState extends State<_TaskCard> {
                         Icon(
                           switch (e.status) {
                             'scheduled' => Icons.schedule_send,
+                            'sent' || 'partial' => Icons.mark_email_read_outlined,
                             'dry_run' => Icons.mark_email_read_outlined,
                             'failed' => Icons.error_outline,
                             'planned' => Icons.schedule,
@@ -1185,7 +1218,8 @@ class _TaskCardState extends State<_TaskCard> {
                           size: 15,
                           color: switch (e.status) {
                             'failed' => AppColors.danger,
-                            'scheduled' => AppColors.success,
+                            'scheduled' || 'sent' => AppColors.success,
+                            'partial' => AppColors.warning,
                             'cancelled' => AppColors.textTertiary,
                             _ => AppColors.info,
                           },
@@ -1199,11 +1233,23 @@ class _TaskCardState extends State<_TaskCard> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Text(
-                          _time(e.sendAt),
-                          style: context.textTheme.labelSmall
-                              ?.copyWith(color: AppColors.textTertiary),
-                        ),
+                        // Provider truth for THIS email: "1 delivered",
+                        // "1 delivered, 1 failed" — empty until it sends.
+                        if (e.hasDelivery)
+                          Text(
+                            e.deliveryLabel,
+                            style: context.textTheme.labelSmall?.copyWith(
+                              color: (e.failed ?? 0) > 0
+                                  ? AppColors.warning
+                                  : AppColors.success,
+                            ),
+                          )
+                        else
+                          Text(
+                            _time(e.sendAt),
+                            style: context.textTheme.labelSmall
+                                ?.copyWith(color: AppColors.textTertiary),
+                          ),
                       ],
                     ),
                   ),

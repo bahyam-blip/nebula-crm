@@ -463,6 +463,19 @@ jobs:
                       f"detail={json.dumps(body)[:300]}")
           except Exception as e:
               say(f"/v1/ai probe failed: {e}")
+
+          # 6) Open-tracking pixel: must be PUBLIC (mail clients send no
+          #    auth header) and always answer image/png, even for unknown
+          #    campaign ids. A 4xx/5xx here means inbox opens go dark.
+          try:
+              r = requests.get(f"{WORKER}/v1/t/o.png?c=ci_probe&u=ci", timeout=30)
+              ctype = r.headers.get("content-type", "")
+              if r.ok and ctype == "image/png" and len(r.content) < 500:
+                  say(f"TRACK PIXEL OK ({len(r.content)} bytes png, public)")
+              else:
+                  say(f"TRACK PIXEL FAIL HTTP {r.status_code} type={ctype}")
+          except Exception as e:
+              say(f"/v1/t/o.png probe failed: {e}")
           PYEOF
           rm -f /tmp/sa.json
 

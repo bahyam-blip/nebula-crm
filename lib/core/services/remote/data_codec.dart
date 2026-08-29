@@ -76,3 +76,47 @@ Map<String, dynamic> decodeData(Map<String, dynamic> raw) =>
 /// Encode a full payload map.
 Map<String, dynamic> encodeData(Map<String, dynamic> raw) =>
     {for (final e in raw.entries) e.key: encodeValue(e.value)};
+
+/// Tolerant timestamp reader for model parsers.
+///
+/// Rows reach the app from three writers: this app (Timestamp markers),
+/// the Worker's server-side stamps, and the Firestore migration. The
+/// server stamps used to land as PLAIN ISO strings (and `serverTimestamp`
+/// sentinels still resolve to them), so `value as Timestamp?` threw a
+/// TypeError for whole collections — contacts, campaigns, even the signed-in
+/// user's own profile. This accepts every shape that has ever been stored:
+///
+///   Timestamp            → .toDate()
+///   {__type:'ts', v:ISO} → parsed (defensive; decodeValue already hydrates)
+///   "2026-…T…Z" (String) → DateTime.tryParse
+///   epoch millis (num)   → DateTime.fromMillisecondsSinceEpoch
+///   anything else        → null
+DateTime? flexTs(dynamic v) {
+  if (v == null) return null;
+  if (v is Timestamp) return v.toDate();
+  if (v is DateTime) return v;
+  if (v is String) {
+    final s = v.trim();
+    if (s.isEmpty) return null;
+    return DateTime.tryParse(s)?.toUtc();
+  }
+  if (v is num) {
+    // Heuristic: plain seconds vs milliseconds. Nothing in the CRM stores
+    // epoch-second dates, but the cost of supporting both is one comparison.
+    final ms = v > 1e11 ? v.toInt() : (v * 1000).toInt();
+    return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+  }
+  if (v is Map && v['__type'] == 'ts' && v['v'] is String) {
+    return DateTime.tryParse(v['v'] as String)?.toUtc();
+  }
+  return null;
+}
+
+/// Tolerant string-list reader. One non-string element (a number from CSV
+/// import, a map written by an older build) used to throw for the WHOLE
+/// list and crash the screen it fed. Elements are stringified instead.
+List<String> stringList(dynamic v) {
+  if (v is List) return v.map((e) => e?.toString() ?? '').where((s) => true).toList();
+  if (v is String) return v.isEmpty ? const [] : [v];
+  return const [];
+}

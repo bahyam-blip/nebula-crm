@@ -28,6 +28,7 @@ const PLAN_SCHEMA_PROMPT = `Return ONLY a JSON object:
 {
  "understanding": "1-2 sentences: what the owner asked for",
  "audience": { "segment": "a status value to target (lead|customer|mql|sql|opportunity|subscriber) or null for everyone", "max_recipients": <number> },
+ "explicit_recipients": ["email addresses EXPLICITLY named in the task, e.g. send to x@y.com — empty array if none"],
  "emails": [
    {
      "seq": 1,
@@ -166,9 +167,13 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     '',
     'RULES:',
     '- Respect any explicit email count, recipient count, dates or deadlines in the task.',
+    '- If the task names specific email addresses, list them in explicit_recipients EXACTLY as written (they are sent to directly, bypassing the segment).',
+    '- URGENCY: if the task says "right away", "now", "immediately", "asap" or "today", the FIRST email must go out within 15 minutes of the current time. Never push an urgent task days into the future.',
+    '- If the task does NOT mention a date/time/day/urgency, keep every sendAt within the next 48 hours — owners expect action, not a distant reservation.',
+    '- Only schedule beyond 48 hours when the task explicitly says so ("next Monday", "3 emails over 2 weeks", a named date).',
     '- If the task gives no count, choose 1-3 emails spaced 2-5 days apart.',
     `- If the task gives no recipient count, cap at ${contactStats.total}.`,
-    `- sendAt must be in the future, between 08:00-20:00 in ${env.MAIL_TIMEZONE || 'Asia/Calcutta'}, never all at the same minute.`,
+    `- sendAt must be in the future, between 08:00-20:00 in ${env.MAIL_TIMEZONE || 'Asia/Calcutta'}, never all at the same minute. EXCEPTION: urgent tasks (rule above) may send any time within the next 15 minutes.`,
     '- Vary angles across emails (story → proof → urgency, etc.).',
     '- Detect the campaign type (promotion, introduction, re-engagement, announcement, newsletter, follow-up) and let it shape the angles.',
     '- Reuse angles from the CREATIVE PLAYBOOK that are marked WINNER. Never repeat subjects of FLOP emails or of the recent campaign focus list.',
@@ -200,14 +205,49 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     plan.audience.segment = valid.includes(seg) ? seg : null;
   }
 
+  // Explicit recipients: validate + cap. Belt-and-braces sweep of the raw
+  // instruction catches addresses the model forgot to copy — "send to
+  // x@y.com" must NEVER silently degrade to a segment blast.
+  const EMAIL_TEST = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  plan.explicit_recipients = [...new Set(
+    (Array.isArray(plan.explicit_recipients) ? plan.explicit_recipients : [])
+      .map((e) => String(e || '').trim().toLowerCase())
+      .filter((e) => EMAIL_TEST.test(e))
+  )];
+  const mentioned = String(task.instruction || '')
+    .match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
+  for (const m of mentioned) {
+    if (!plan.explicit_recipients.includes(m.toLowerCase())) {
+      plan.explicit_recipients.push(m.toLowerCase());
+    }
+  }
+  plan.explicit_recipients = plan.explicit_recipients.slice(0, 100);
+
   const emails = Array.isArray(plan.emails) ? plan.emails.slice(0, 10) : [];
   const base = Date.now() + 30 * 60 * 1000; // earliest send: 30 min from now
+  const URGENT_RE = /right away|immediately|asap|urgent|send now|\bnow\b/i;
+  const SCHEDULED_RE = /tomorrow|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|this weekend|later|\d{4}-\d{2}-\d{2}|in \d+ (day|days|week|weeks)/i;
+  const instruction = String(task.instruction || '');
+  const urgent = URGENT_RE.test(instruction);
+  const explicitlyScheduled = SCHEDULED_RE.test(instruction);
+
   plan.emails = emails.map((e, i) => {
-    const t = Date.parse(e?.sendAt);
-    const safe = Number.isFinite(t) ? Math.max(t, base + i * 60 * 60 * 1000) : base + i * 24 * 60 * 60 * 1000;
+    let t = Date.parse(e?.sendAt);
+    if (!Number.isFinite(t)) t = base + i * 48 * 3600 * 1000;
+    // Urgent: the first email leaves within minutes, whatever the model chose.
+    if (urgent && i === 0) t = Date.now() + (2 + Math.floor(Math.random() * 6)) * 60 * 1000;
+    // No scheduling language and the model drifted days out → pull it back.
+    // (Multi-day drift made owners believe sends were lost.) Later emails in
+    // the sequence space 48h apart — matching the "spaced 2-5 days" rule and
+    // staying OUTSIDE the runner's 26h lookahead so a sequence never fires
+    // as one blast.
+    else if (!explicitlyScheduled && t - Date.now() > 48 * 3600 * 1000) {
+      t = base + i * 48 * 3600 * 1000;
+    }
+    t = Math.max(t, base + i * 60 * 60 * 1000);
     return {
       seq: i + 1,
-      sendAt: new Date(safe).toISOString(),
+      sendAt: new Date(t).toISOString(),
       goal: String(e?.goal || 'Engage the audience').slice(0, 300),
       angle: String(e?.angle || 'Helpful update').slice(0, 300),
       tone: String(e?.tone || 'friendly, confident').slice(0, 120),

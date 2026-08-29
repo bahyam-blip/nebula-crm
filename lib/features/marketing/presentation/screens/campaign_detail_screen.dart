@@ -168,6 +168,16 @@ class _MetricsGrid extends StatelessWidget {
           color: AppColors.textPrimary,
         ),
         _MetricTile(
+          label: 'Delivered',
+          value: campaign.metrics.delivered.toString(),
+          color: AppColors.success,
+        ),
+        _MetricTile(
+          label: 'Not delivered',
+          value: campaign.metrics.notDelivered.toString(),
+          color: AppColors.danger,
+        ),
+        _MetricTile(
           label: 'Opens',
           value: campaign.metrics.opens.toString(),
           color: AppColors.info,
@@ -178,19 +188,9 @@ class _MetricsGrid extends StatelessWidget {
           color: AppColors.accent,
         ),
         _MetricTile(
-          label: 'Conversions',
-          value: campaign.metrics.conversions.toString(),
-          color: AppColors.success,
-        ),
-        _MetricTile(
-          label: 'Bounces',
-          value: campaign.metrics.bounces.toString(),
-          color: AppColors.warning,
-        ),
-        _MetricTile(
           label: 'Unsubs',
           value: campaign.metrics.unsubscribes.toString(),
-          color: AppColors.danger,
+          color: AppColors.warning,
         ),
       ],
     );

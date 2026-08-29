@@ -21,6 +21,7 @@ import {
 } from './push.js';
 import { handleMail, runMailCron, mailConfigState } from './emailer/pipeline.js';
 import { handleDataRequest } from './data_http.js';
+import { recordOpen, PNG_1X1 } from './emailer/track.js';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -186,6 +187,23 @@ export default {
       return json({ ok: true, bucket: 'nebula-crm1' });
     }
 
+    // ── Email open-tracking pixel ──
+    // Deliberately BEFORE auth (mail clients can't send headers) and
+    // deliberately boring: it can only bump metrics on a campaign doc that
+    // already exists. Returns a 1x1 PNG so mail clients render nothing.
+    if (request.method === 'GET' && path === '/v1/t/o.png') {
+      const c = url.searchParams.get('c') || '';
+      const u = (url.searchParams.get('u') || '').slice(0, 32);
+      if (c && u) ctx.waitUntil(recordOpen(env, c, u));
+      return new Response(PNG_1X1, {
+        status: 200,
+        headers: {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
+    }
+
     // ── Read ──
     if (request.method === 'GET' && path.startsWith('/v1/file/')) {
       const key = decodeURIComponent(path.slice('/v1/file/'.length));
@@ -346,13 +364,17 @@ export default {
         const accessToken = await getAccessToken(env);
 
         // Who the sender is allowed to speak for: their own team only.
-        const senderTokensDoc = await fetch(
-          `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}` +
-            `/databases/(default)/documents/users/${uid}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        const senderDoc = senderTokensDoc.ok ? await senderTokensDoc.json() : null;
-        const senderTeam = senderDoc?.fields?.teamId?.stringValue || '';
+        // Team identity lives in D1 now — the old Firestore lookup returned
+        // "no team" 403s for every user created after the migration.
+        const senderRow = env.DB
+          ? await env.DB
+              .prepare("SELECT json FROM docs WHERE col = 'users' AND id = ?")
+              .bind(uid)
+              .first()
+          : null;
+        const senderTeam = senderRow
+          ? (JSON.parse(senderRow.json).teamId || '')
+          : '';
         if (!senderTeam) return json({ error: 'no team' }, 403);
 
         let targets = [];

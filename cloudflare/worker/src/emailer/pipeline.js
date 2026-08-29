@@ -65,6 +65,7 @@ import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled
 import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, retryTaskState, progressOf } from './tasks.js';
 import { createStore, stateBackendName, safeParse } from './state.js';
 import { getMemory, saveMemory, resetMemory, teach, learnFromResults, memoryContext, syncBriefToMemory } from './memory.js';
+import { openToken } from './track.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -582,15 +583,24 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
 
         try {
           const planEmail = task.plan.emails.find((e) => e.seq === mail.seq);
-          const audience = pickAudience(contacts, task.plan.audience);
+          // Explicit recipients named in the instruction ("send to x@y.com")
+          // WIN over segment selection — the owner named a person, not a
+          // filter. Without this the AI's segment pick silently sent the
+          // email to whatever the CRM segment happened to contain.
+          const audience = pickAudience(contacts, task.plan.audience, task.plan.explicit_recipients);
           if (audience.length === 0) throw new Error('audience is empty');
 
           const copy = await writeEmail(env, task, planEmail, brief, learnings, memory);
+          const crmCampaignId = `ai_${task.id}_${mail.seq}`;
           // personalize → the HTML carries {{first_name}} which MailerCloud
           // replaces per recipient (inactive on non-merge endpoints).
           const personalize = pickDeliveryMode(env, audience.length) === 'transactional';
-          const html = renderHtml(env, copy, { personalize });
-          const crmCampaignId = `ai_${task.id}_${mail.seq}`;
+          const html = renderHtml(env, copy, {
+            personalize,
+            // Transactional sends carry the per-recipient {{open_uid}} merge
+            // var; campaign-mode opens come from MailerCloud's own reports.
+            track: personalize ? { campaignId: crmCampaignId } : null,
+          });
 
           if (dryRun) {
             mail.status = 'dry_run';
@@ -621,7 +631,12 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           mail.subject = copy.subject;
           mail.status = delivery.status;
           mail.delivery = { mode, ...(delivery.summary || {}) };
-          addEvent(task, `"${copy.subject}" → ${mode} ${delivery.status} to ${audience.length} recipient(s)`, 'send');
+          mail.recipients = audience.map((c) => c.email);
+          addEvent(
+            task,
+            `"${copy.subject}" → ${mode} ${delivery.status}: ${delivery.summary?.sent ?? 0} delivered, ${delivery.summary?.failed ?? 0} failed, ${delivery.summary?.deferred ?? 0} deferred → ${describeRecipients(audience)}`,
+            'send'
+          );
 
           // ── Make it visible in the app: write the campaign doc ──
           const sentCount = delivery.summary?.sent ?? audience.length;
@@ -637,6 +652,12 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
               audienceCount: audience.length,
               subject: copy.subject,
               previewText: copy.preheader,
+              // Actual recipient addresses (capped) — the owner can see WHO
+              // got an email without cross-referencing MailerCloud.
+              recipientsSample: audience.slice(0, 25).map((c) => c.email),
+              // Send-time provider truth (accepted/failed/deferred) — the
+              // analytics pull reads this as the delivery floor.
+              delivery: { mode, ...(delivery.summary || {}) },
               bodyHtml: html,
               bodyPlainText: plainOf(html),
               ctaLabel: copy.cta_text,
@@ -649,6 +670,8 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
                 opens: 0, clicks: 0, conversions: 0,
                 bounces: bounceCount,
                 unsubscribes: 0, revenue: 0,
+                failed: delivery.summary?.failed ?? 0,
+                deferred: delivery.summary?.deferred ?? 0,
               },
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -721,6 +744,8 @@ async function deliverTransactional(env, store, { copy, html, audience, crmCampa
       merge_vars: {
         first_name: c.first_name || 'there',
         company: c.company_name || '',
+        // Per-recipient open-tracking token, rendered into the pixel URL.
+        open_uid: openToken(crmCampaignId, c.email),
       },
     }));
 
@@ -792,6 +817,12 @@ function describeDelivery(delivery, { mode, audience, sendAt, taskId, instructio
 
 /* ══════════════════════ Helpers ══════════════════════ */
 
+function describeRecipients(audience) {
+  const emails = audience.map((c) => c.email);
+  if (emails.length <= 3) return emails.join(', ');
+  return `${emails.slice(0, 3).join(', ')} +${emails.length - 3} more`;
+}
+
 function contactStats(contacts) {
   const segs = {};
   for (const c of contacts) segs[c._segment] = (segs[c._segment] || 0) + 1;
@@ -811,7 +842,22 @@ function contactStats(contacts) {
 }
 
 /** Filter to the AI-chosen status segment, capped to max_recipients (freshest first). */
-function pickAudience(contacts, audience) {
+function pickAudience(contacts, audience, explicitRecipients = null) {
+  // "Send an email to x@y.com" — the owner NAMED the recipient. Build the
+  // audience from exactly those addresses, enriched with CRM data when the
+  // address exists there (names/merge vars), so the email reaches the person
+  // the owner actually named instead of whoever the segment matched.
+  if (Array.isArray(explicitRecipients) && explicitRecipients.length) {
+    const wanted = [...new Set(explicitRecipients.map((e) => String(e).toLowerCase()))];
+    return wanted.map((email) => {
+      const match = contacts.find((c) => String(c.email || '').toLowerCase() === email);
+      return match || {
+        email,
+        first_name: '', last_name: '', company_name: '', phone: '',
+        tags: [], _segment: 'explicit', _created: '', _leadScore: null,
+      };
+    });
+  }
   let pool = contacts;
   if (audience?.segment) {
     const seg = String(audience.segment).toLowerCase();

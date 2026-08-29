@@ -175,8 +175,8 @@ class AppUser extends Equatable {
           ?.map((e) => e.toString())
           .toList(),
       title: data['title'] as String?,
-      lastActiveAt: (data['lastActiveAt'] as Timestamp?)?.toDate(),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      lastActiveAt: flexTs(data['lastActiveAt']),
+      createdAt: flexTs(data['createdAt']),
       preferences: UserPreferences.fromMap(
         data['preferences'] as Map<String, dynamic>? ?? const {},
       ),

@@ -113,8 +113,8 @@ class Contact extends Equatable {
       status: _parseStatus(data['status'] as String?),
       ownerId: data['ownerId'] as String?,
       teamId: data['teamId'] as String?,
-      tags: List<String>.from(data['tags'] as List? ?? const []),
-      segments: List<String>.from(data['segments'] as List? ?? const []),
+      tags: stringList(data['tags']),
+      segments: stringList(data['segments']),
       linkedin: data['linkedin'] as String?,
       twitter: data['twitter'] as String?,
       website: data['website'] as String?,
@@ -122,9 +122,9 @@ class Contact extends Equatable {
       notes: data['notes'] as String?,
       leadScore: (data['leadScore'] as num?)?.toDouble(),
       lifetimeValue: (data['lifetimeValue'] as num?)?.toDouble() ?? 0,
-      lastActivityAt: (data['lastActivityAt'] as Timestamp?)?.toDate(),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+      lastActivityAt: flexTs(data['lastActivityAt']),
+      createdAt: flexTs(data['createdAt']),
+      updatedAt: flexTs(data['updatedAt']),
       customFields: Map<String, dynamic>.from(
         data['customFields'] as Map? ?? const {},
       ),
@@ -132,11 +132,11 @@ class Contact extends Equatable {
       openDealsCount: data['openDealsCount'] as int? ?? 0,
       assignedTo: data['assignedTo'] as String?,
       assignedBy: data['assignedBy'] as String?,
-      assignedAt: (data['assignedAt'] as Timestamp?)?.toDate(),
+      assignedAt: flexTs(data['assignedAt']),
       callStatus: CallStatusX.parse(data['callStatus'] as String?),
       callAttempts: (data['callAttempts'] as num?)?.toInt() ?? 0,
-      lastCallAt: (data['lastCallAt'] as Timestamp?)?.toDate(),
-      followUpAt: (data['followUpAt'] as Timestamp?)?.toDate(),
+      lastCallAt: flexTs(data['lastCallAt']),
+      followUpAt: flexTs(data['followUpAt']),
       source: data['source'] as String?,
     );
   }
@@ -292,7 +292,7 @@ class Activity extends Equatable {
       title: data['title'] as String?,
       description: data['description'] as String?,
       metadata: Map<String, dynamic>.from(data['metadata'] as Map? ?? const {}),
-      timestamp: (data['timestamp'] as Timestamp?)?.toDate(),
+      timestamp: flexTs(data['timestamp']),
     );
   }
 

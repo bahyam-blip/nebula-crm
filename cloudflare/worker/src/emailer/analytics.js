@@ -13,6 +13,7 @@
 import { sarvamChat } from './sarvam.js';
 import { findMailerCampaigns, updateCampaignMetrics } from './firestore.js';
 import { safeParse } from './state.js';
+import { openStats } from './track.js';
 
 const DAYS = 21;
 const CAMPAIGN_STATUSES = { scheduled: 'running', running: 'completed' };
@@ -43,50 +44,82 @@ export async function collectAnalytics(mc, env, kv) {
     : [];
 
   const snapshot = [];
-  for (const doc of crmCampaigns.slice(0, 15)) {
+  for (const doc of crmCampaigns.slice(0, 25)) {
+    // REAL numbers, never invented ones. Transactional sends (the Email API)
+    // have no MailerCloud campaign id — their truth lives in the delivery
+    // summary recorded at send time plus our own open-tracking pixel. The
+    // old code SKIPPED those campaigns entirely, which is why the analytics
+    // tab stayed empty while emails were going out.
+    const delivery = doc.delivery && typeof doc.delivery === 'object' ? doc.delivery : {};
+    const tracked = await openStats(env, doc.__id || doc.id || '');
+
+    let opensN = tracked.opens || 0;
+    let clicksN = 0;
+    let unsubsN = 0;
+    let sent = n(doc.audienceCount);
+    // pipeline stamps metrics.delivered/failed/deferred on the campaign doc
+    // at SEND time for BOTH modes (transactional + campaign) — use it as the
+    // floor so a missing/old `delivery` blob can never turn a fully
+    // delivered blast into "0 delivered / N not delivered".
+    let delivered = Math.max(n(delivery.sent), n(doc.metrics?.delivered));
+    let failed = Math.max(n(delivery.failed), n(doc.metrics?.failed));
+    let deferred = Math.max(n(delivery.deferred), n(doc.metrics?.deferred));
     const mcId = doc.mailercloudCampaignId;
-    if (!mcId) continue;
 
-    const [opens, clicks, unsubs, domains] = await Promise.all([
-      safe(mc.campaignOpens(mcId), null),
-      safe(mc.campaignClicks(mcId), null),
-      safe(mc.campaignUnsubs(mcId), null),
-      safe(mc.campaignDomainReport(mcId), null),
-    ]);
+    // Campaign-mode sends: merge MailerCloud's provider reports (opens,
+    // clicks, unsubs) on top of whatever the pixel saw.
+    if (mcId) {
+      const [opens, clicks, unsubs] = await Promise.all([
+        safe(mc.campaignOpens(mcId), null),
+        safe(mc.campaignClicks(mcId), null),
+        safe(mc.campaignUnsubs(mcId), null),
+      ]);
+      opensN = Math.max(opensN, countOf(opens));
+      clicksN = Math.max(clicksN, countOf(clicks));
+      unsubsN = Math.max(unsubsN, countOf(unsubs));
+    }
 
-    const recipients = Math.max(n(doc.audienceCount), countOf(opens), countOf(clicks));
-    const opensN = countOf(opens);
-    const clicksN = countOf(clicks);
-    const unsubsN = countOf(unsubs);
+    sent = Math.max(sent, delivered);
+    const notDelivered = Math.max(0, sent - delivered);
+    const recipients = sent;
 
     snapshot.push({
       crmCampaignId: doc.__id,
-      mailercloudId: String(mcId),
+      mailercloudId: mcId ? String(mcId) : null,
+      delivery_mode: String(doc.deliveryMode || (mcId ? 'campaign' : 'transactional')),
       name: String(doc.name || ''),
       subject: String(doc.subject || ''),
       scheduled_at: String(doc.scheduledAt || ''),
       status: String(doc.status || ''),
       recipients,
+      delivered,
+      not_delivered: notDelivered,
       opens: opensN,
       clicks: clicksN,
       unsubs: unsubsN,
       open_rate: recipients ? +(opensN / recipients * 100).toFixed(1) : null,
-      click_rate: recipients ? +(clicksN / recipients * 100).toFixed(1) : null,
-      top_domains: extractTopDomains(domains),
+      delivery_rate: recipients ? +(delivered / recipients * 100).toFixed(1) : null,
     });
 
-    // ── Write metrics back into the CRM (native app visibility) ──
-    const nextStatus = CAMPAIGN_STATUSES[String(doc.status || '')] || null;
+    // ── Write REAL metrics back into the CRM (native app visibility) ──
+    // opens use max(): the pixel keeps incrementing live between pulls and
+    // must never be rolled back to a provider snapshot.
+    const prevMetrics = doc.metrics && typeof doc.metrics === 'object' ? doc.metrics : {};
+    // Campaign-mode docs still need their lifecycle status (scheduled →
+    // running → completed); transactional docs are already terminal.
+    const nextStatus = mcId ? (CAMPAIGN_STATUSES[String(doc.status || '')] || null) : null;
     await updateCampaignMetrics(env, doc.__id, {
       metrics: {
         sent: recipients,
-        delivered: recipients,
-        opens: opensN,
-        clicks: clicksN,
-        conversions: 0,
-        bounces: 0,
-        unsubscribes: unsubsN,
-        revenue: 0,
+        delivered: Math.max(n(prevMetrics.delivered), delivered),
+        opens: Math.max(n(prevMetrics.opens), opensN),
+        clicks: Math.max(n(prevMetrics.clicks), clicksN),
+        conversions: n(prevMetrics.conversions) || 0,
+        bounces: Math.max(n(prevMetrics.bounces), failed + deferred),
+        failed: Math.max(n(prevMetrics.failed), failed),
+        deferred: Math.max(n(prevMetrics.deferred), deferred),
+        unsubscribes: Math.max(n(prevMetrics.unsubscribes), unsubsN),
+        revenue: n(prevMetrics.revenue) || 0,
       },
       status: nextStatus,
     });
@@ -99,6 +132,7 @@ export async function collectAnalytics(mc, env, kv) {
     generatedAt: now.toISOString(),
     window_days: DAYS,
     campaigns: snapshot,
+    totals: summariseTotals(snapshot),
     inbox_tracking: summariseInbox(inbox),
   };
 
@@ -158,6 +192,21 @@ function extractTopDomains(report) {
     share: r.percentage ?? r.percent ?? r.share ?? null,
     opens: r.opens ?? r.unique_opens ?? null,
   }));
+}
+
+function summariseTotals(campaigns) {
+  const sum = (k) => campaigns.reduce((a, c) => a + (Number(c[k]) || 0), 0);
+  const recipients = sum('recipients');
+  return {
+    campaigns: campaigns.length,
+    recipients,
+    delivered: sum('delivered'),
+    not_delivered: sum('not_delivered'),
+    opens: sum('opens'),
+    clicks: sum('clicks'),
+    open_rate: recipients ? +(sum('opens') / recipients * 100).toFixed(1) : null,
+    delivery_rate: recipients ? +(sum('delivered') / recipients * 100).toFixed(1) : null,
+  };
 }
 
 function summariseInbox(inbox) {

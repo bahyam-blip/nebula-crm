@@ -74,7 +74,7 @@ class Campaign extends Equatable {
       ownerId: data['ownerId'] as String?,
       teamId: data['teamId'] as String?,
       audienceSegmentIds:
-          List<String>.from(data['audienceSegmentIds'] as List? ?? const []),
+          stringList(data['audienceSegmentIds']),
       audienceCount: data['audienceCount'] as int? ?? 0,
       subject: data['subject'] as String?,
       previewText: data['previewText'] as String?,
@@ -87,15 +87,15 @@ class Campaign extends Equatable {
           .toList(),
       abVariantOf: data['abVariantOf'] as String?,
       scheduleType: data['scheduleType'] as String? ?? 'manual',
-      scheduledAt: (data['scheduledAt'] as Timestamp?)?.toDate(),
-      startedAt: (data['startedAt'] as Timestamp?)?.toDate(),
-      completedAt: (data['completedAt'] as Timestamp?)?.toDate(),
+      scheduledAt: flexTs(data['scheduledAt']),
+      startedAt: flexTs(data['startedAt']),
+      completedAt: flexTs(data['completedAt']),
       metrics: CampaignMetrics.fromMap(
         data['metrics'] as Map<String, dynamic>? ?? const {},
       ),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
-      tags: List<String>.from(data['tags'] as List? ?? const []),
+      createdAt: flexTs(data['createdAt']),
+      updatedAt: flexTs(data['updatedAt']),
+      tags: stringList(data['tags']),
     );
   }
 
@@ -166,6 +166,8 @@ class CampaignMetrics extends Equatable {
     this.conversions = 0,
     this.bounces = 0,
     this.unsubscribes = 0,
+    this.failed = 0,
+    this.deferred = 0,
     this.revenue = 0,
   });
 
@@ -176,16 +178,37 @@ class CampaignMetrics extends Equatable {
   final int conversions;
   final int bounces;
   final int unsubscribes;
+
+  /// Provider rejected the address at send time (hard failure).
+  final int failed;
+
+  /// Temporarily unavailable mailbox — retried by the provider, still counts
+  /// as "not delivered" until it lands.
+  final int deferred;
   final double revenue;
 
+  /// Emails that did NOT reach an inbox: everything sent minus everything
+  /// confirmed delivered. Falls back to failed+deferred when the sender
+  /// didn't stamp a delivered count.
+  int get notDelivered {
+    if (sent > 0) return (sent - delivered).clamp(0, sent).toInt();
+    return (failed + deferred).clamp(0, 1 << 31).toInt();
+  }
+
+  /// Tolerant: provider/analytics numbers may arrive as double (12.0) —
+  /// a hard `as int?` would throw for the whole metrics map.
+  static int _int(dynamic v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+
   factory CampaignMetrics.fromMap(Map<String, dynamic> m) => CampaignMetrics(
-        sent: m['sent'] as int? ?? 0,
-        delivered: m['delivered'] as int? ?? 0,
-        opens: m['opens'] as int? ?? 0,
-        clicks: m['clicks'] as int? ?? 0,
-        conversions: m['conversions'] as int? ?? 0,
-        bounces: m['bounces'] as int? ?? 0,
-        unsubscribes: m['unsubscribes'] as int? ?? 0,
+        sent: _int(m['sent']),
+        delivered: _int(m['delivered']),
+        opens: _int(m['opens']),
+        clicks: _int(m['clicks']),
+        conversions: _int(m['conversions']),
+        bounces: _int(m['bounces']),
+        unsubscribes: _int(m['unsubscribes']),
+        failed: _int(m['failed']),
+        deferred: _int(m['deferred']),
         revenue: (m['revenue'] as num?)?.toDouble() ?? 0,
       );
 
@@ -197,12 +220,16 @@ class CampaignMetrics extends Equatable {
         'conversions': conversions,
         'bounces': bounces,
         'unsubscribes': unsubscribes,
+        'failed': failed,
+        'deferred': deferred,
         'revenue': revenue,
       };
 
   @override
-  List<Object?> get props =>
-      [sent, delivered, opens, clicks, conversions, bounces, revenue];
+  List<Object?> get props => [
+        sent, delivered, opens, clicks, conversions,
+        bounces, unsubscribes, failed, deferred, revenue,
+      ];
 }
 
 /// A single step in a drip sequence.

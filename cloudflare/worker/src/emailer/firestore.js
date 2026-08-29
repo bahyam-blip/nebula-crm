@@ -213,7 +213,12 @@ export async function findMailerCampaigns(env, { withinDays = 30 } = {}) {
     const cutoff = Date.now() - withinDays * 86400000;
     return (results || [])
       .map((r) => {
-        try { return JSON.parse(r.json); } catch { return null; }
+        try {
+          // __id rides along: the analytics write-back addresses campaign
+          // docs by it. (It used to be missing, so every write-back silently
+          // targeted `undefined` and no metrics ever moved.)
+          return { __id: r.id, ...JSON.parse(r.json) };
+        } catch { return null; }
       })
       .filter(Boolean)
       .filter((c) => {

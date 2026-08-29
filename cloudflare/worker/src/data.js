@@ -45,7 +45,11 @@ function applySentinels(data, existing) {
     if (isMarker(raw)) {
       switch (raw.__type) {
         case 'svts':
-          out[k] = nowIso();
+          // Resolve to the SAME marker shape Dart's decoder hydrates into a
+          // real Timestamp. This used to store a plain ISO string, which the
+          // app's `as Timestamp?` casts choked on — contacts, campaigns and
+          // the signed-in profile all failed to parse on read.
+          out[k] = { __type: 'ts', v: nowIso() };
           continue;
         case 'ts':
           out[k] = { __type: 'ts', v: raw.v };
@@ -129,8 +133,12 @@ export async function putDoc(db, col, id, data, { merge = false, touchOnly = fal
   const now = Date.now();
   const createdAt = existingRow?.createdAt ?? now;
   // Server stamps: every doc gets updatedAt; createdAt survives merges.
-  payload.updatedAt = nowIso();
-  if (!payload.createdAt && !existing?.createdAt) payload.createdAt = nowIso();
+  // Both go out as timestamp markers (see applySentinels — plain strings
+  // broke every model parser on the app side).
+  payload.updatedAt = { __type: 'ts', v: nowIso() };
+  if (!payload.createdAt && !existing?.createdAt) {
+    payload.createdAt = { __type: 'ts', v: nowIso() };
+  }
 
   const teamId = typeof payload.teamId === 'string' ? payload.teamId : null;
   const json = JSON.stringify(payload);

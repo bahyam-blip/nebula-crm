@@ -186,14 +186,14 @@ class CrmTask extends Equatable {
       createdByName: d['createdByName'] as String? ?? '',
       relatedContactId: d['relatedContactId'] as String?,
       relatedContactName: d['relatedContactName'] as String?,
-      dueAt: (d['dueAt'] as Timestamp?)?.toDate(),
-      remindAt: (d['remindAt'] as Timestamp?)?.toDate(),
-      completedAt: (d['completedAt'] as Timestamp?)?.toDate(),
+      dueAt: flexTs(d['dueAt']),
+      remindAt: flexTs(d['remindAt']),
+      completedAt: flexTs(d['completedAt']),
       acknowledged: d['acknowledged'] as bool? ?? false,
       audienceRole: d['audienceRole'] as String?,
       audienceEveryone: d['audienceEveryone'] as bool? ?? false,
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
-      updatedAt: (d['updatedAt'] as Timestamp?)?.toDate(),
+      createdAt: flexTs(d['createdAt']),
+      updatedAt: flexTs(d['updatedAt']),
     );
   }
 

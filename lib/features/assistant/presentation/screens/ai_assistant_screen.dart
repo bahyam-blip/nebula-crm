@@ -107,7 +107,20 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     final text = _input.text.trim();
     if (text.isEmpty || _busy) return;
     final me = ref.read(currentAppUserValueProvider);
-    if (me == null) return;
+    if (me == null) {
+      // The profile stream hasn't emitted yet. Silent-returning here felt
+      // exactly like a dead send button — say what is happening instead.
+      if (!mounted) return;
+      setState(() {
+        _messages.add(_Msg(
+          'Your profile is still loading — give it a few seconds and try '
+          'again. If this keeps happening, check your connection.',
+          mine: false,
+        ));
+      });
+      _jump();
+      return;
+    }
 
     setState(() {
       _messages.add(_Msg(text, mine: true));
