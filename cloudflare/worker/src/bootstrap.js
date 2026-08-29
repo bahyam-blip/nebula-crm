@@ -192,10 +192,14 @@ export async function migrateFromFirestore(env, db) {
 
   const upsertBatch = async (col, rows) => {
     if (!rows.length) return;
+    // DO NOTHING, not DO UPDATE: D1 rows are the live database (post-cutover
+    // truth, possibly edited by the team already); Firestore is an older
+    // snapshot. Import must never clobber newer data with older. Rows that
+    // only exist in Firestore are added; rows already in D1 are kept as-is.
     const stmt = db.prepare(
       `INSERT INTO docs (col, id, team_id, json, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(col, id) DO UPDATE SET team_id = excluded.team_id, json = excluded.json, updated_at = excluded.updated_at`
+       ON CONFLICT(col, id) DO NOTHING`
     );
     const now = Date.now();
     await db.batch(rows.map((r) => stmt.bind(col, r.id, r.teamId, r.json, now, now)));
