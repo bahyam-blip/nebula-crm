@@ -21,6 +21,9 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
  *   { email, first_name, last_name, company_name, phone, tags[], _segment, _created }
  * Only contacts with a valid email are returned. teamId filter optional
  * (MAIL_TEAM_ID); superAdmin-style "all teams" when unset.
+ * Contacts marked emailOptOut (one-click unsubscribes) are EXCLUDED —
+ * the suppression list is enforced again at send time, this keeps them
+ * out of every sync/segment/sample too.
  */
 export async function fetchCrmContacts(env, { max = 5000 } = {}) {
   if (!env.DB) return [];
@@ -53,6 +56,7 @@ export async function fetchCrmContacts(env, { max = 5000 } = {}) {
       afterId = row.id;
       let c;
       try { c = JSON.parse(row.json); } catch { continue; }
+      if (c.emailOptOut === true) continue; // unsubscribed — never email
       const email = String(c.email || '').trim().toLowerCase();
       if (!EMAIL_RE.test(email) || seen.has(email)) continue;
 
@@ -229,4 +233,99 @@ export async function findMailerCampaigns(env, { withinDays = 30 } = {}) {
     console.warn(`[mailer:d1] findMailerCampaigns failed (non-fatal): ${e.message}`);
     return [];
   }
+}
+
+/* ══ CRM-wide reads for the agentic assistant ═════════════════════ */
+
+/**
+ * One-call pulse of the whole CRM: counts, deal pipeline value by stage,
+ * open tasks, recent campaigns. Powers the assistant's "know what's going
+ * on" answers without the model ever touching the database.
+ */
+export async function crmOverview(env) {
+  const empty = { contacts: 0, deals: 0, openDeals: 0, pipelineValue: 0, wonValue: 0, tasks: 0, openTasks: 0, tickets: 0, companies: 0 };
+  if (!env.DB) return empty;
+  try {
+    const { results } = await env.DB
+      .prepare("SELECT col, COUNT(*) AS n FROM docs GROUP BY col")
+      .all();
+    const counts = {};
+    for (const r of results || []) counts[r.col] = Number(r.n) || 0;
+
+    // Deal stages + values (single scan, JSON-tolerant).
+    let openDeals = 0, pipelineValue = 0, wonValue = 0;
+    try {
+      const deals = await env.DB
+        .prepare("SELECT json FROM docs WHERE col = 'deals' LIMIT 2000")
+        .all();
+      for (const row of deals.results || []) {
+        let d; try { d = JSON.parse(row.json); } catch { continue; }
+        const amount = Number(d.amount || d.value || 0) || 0;
+        const stage = String(d.stageName || d.stage || '').toLowerCase();
+        if (stage === 'won' || stage === 'closed won' || d.status === 'won') {
+          wonValue += amount;
+        } else if (stage !== 'lost' && stage !== 'closed lost' && d.status !== 'lost') {
+          openDeals++;
+          pipelineValue += amount;
+        }
+      }
+    } catch { /* deals are additive detail — never fatal */ }
+
+    let openTasks = 0;
+    try {
+      const tasks = await env.DB
+        .prepare("SELECT json FROM docs WHERE col = 'tasks' LIMIT 1000")
+        .all();
+      for (const row of tasks.results || []) {
+        let t; try { t = JSON.parse(row.json); } catch { continue; }
+        const done = t.completed === true || String(t.status || '').toLowerCase() === 'done' || String(t.status || '').toLowerCase() === 'completed';
+        if (!done) openTasks++;
+      }
+    } catch { /* additive detail */ }
+
+    return {
+      contacts: counts.contacts || 0,
+      deals: counts.deals || 0,
+      openDeals,
+      pipelineValue: Math.round(pipelineValue),
+      wonValue: Math.round(wonValue),
+      tasks: counts.tasks || 0,
+      openTasks,
+      tickets: counts.tickets || 0,
+      companies: counts.companies || 0,
+      campaigns: counts.campaigns || 0,
+      users: counts.users || 0,
+    };
+  } catch (e) {
+    console.warn(`[assistant:d1] crmOverview failed (non-fatal): ${e.message}`);
+    return empty;
+  }
+}
+
+/**
+ * Search contacts for the assistant: name/email/company substring match
+ * against a paged scan. Returns {name, email, company, status} rows —
+ * exactly what a human asks for ("what's Priya's email?").
+ */
+export async function searchContacts(env, { query = '', segment = '', limit = 10 } = {}) {
+  if (!env.DB) return [];
+  const rows = await fetchCrmContacts(env, { max: 3000 });
+  const q = String(query || '').trim().toLowerCase();
+  const seg = String(segment || '').trim().toLowerCase();
+  const out = [];
+  for (const c of rows) {
+    if (seg && c._segment !== seg && !(c.tags || []).some((t) => t.toLowerCase().includes(seg))) continue;
+    if (q) {
+      const hay = `${c.first_name} ${c.last_name} ${c.email} ${c.company_name}`.toLowerCase();
+      if (!hay.includes(q)) continue;
+    }
+    out.push({
+      name: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)',
+      email: c.email,
+      company: c.company_name || '',
+      status: c._segment,
+    });
+    if (out.length >= Math.min(Math.max(limit, 1), 25)) break;
+  }
+  return out;
 }

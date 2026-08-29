@@ -23,7 +23,7 @@ const PROFILE_KEY = 'biz:profile';
 const BRIEF_CACHE_KEY = 'biz:brief';
 
 /** Canonical template styles the AI can pick from (see copywriter.js). */
-export const TEMPLATE_STYLES = ['modern', 'classic', 'bold', 'minimal', 'gradient'];
+export const TEMPLATE_STYLES = ['modern', 'classic', 'bold', 'minimal', 'gradient', 'editorial', 'spotlight'];
 
 /** Legacy planner values → canonical render styles. */
 const STYLE_ALIASES = {
@@ -32,6 +32,9 @@ const STYLE_ALIASES = {
   offer: 'bold',
   story: 'minimal',
   tip: 'gradient',
+  magazine: 'editorial',
+  product: 'spotlight',
+  launch: 'spotlight',
 };
 
 export function normalizeStyle(style) {
@@ -59,6 +62,7 @@ export function emptyBusinessProfile() {
     offers: [],          // current promos
     // Contact & compliance (footer + reply identity)
     website: '',
+    cta_url: '',         // where the email's main button points (falls back to website)
     address: '',
     phone: '',
     contact_email: '',
@@ -89,7 +93,7 @@ export function mergeProfilePatch(current, patch = {}) {
   for (const k of ['business_name', 'tagline', 'about', 'industry', 'audience', 'tone', 'address', 'sender_name', 'signature_name']) {
     if (k in patch) p[k] = cleanField(patch[k], 300);
   }
-  for (const k of ['website', 'logo_url']) {
+  for (const k of ['website', 'logo_url', 'cta_url']) {
     if (k in patch) p[k] = cleanField(patch[k], 500);
   }
   if ('contact_email' in patch) p.contact_email = cleanField(patch.contact_email, 200).toLowerCase();
@@ -105,7 +109,9 @@ export function mergeProfilePatch(current, patch = {}) {
     p.default_style = normalizeStyle(patch.default_style);
   }
   // Website sanity: keep the scheme so links in emails always work.
-  if (p.website && !/^https?:\/\//i.test(p.website)) p.website = `https://${p.website}`;
+  for (const k of ['website', 'cta_url']) {
+    if (p[k] && !/^https?:\/\//i.test(p[k])) p[k] = `https://${p[k]}`;
+  }
   p.updatedAt = new Date().toISOString();
   return p;
 }
@@ -156,7 +162,7 @@ export function brandFor(env, profile) {
     color: p.brand_color || env.MAIL_BRAND_COLOR || '#6C8CFF',
     logoUrl: p.logo_url || env.MAIL_LOGO_URL || '',
     website,
-    ctaUrl: env.MAIL_CTA_URL || website,
+    ctaUrl: p.cta_url || env.MAIL_CTA_URL || website,
     address: p.address || '',
     phone: p.phone || '',
     contactEmail: p.contact_email || '',
@@ -208,5 +214,6 @@ export function profileContext(p) {
   if (p.tone) lines.push(`Brand voice: ${p.tone}`);
   if (p.offers?.length) lines.push(`Current offers: ${p.offers.join('; ')}`);
   if (p.website) lines.push(`Website: ${p.website}`);
+  if (p.cta_url && p.cta_url !== p.website) lines.push(`Main link for email buttons: ${p.cta_url}`);
   return lines.length ? lines.join('\n') : '';
 }

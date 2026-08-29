@@ -13,7 +13,7 @@
 import { sarvamChat } from './sarvam.js';
 import { findMailerCampaigns, updateCampaignMetrics } from './firestore.js';
 import { safeParse } from './state.js';
-import { openStats } from './track.js';
+import { openStats, clickStats } from './track.js';
 
 const DAYS = 21;
 const CAMPAIGN_STATUSES = { scheduled: 'running', running: 'completed' };
@@ -34,8 +34,11 @@ function countOf(res) {
   return n(res.total ?? res.total_records ?? (Array.isArray(res.data) ? res.data.length : 0));
 }
 
-/** Pull stats for recent AI campaigns → snapshot + CRM write-back + learnings. */
-export async function collectAnalytics(mc, env, kv) {
+/** Pull stats for recent AI campaigns → snapshot + CRM write-back + learnings.
+ *  onUnsubscribers(emails) — every address MailerCloud reports as
+ *  unsubscribed lands here so the caller can add it to the suppression
+ *  list; that is the loop that permanently silences opt-outs. */
+export async function collectAnalytics(mc, env, kv, { onUnsubscribers = null } = {}) {
   const now = new Date();
   const from = new Date(now.getTime() - DAYS * 86400000);
 
@@ -54,7 +57,7 @@ export async function collectAnalytics(mc, env, kv) {
     const tracked = await openStats(env, doc.__id || doc.id || '');
 
     let opensN = tracked.opens || 0;
-    let clicksN = 0;
+    let clicksN = (await clickStats(env, doc.__id || doc.id || '')).clicks || 0;
     let unsubsN = 0;
     let sent = n(doc.audienceCount);
     // pipeline stamps metrics.delivered/failed/deferred on the campaign doc
@@ -67,7 +70,9 @@ export async function collectAnalytics(mc, env, kv) {
     const mcId = doc.mailercloudCampaignId;
 
     // Campaign-mode sends: merge MailerCloud's provider reports (opens,
-    // clicks, unsubs) on top of whatever the pixel saw.
+    // clicks, unsubs) on top of whatever the pixel saw. Unsubscriber EMAILS
+    // flow back into the suppression list — opted-out people are never
+    // emailed again, even though they sit in the provider's audience.
     if (mcId) {
       const [opens, clicks, unsubs] = await Promise.all([
         safe(mc.campaignOpens(mcId), null),
@@ -77,6 +82,10 @@ export async function collectAnalytics(mc, env, kv) {
       opensN = Math.max(opensN, countOf(opens));
       clicksN = Math.max(clicksN, countOf(clicks));
       unsubsN = Math.max(unsubsN, countOf(unsubs));
+      const unsubEmails = emailsFromReport(unsubs);
+      if (unsubEmails.length && onUnsubscribers) {
+        try { await onUnsubscribers(unsubEmails); } catch { /* best-effort */ }
+      }
     }
 
     sent = Math.max(sent, delivered);
@@ -194,6 +203,19 @@ function extractTopDomains(report) {
   }));
 }
 
+/** Extract subscriber email addresses from a MailerCloud report payload. */
+function emailsFromReport(res) {
+  const rows = res?.data ?? (Array.isArray(res) ? res : []);
+  if (!Array.isArray(rows)) return [];
+  const out = [];
+  for (const r of rows) {
+    const email = String(r?.email ?? r?.recipient ?? r?.email_address ?? '').trim().toLowerCase();
+    if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) out.push(email);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+
 function summariseTotals(campaigns) {
   const sum = (k) => campaigns.reduce((a, c) => a + (Number(c[k]) || 0), 0);
   const recipients = sum('recipients');
@@ -204,7 +226,9 @@ function summariseTotals(campaigns) {
     not_delivered: sum('not_delivered'),
     opens: sum('opens'),
     clicks: sum('clicks'),
+    unsubs: sum('unsubs'),
     open_rate: recipients ? +(sum('opens') / recipients * 100).toFixed(1) : null,
+    click_rate: recipients ? +(sum('clicks') / recipients * 100).toFixed(1) : null,
     delivery_rate: recipients ? +(sum('delivered') / recipients * 100).toFixed(1) : null,
   };
 }

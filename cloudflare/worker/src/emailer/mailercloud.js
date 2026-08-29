@@ -55,15 +55,20 @@ export class MailerCloud {
     const cached = kv ? await kv.get('mc:list_id') : null;
     if (cached) return cached;
 
-    const created = await this.#req('/list', {
-      method: 'POST',
-      body: { list_type: 1, name: 'Nebula CRM Contacts' },
-    });
+    const created = await this.createList('Nebula CRM Contacts');
     const id = created?.id ?? created?.data?.id;
     if (!id) throw new Error('Could not auto-create MailerCloud list: ' + JSON.stringify(created).slice(0, 200));
     if (kv) await kv.put('mc:list_id', String(id));
     console.log(`[mailer] auto-created MailerCloud list ${id}`);
     return String(id);
+  }
+
+  /** Create a named list (used for per-campaign exact-audience lists). */
+  async createList(name) {
+    return this.#req('/list', {
+      method: 'POST',
+      body: { list_type: 1, name: String(name || 'AI Campaign').slice(0, 90) },
+    });
   }
 
   /**

@@ -67,14 +67,23 @@ class RemoteDataSource {
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
     final token = await _token();
-    final res = await _client.post(
-      Uri.parse('$_baseUrl$path'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(body),
-    );
+    final http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_baseUrl$path'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 60));
+    } catch (e) {
+      // A hung request used to keep callers (assistant executor, screen
+      // loaders) spinning forever — every call is now hard-bounded.
+      throw DataApiException(408, 'request timed out or failed: $path');
+    }
     final text = res.body;
     Map<String, dynamic> json;
     try {

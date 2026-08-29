@@ -1,6 +1,11 @@
+import 'dart:typed_data';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../../../../core/services/storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/widgets/common_widgets.dart';
@@ -28,12 +33,12 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
   final _tagline = TextEditingController();
   final _about = TextEditingController();
   final _industry = TextEditingController();
-  final _logoUrl = TextEditingController();
   final _products = TextEditingController();
   final _audience = TextEditingController();
   final _toneCustom = TextEditingController();
   final _offers = TextEditingController();
   final _website = TextEditingController();
+  final _ctaUrl = TextEditingController();
   final _address = TextEditingController();
   final _phone = TextEditingController();
   final _contactEmail = TextEditingController();
@@ -43,8 +48,10 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
   String _brandColor = '';
   String _tone = '';
   String _defaultStyle = '';
+  String _logoUrl = '';
   bool _seeded = false;
   bool _saving = false;
+  bool _uploadingLogo = false;
 
   static const _tonePresets = [
     'Friendly and helpful',
@@ -71,14 +78,16 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     'bold': ('Bold', 'Full-colour promo — offers & launches'),
     'minimal': ('Minimal', 'Quiet text-first — stories & notes'),
     'gradient': ('Gradient', 'Soft gradient card — tips & how-tos'),
+    'editorial': ('Editorial', 'Magazine feel, serif type — thought pieces'),
+    'spotlight': ('Spotlight', 'Product showcase cards — launches & features'),
   };
 
   @override
   void dispose() {
     for (final c in [
-      _name, _tagline, _about, _industry, _logoUrl, _products, _audience,
-      _toneCustom, _offers, _website, _address, _phone, _contactEmail,
-      _senderName, _signatureName,
+      _name, _tagline, _about, _industry, _products, _audience,
+      _toneCustom, _offers, _website, _ctaUrl, _address, _phone,
+      _contactEmail, _senderName, _signatureName,
     ]) {
       c.dispose();
     }
@@ -90,11 +99,12 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     _tagline.text = p.tagline;
     _about.text = p.about;
     _industry.text = p.industry;
-    _logoUrl.text = p.logoUrl;
+    _logoUrl = p.logoUrl;
     _products.text = p.products.join(', ');
     _audience.text = p.audience;
     _offers.text = p.offers.join(', ');
     _website.text = p.website;
+    _ctaUrl.text = p.ctaUrl;
     _address.text = p.address;
     _phone.text = p.phone;
     _contactEmail.text = p.contactEmail;
@@ -112,12 +122,58 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     }
   }
 
+  /// Pick an image, upload it straight to R2 through the Worker and use the
+  /// returned public URL as the brand logo. No URL typing — the owner picks
+  /// a photo and everything else just happens.
+  Future<void> _pickAndUploadLogo() async {
+    if (_uploadingLogo) return;
+    final picker = ImagePicker();
+    XFile? file;
+    try {
+      file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 88,
+      );
+    } catch (_) {
+      _toast('Could not open the gallery.');
+      return;
+    }
+    if (file == null) return; // user cancelled
+
+    setState(() => _uploadingLogo = true);
+    try {
+      final Uint8List bytes = await file.readAsBytes();
+      final ext = file.name.split('.').last.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
+      final contentType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final key = 'branding/logo_${uid}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final url = await StorageService().uploadBytes(
+        key: key,
+        bytes: bytes,
+        contentType: contentType,
+      );
+      if (!mounted) return;
+      setState(() => _logoUrl = url);
+      _toast('Logo uploaded — save the profile to apply it.');
+    } catch (e) {
+      _toast('Upload failed: $e');
+    } finally {
+      if (mounted) setState(() => _uploadingLogo = false);
+    }
+  }
+
   BusinessProfile _collect() => BusinessProfile(
         businessName: _name.text.trim(),
         tagline: _tagline.text.trim(),
         about: _about.text.trim(),
         industry: _industry.text.trim(),
-        logoUrl: _logoUrl.text.trim(),
+        logoUrl: _logoUrl.trim(),
         brandColor: _brandColor,
         products: _products.text
             .split(',')
@@ -132,6 +188,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
             .where((e) => e.isNotEmpty)
             .toList(),
         website: _website.text.trim(),
+        ctaUrl: _ctaUrl.text.trim(),
         address: _address.text.trim(),
         phone: _phone.text.trim(),
         contactEmail: _contactEmail.text.trim(),
@@ -228,6 +285,8 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                   subtitle:
                       'This is the name, logo and colour your customers will see on every email.',
                   children: [
+                    _logoPicker(),
+                    const SizedBox(height: 4),
                     _field(_name, 'Business name *', hint: 'e.g. Aidraft Legal',
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? 'Required — this becomes your From name' : null),
@@ -237,9 +296,6 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                         hint: '1–2 sentences. The AI uses this to write for you.',
                         maxLines: 3),
                     _field(_industry, 'Industry', hint: 'e.g. Legal, Real estate, Coaching'),
-                    _field(_logoUrl, 'Logo image URL',
-                        hint: 'https://… (optional — name is used otherwise)',
-                        keyboardType: TextInputType.url),
                     _colorPicker(),
                   ],
                 ),
@@ -262,6 +318,9 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                       'Shown in the email footer — builds trust and keeps you compliant.',
                   children: [
                     _field(_website, 'Website', hint: 'yourbusiness.com'),
+                    _field(_ctaUrl, 'Main button link',
+                        hint: 'Where the email\'s CTA opens (defaults to your website)',
+                        keyboardType: TextInputType.url),
                     _field(_address, 'Address', hint: 'Street, city, PIN'),
                     _field(_phone, 'Phone', hint: '+91 …', keyboardType: TextInputType.phone),
                     _field(_contactEmail, 'Reply-to email',
@@ -348,6 +407,82 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _logoPicker() {
+    return Row(
+      children: [
+        GestureDetector(
+          onTap: _pickAndUploadLogo,
+          child: Stack(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: _logoUrl.isNotEmpty
+                    ? ClipOval(
+                        child: Image.network(
+                          _logoUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(
+                              Icons.business_outlined,
+                              color: AppColors.textSecondary),
+                        ),
+                      )
+                    : const Icon(Icons.image_outlined,
+                        color: AppColors.textSecondary),
+              ),
+              if (_uploadingLogo)
+                const Positioned.fill(
+                  child: Center(
+                    child: SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ),
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.edit, size: 12, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Business logo',
+                  style: context.textTheme.bodyMedium),
+              const SizedBox(height: 2),
+              Text(
+                _logoUrl.isEmpty
+                    ? 'Tap to upload a square PNG/JPG from your gallery — it appears in every email header.'
+                    : 'Uploaded. Tap to replace.',
+                style: context.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondary, fontSize: 11.5),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

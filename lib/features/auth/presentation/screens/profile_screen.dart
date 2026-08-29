@@ -279,9 +279,16 @@ class _LoadingOrError extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (!state.hasError) {
+    // AsyncData(null) with no error used to spin forever (the stream's
+    // self-heal swallowed failures). Give BOTH failure shapes an exit:
+    // an error shows its message; a null profile shows a nudge + retry.
+    if (!state.hasError && state.value != null) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
+    final message = state.hasError
+        ? '${state.error}'
+        : 'Your profile is not available yet. This can happen right after '
+            'sign-in or on a flaky connection — try again in a moment.';
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -296,7 +303,7 @@ class _LoadingOrError extends ConsumerWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${state.error}',
+              message,
               textAlign: TextAlign.center,
               style: context.textTheme.bodySmall
                   ?.copyWith(color: AppColors.textSecondary),

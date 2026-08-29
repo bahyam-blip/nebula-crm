@@ -41,8 +41,12 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
     try {
       return await guarded(() async {
         if (!bootstrapped) {
-          bootstrapped = true;
+          // ONLY latch after success: if the first bootstrap throws (network
+          // blip on the tick right after login), every later tick must retry
+          // it. Latching early turned one blip into a permanent
+          // "profile missing" 409 wall — the spinner-everywhere bug.
           await ds.bootstrap();
+          bootstrapped = true;
         }
         final doc = await ds.get('users', user.uid);
         final parsed = doc == null ? null : AppUser.fromFirestore(doc);
@@ -58,10 +62,13 @@ final currentAppUserProvider = StreamProvider<AppUser?>((ref) {
         }
         return parsed;
       });
-    } catch (_) {
-      // Self-heal: surface the last known profile and retry on the next
-      // tick. Erroring the stream here froze the profile page and the AI
-      // assistant on a spinner for the whole session.
+    } catch (e) {
+      // Self-heal: a failed tick surfaces the last known profile and the
+      // next tick retries. But with NOTHING good yet, rethrow so the UI
+      // shows its error + retry state instead of an endless spinner —
+      // a silent AsyncData(null) here is exactly what froze the profile
+      // screen and made the AI assistant's send feel dead.
+      if (lastGood == null) rethrow;
       return lastGood;
     }
   }, interval: const Duration(seconds: 60));

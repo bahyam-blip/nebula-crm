@@ -244,8 +244,10 @@ class MailAnalytics {
         .map((c) => c.cast<String, dynamic>())
         .toList();
     double avg(String key) {
+      // Rates can arrive as numbers OR strings ("12.3") — tolerate both,
+      // a dropped value used to read as 0.0% and looked like a bug.
       final vals = list
-          .map((c) => (c[key] as num?)?.toDouble())
+          .map((c) => double.tryParse('${c[key] ?? ''}'))
           .whereType<double>()
           .toList();
       if (vals.isEmpty) return 0;
@@ -270,7 +272,9 @@ class MailAnalytics {
         notDelivered: intOf(t['not_delivered']),
         opens: intOf(t['opens']),
         clicks: intOf(t['clicks']),
-        deliveryRate: (t['delivery_rate'] as num?)?.toDouble(),
+        unsubs: intOf(t['unsubs']),
+        deliveryRate: (t['delivery_rate'] as num?)?.toDouble() ??
+            double.tryParse('${t['delivery_rate'] ?? ''}'),
       ),
     );
   }
@@ -284,6 +288,7 @@ class MailTotals {
     this.notDelivered = 0,
     this.opens = 0,
     this.clicks = 0,
+    this.unsubs = 0,
     this.deliveryRate,
   });
 
@@ -292,6 +297,7 @@ class MailTotals {
   final int notDelivered;
   final int opens;
   final int clicks;
+  final int unsubs;
   final double? deliveryRate;
 }
 
@@ -376,6 +382,7 @@ class BusinessProfile {
     this.tone = '',
     this.offers = const [],
     this.website = '',
+    this.ctaUrl = '',
     this.address = '',
     this.phone = '',
     this.contactEmail = '',
@@ -396,6 +403,9 @@ class BusinessProfile {
   final String tone;
   final List<String> offers;
   final String website;
+
+  /// Where the email's main button points (falls back to website server-side).
+  final String ctaUrl;
   final String address;
   final String phone;
   final String contactEmail;
@@ -430,6 +440,7 @@ class BusinessProfile {
       tone: (m['tone'] as String?) ?? '',
       offers: strList(m['offers']),
       website: (m['website'] as String?) ?? '',
+      ctaUrl: (m['cta_url'] as String?) ?? '',
       address: (m['address'] as String?) ?? '',
       phone: (m['phone'] as String?) ?? '',
       contactEmail: (m['contact_email'] as String?) ?? '',
@@ -452,6 +463,7 @@ class BusinessProfile {
         'tone': tone,
         'offers': offers,
         'website': website,
+        'cta_url': ctaUrl,
         'address': address,
         'phone': phone,
         'contact_email': contactEmail,
@@ -472,6 +484,7 @@ class BusinessProfile {
     String? tone,
     List<String>? offers,
     String? website,
+    String? ctaUrl,
     String? address,
     String? phone,
     String? contactEmail,
@@ -491,6 +504,7 @@ class BusinessProfile {
         tone: tone ?? this.tone,
         offers: offers ?? this.offers,
         website: website ?? this.website,
+        ctaUrl: ctaUrl ?? this.ctaUrl,
         address: address ?? this.address,
         phone: phone ?? this.phone,
         contactEmail: contactEmail ?? this.contactEmail,
@@ -532,7 +546,10 @@ class MailBrand {
         branded: m['branded'] as bool? ?? false,
         defaultStyle: (m['defaultStyle'] as String?) ?? 'modern',
         templateStyles: ((m['template_styles'] as List?) ??
-                const ['modern', 'classic', 'bold', 'minimal', 'gradient'])
+                const [
+                  'modern', 'classic', 'bold', 'minimal', 'gradient',
+                  'editorial', 'spotlight',
+                ])
             .map((e) => e.toString())
             .toList(),
       );
@@ -556,6 +573,42 @@ class MailInsight {
         text: (m['text'] as String?) ?? '',
         kind: (m['kind'] as String?) ?? 'observation',
         weight: (m['weight'] as num?)?.toInt() ?? 1,
+        at: (m['at'] as String?) ?? '',
+      );
+}
+
+/// One suppressed address — a person who must not be emailed again.
+class MailSuppression {
+  const MailSuppression({
+    required this.email,
+    this.reason = '',
+    this.at = '',
+  });
+
+  final String email;
+  final String reason; // unsub | 9007 (hard bounce) | 9008 (spam) | manual …
+  final String at;
+
+  String get reasonLabel {
+    switch (reason) {
+      case 'unsub':
+        return 'Unsubscribed';
+      case '9007':
+        return 'Hard bounce';
+      case '9008':
+        return 'Marked as spam';
+      case '9009':
+        return 'Previously unsubscribed';
+      case 'manual':
+        return 'Added manually';
+      default:
+        return reason.isEmpty ? 'Suppressed' : 'Provider code $reason';
+    }
+  }
+
+  factory MailSuppression.fromMap(Map<String, dynamic> m) => MailSuppression(
+        email: (m['email'] as String?) ?? '',
+        reason: (m['code'] as String?) ?? '',
         at: (m['at'] as String?) ?? '',
       );
 }
@@ -756,6 +809,22 @@ class MailApiService {
   /// Wipe the business memory (the AI starts learning from scratch).
   Future<void> resetMemory() async {
     await _send('POST', '/v1/mail/memory/reset', body: {});
+  }
+
+  /// Who will NEVER be emailed again: unsubscribes, hard bounces, spam
+  /// reports and manual entries. Newest first.
+  Future<List<MailSuppression>> suppressions() async {
+    final map = await _send('GET', '/v1/mail/suppressions');
+    return ((map['suppressions'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((s) => MailSuppression.fromMap(s.cast<String, dynamic>()))
+        .toList();
+  }
+
+  /// Manually add an address to the suppression list.
+  Future<void> suppress(String email, {String reason = 'manual'}) async {
+    await _send('POST', '/v1/mail/suppressions',
+        body: {'email': email, 'reason': reason});
   }
 
   /// Send ONE real email to [to] through the transactional endpoint

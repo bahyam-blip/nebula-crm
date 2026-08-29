@@ -102,42 +102,50 @@ class Contact extends Equatable {
 
   factory Contact.fromFirestore(DataDoc doc) {
     final data = doc.data;
+    // Tolerant scalar reads: a JSON number arriving as double/string (CSV
+    // import, older rows) must not kill the WHOLE list parse. Strings use
+    // toString() coercion; numerics go through num?.
+    String? s(String k) => data[k] == null ? null : data[k].toString();
     return Contact(
       id: doc.id,
       name: data['name'] as String? ?? '',
-      email: data['email'] as String?,
-      phone: data['phone'] as String?,
-      company: data['company'] as String?,
-      jobTitle: data['jobTitle'] as String?,
-      photoUrl: data['photoUrl'] as String?,
-      status: _parseStatus(data['status'] as String?),
-      ownerId: data['ownerId'] as String?,
-      teamId: data['teamId'] as String?,
+      email: s('email'),
+      phone: s('phone'),
+      company: s('company'),
+      jobTitle: s('jobTitle'),
+      photoUrl: s('photoUrl'),
+      status: _parseStatus(s('status')),
+      ownerId: s('ownerId'),
+      teamId: s('teamId'),
       tags: stringList(data['tags']),
       segments: stringList(data['segments']),
-      linkedin: data['linkedin'] as String?,
-      twitter: data['twitter'] as String?,
-      website: data['website'] as String?,
-      address: data['address'] as String?,
-      notes: data['notes'] as String?,
-      leadScore: (data['leadScore'] as num?)?.toDouble(),
-      lifetimeValue: (data['lifetimeValue'] as num?)?.toDouble() ?? 0,
+      linkedin: s('linkedin'),
+      twitter: s('twitter'),
+      website: s('website'),
+      address: s('address'),
+      notes: s('notes'),
+      leadScore: (data['leadScore'] as num?)?.toDouble() ??
+          (double.tryParse('${data['leadScore'] ?? ''}')),
+      lifetimeValue: (data['lifetimeValue'] as num?)?.toDouble() ??
+          (double.tryParse('${data['lifetimeValue'] ?? ''}') ?? 0),
       lastActivityAt: flexTs(data['lastActivityAt']),
       createdAt: flexTs(data['createdAt']),
       updatedAt: flexTs(data['updatedAt']),
       customFields: Map<String, dynamic>.from(
         data['customFields'] as Map? ?? const {},
       ),
-      activityCount: data['activityCount'] as int? ?? 0,
-      openDealsCount: data['openDealsCount'] as int? ?? 0,
-      assignedTo: data['assignedTo'] as String?,
-      assignedBy: data['assignedBy'] as String?,
+      activityCount: (data['activityCount'] as num?)?.toInt() ??
+          (int.tryParse('${data['activityCount'] ?? ''}') ?? 0),
+      openDealsCount: (data['openDealsCount'] as num?)?.toInt() ??
+          (int.tryParse('${data['openDealsCount'] ?? ''}') ?? 0),
+      assignedTo: s('assignedTo'),
+      assignedBy: s('assignedBy'),
       assignedAt: flexTs(data['assignedAt']),
-      callStatus: CallStatusX.parse(data['callStatus'] as String?),
+      callStatus: CallStatusX.parse(s('callStatus')),
       callAttempts: (data['callAttempts'] as num?)?.toInt() ?? 0,
       lastCallAt: flexTs(data['lastCallAt']),
       followUpAt: flexTs(data['followUpAt']),
-      source: data['source'] as String?,
+      source: s('source'),
     );
   }
 

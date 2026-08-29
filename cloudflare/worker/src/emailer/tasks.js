@@ -84,7 +84,7 @@ export function cancelTaskState(task) {
   if (!['pending', 'planning', 'active'].includes(task.status)) return false;
   task.status = 'cancelled';
   for (const e of task.emails || []) {
-    if (e.status === 'planned') e.status = 'cancelled';
+    if (e.status === 'planned' || e.status === 'sending') e.status = 'cancelled';
   }
   addEvent(task, 'Cancelled by owner — no further emails will send.', 'cancel');
   return touch(task);
@@ -129,10 +129,11 @@ export function progressOf(task) {
   const emails = task.emails || [];
   const done = emails.filter((e) => ['sent', 'scheduled', 'dry_run', 'partial'].includes(e.status)).length;
   const failed = emails.filter((e) => e.status === 'failed').length;
+  const inFlight = emails.filter((e) => e.status === 'sending').length;
   const pending = emails.filter((e) => e.status === 'planned').length;
   const nextSendAt = emails
     .filter((e) => e.status === 'planned' && e.sendAt)
     .map((e) => e.sendAt)
     .sort()[0] || null;
-  return { total: emails.length, done, failed, pending, nextSendAt };
+  return { total: emails.length, done, failed, pending, sending: inFlight, nextSendAt };
 }

@@ -6,6 +6,60 @@ import 'package:http/http.dart' as http;
 
 import 'storage_service.dart' show kStorageBaseUrl;
 
+/// What the WORKER-side agentic assistant answered.
+///
+/// [reply] is the text for the chat. [actions] lists what the agent did on
+/// the server (tools it ran — search, analytics, queued email tasks…) with
+/// a one-line human summary each; the UI renders them under the bubble so
+/// the user SEES the agent acted, not just talked.
+class AgentAnswer {
+  const AgentAnswer({required this.reply, this.actions = const []});
+
+  final String reply;
+  final List<AgentAction> actions;
+
+  bool get didSomething => actions.isNotEmpty;
+
+  factory AgentAnswer.fromMap(Map<String, dynamic> m) => AgentAnswer(
+        reply: (m['reply'] as String?) ?? '',
+        actions: ((m['actions'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((a) => AgentAction.fromMap(a.cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+class AgentAction {
+  const AgentAction({required this.tool, required this.ok, this.summary = ''});
+
+  final String tool;
+  final bool ok;
+  final String summary;
+
+  /// Short label for the chip row under the reply.
+  String get label {
+    const names = {
+      'search_contacts': 'Searched contacts',
+      'crm_overview': 'Read CRM stats',
+      'recent_campaigns': 'Checked campaigns',
+      'email_analytics': 'Pulled email analytics',
+      'list_tasks': 'Listed email tasks',
+      'create_email_task': 'Queued email campaign',
+      'get_business_profile': 'Read business profile',
+      'save_business_profile': 'Updated business profile',
+      'teach_memory': 'Learned a new fact',
+    };
+    final base = names[tool] ?? tool;
+    return summary.isNotEmpty ? '$base — $summary' : base;
+  }
+
+  factory AgentAction.fromMap(Map<String, dynamic> m) => AgentAction(
+        tool: (m['tool'] as String?) ?? '',
+        ok: m['ok'] as bool? ?? false,
+        summary: (m['summary'] as String?) ?? '',
+      );
+}
+
 /// One thing the AI is allowed to do.
 ///
 /// The model never touches the database. It returns a named action plus
@@ -88,6 +142,50 @@ ${jsonEncode(context)}
       throw AiException('Could not verify your session.');
     }
     return token;
+  }
+
+  /// Ask the WORKER-side agentic assistant (POST /v1/assistant).
+  ///
+  /// The agent has live CRM access on the server: it can see contacts,
+  /// pipeline, campaigns and analytics, and it can ACT — search contacts,
+  /// queue real email campaigns, update the business profile, teach memory.
+  /// Every action it takes is listed in the answer so the UI can show it.
+  Future<AgentAnswer> askAgent({
+    required String prompt,
+    List<Map<String, String>> history = const [],
+  }) async {
+    final token = await _idToken();
+    late http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_baseUrl/v1/assistant'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'messages': [
+                ...history,
+                {'role': 'user', 'content': prompt},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 90));
+    } catch (e) {
+      throw AiException('Could not reach the assistant. $e');
+    }
+    if (res.statusCode == 503) {
+      throw AiException('The assistant is not configured yet.');
+    }
+    if (res.statusCode != 200) {
+      throw AiException(_detail(res.statusCode, res.body));
+    }
+    try {
+      return AgentAnswer.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw AiException('The assistant sent a malformed reply.');
+    }
   }
 
   /// Send [prompt] with [context] and get back an action to run.

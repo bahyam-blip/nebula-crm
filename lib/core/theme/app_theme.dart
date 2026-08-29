@@ -101,11 +101,12 @@ class AppTheme {
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           minimumSize: const Size.fromHeight(52),
+          elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
           textStyle: AppTypography.textTheme.labelLarge
-              ?.copyWith(color: Colors.white),
+              ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
@@ -115,7 +116,7 @@ class AppTheme {
           side: const BorderSide(color: AppColors.border, width: 1),
           minimumSize: const Size.fromHeight(52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
           textStyle: AppTypography.textTheme.labelLarge,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -183,6 +184,8 @@ class AppTheme {
       ),
 
       // ── Chips ────────────────────────────────────────────────
+      // Pill-shaped chips read as modern/premium and match the AI
+      // assistant's action chips and the tone/colour pickers.
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.surfaceElevated,
         selectedColor: AppColors.primary.withValues(alpha: 0.2),
@@ -191,9 +194,53 @@ class AppTheme {
             ?.copyWith(color: Colors.white),
         side: const BorderSide(color: AppColors.border, width: 0.5),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(999),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      ),
+
+      // ── Text selection ───────────────────────────────────────
+      textSelectionTheme: const TextSelectionThemeData(
+        cursorColor: AppColors.primary,
+        selectionColor: Color(0x3D6C8CFF),
+        selectionHandleColor: AppColors.primary,
+      ),
+
+      // ── Tooltips / menus ─────────────────────────────────────
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: AppColors.surfaceHigh,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.border, width: 0.5),
+        ),
+        textStyle: AppTypography.textTheme.labelSmall,
+        waitDuration: const Duration(milliseconds: 450),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: AppColors.surfaceElevated,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: AppColors.border, width: 0.5),
+        ),
+        textStyle: AppTypography.textTheme.bodyMedium,
+      ),
+
+      // ── Pickers (calendar / date fields) ─────────────────────
+      datePickerTheme: DatePickerThemeData(
+        backgroundColor: AppColors.surfaceElevated,
+        surfaceTintColor: Colors.transparent,
+        headerForegroundColor: AppColors.textPrimary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+      ),
+      timePickerTheme: TimePickerThemeData(
+        backgroundColor: AppColors.surfaceElevated,
+        dialBackgroundColor: AppColors.surfaceHigh,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
       ),
 
       // ── Divider ──────────────────────────────────────────────

@@ -13,10 +13,13 @@ import '../../../insights/providers/monitor_provider.dart';
 import '../../services/ai_action_executor.dart';
 
 class _Msg {
-  _Msg(this.text, {required this.mine, this.pending = false});
+  _Msg(this.text, {required this.mine, this.pending = false, this.actions});
   final String text;
   final bool mine;
   final bool pending;
+
+  /// What the agent DID on the server for this reply (tools it ran).
+  final List<AgentAction>? actions;
 }
 
 /// Conversational assistant that can also act on the CRM.
@@ -131,20 +134,15 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     _jump();
 
     try {
-      final action = await ref.read(aiAgentServiceProvider).ask(
+      // ── Agentic path (preferred): the WORKER assistant has live CRM
+      // access — it can search contacts, quote pipeline/analytics, queue
+      // real email campaigns and update the business profile itself.
+      final agent = await ref.read(aiAgentServiceProvider).askAgent(
             prompt: text,
-            context: _context(),
             history: _history.take(8).toList(),
           );
 
-      final result = await ref.read(aiActionExecutorProvider).run(action, me);
-
-      // Prefer the executor's message: it reports what actually happened,
-      // whereas the model's reply is only what it intended.
-      final shown = result.message.isNotEmpty
-          ? result.message
-          : (action.reply.isNotEmpty ? action.reply : 'Done.');
-
+      final shown = agent.reply.isNotEmpty ? agent.reply : 'Done.';
       _history
         ..add({'role': 'user', 'content': text})
         ..add({'role': 'assistant', 'content': shown});
@@ -152,14 +150,46 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       if (!mounted) return;
       setState(() {
         _messages.removeWhere((m) => m.pending);
-        _messages.add(_Msg(shown, mine: false));
+        _messages.add(_Msg(shown, mine: false, actions: agent.actions));
       });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _messages.removeWhere((m) => m.pending);
-        _messages.add(_Msg('$e', mine: false));
-      });
+    } catch (agentError) {
+      // ── Fallback: the legacy local flow (ask for a structured action →
+      // execute it client-side). Keeps the assistant usable even if the
+      // agent endpoint is briefly unavailable.
+      try {
+        final action = await ref.read(aiAgentServiceProvider).ask(
+              prompt: text,
+              context: _context(),
+              history: _history.take(8).toList(),
+            );
+
+        final result = await ref
+            .read(aiActionExecutorProvider)
+            .run(action, me)
+            .timeout(const Duration(seconds: 90));
+
+        // Prefer the executor's message: it reports what actually happened,
+        // whereas the model's reply is only what it intended.
+        final shown = result.message.isNotEmpty
+            ? result.message
+            : (action.reply.isNotEmpty ? action.reply : 'Done.');
+
+        _history
+          ..add({'role': 'user', 'content': text})
+          ..add({'role': 'assistant', 'content': shown});
+
+        if (!mounted) return;
+        setState(() {
+          _messages.removeWhere((m) => m.pending);
+          _messages.add(_Msg(shown, mine: false));
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _messages.removeWhere((m) => m.pending);
+          _messages.add(_Msg('$e', mine: false));
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
       _jump();
@@ -177,10 +207,10 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       });
 
   static const _suggestions = [
-    'Split the first 100 unassigned leads between my telecallers',
-    'How many open leads does each person have?',
-    'Create a task for tomorrow to follow up callbacks',
-    'Who should I call today?',
+    'How many open leads do I have right now?',
+    "What's Priya's email address?",
+    'Send an announcement about our new offer to all leads',
+    'How did my last email campaigns perform?',
   ];
 
   @override
@@ -215,8 +245,9 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
               style: context.textTheme.titleMedium),
           const SizedBox(height: 6),
           Text(
-            'I can answer questions about your pipeline and carry out changes '
-            'like sharing leads or creating tasks.',
+            'I can see everything in your CRM — contacts, pipeline, campaigns, '
+            'analytics — and I can act: search people, queue on-brand email '
+            'campaigns, update your business profile and more.',
             textAlign: TextAlign.center,
             style: context.textTheme.bodySmall
                 ?.copyWith(color: AppColors.textSecondary),
@@ -261,11 +292,51 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             borderRadius: BorderRadius.circular(14),
             border: m.mine ? null : Border.all(color: AppColors.border),
           ),
-          child: Text(
-            m.text,
-            style: context.textTheme.bodyMedium?.copyWith(
-              color: m.mine ? Colors.white : AppColors.textPrimary,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                m.text,
+                style: context.textTheme.bodyMedium?.copyWith(
+                  color: m.mine ? Colors.white : AppColors.textPrimary,
+                ),
+              ),
+              // Show what the agent actually DID — trust through transparency.
+              if (!m.mine && m.actions != null && m.actions!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final a in m.actions!)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (a.ok ? AppColors.success : AppColors.danger)
+                              .withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                              color: (a.ok ? AppColors.success : AppColors.danger)
+                                  .withValues(alpha: 0.35)),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(
+                            a.ok ? Icons.check_circle_outline : Icons.error_outline,
+                            size: 12,
+                            color: a.ok ? AppColors.success : AppColors.danger,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(a.label,
+                              style: context.textTheme.labelSmall?.copyWith(
+                                  color: AppColors.textSecondary)),
+                        ]),
+                      ),
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       );

@@ -37,7 +37,8 @@ const PLAN_SCHEMA_PROMPT = `Return ONLY a JSON object:
      "goal": "what this email should achieve",
      "angle": "the creative angle/hook",
      "tone": "tone for this email",
-     "template_style": "modern|classic|bold|minimal|gradient — pick what fits: offer/promo → bold, story → minimal, tip/how-to → gradient, news/announcement → modern, roundup → classic"
+     "template_style": "modern|classic|bold|minimal|gradient|editorial|spotlight — pick what fits: offer/promo → bold, product/launch → spotlight, story → minimal or editorial, tip/how-to → gradient, news/announcement → modern, roundup → classic",
+     "link_url": "OPTIONAL destination for the email's main button: the business website or main link from the brief. Omit to use the default."
    }
  ],
  "reasoning": "why this schedule and these angles will maximise opens & engagement"
@@ -176,7 +177,7 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     '',
     memoryBlock ? `BUSINESS MEMORY (owner-taught facts + what already worked — this outranks the brief):\n${memoryBlock}` : '',
     '',
-    'CRM AUDIENCE (contacts collection):',
+    'CRM AUDIENCE (contacts collection — real people you are writing to; the greeting uses each recipient\'s own name automatically, and you may reference companies/segments when it helps):',
     JSON.stringify(contactStats),
     '',
     learn,
@@ -197,7 +198,8 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     '- Detect the campaign type (promotion, introduction, re-engagement, announcement, newsletter, follow-up) and let it shape the angles.',
     '- Reuse angles from the CREATIVE PLAYBOOK that are marked WINNER. Never repeat subjects of FLOP emails or of the recent campaign focus list.',
     '- The audience.segment MUST be one of the CRM statuses shown in contact_stats.segments, or null for everyone.',
-    `- template_style MUST be one of: ${TEMPLATE_STYLES.join('|')}. Pick per email goal (offer → bold, story → minimal, tip → gradient, announcement → modern, roundup → classic) and vary across emails.`,
+    `- template_style MUST be one of: ${TEMPLATE_STYLES.join('|')}. Pick per email goal (offer → bold, product/launch → spotlight, story → minimal or editorial, tip → gradient, announcement → modern, roundup → classic) and vary across emails.`,
+    '- link_url, when set, must be the business website / main link from the brief (https). Never invent domains that are not in the brief or memory.',
     '',
     PLAN_SCHEMA_PROMPT,
   ].filter(Boolean).join('\n');
@@ -272,6 +274,9 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
       angle: String(e?.angle || 'Helpful update').slice(0, 300),
       tone: String(e?.tone || 'friendly, confident').slice(0, 120),
       template_style: String(e?.template_style || 'newsletter').slice(0, 40),
+      // Optional per-email button destination — only real http(s) URLs from
+      // the owner's own links survive (renderHtml re-checks).
+      link_url: /^https?:\/\//i.test(String(e?.link_url || '').trim()) ? String(e.link_url).trim().slice(0, 500) : '',
     };
   });
   if (plan.emails.length === 0) throw new Error('AI plan contained no emails');

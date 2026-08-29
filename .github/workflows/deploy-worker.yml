@@ -502,6 +502,28 @@ jobs:
                           f"detail={json.dumps(b2)[:300]}")
           except Exception as e:
               say(f"/v1/mail/business probe failed: {e}")
+
+          # 8) Click redirect + one-click unsubscribe: PUBLIC routes (mail
+          #    clients) — the redirect must 302 somewhere, the unsub page
+          #    must render branded HTML for ANY input (unknown token → calm
+          #    page, never an error page).
+          try:
+              r = requests.get(f"{WORKER}/v1/t/c?c=ci_probe&u=ci&to=https%3A%2F%2Fexample.com",
+                               timeout=30, allow_redirects=False)
+              if r.status_code in (301, 302, 303, 307, 308):
+                  say(f"CLICK REDIRECT OK ({r.status_code} → {r.headers.get('location', '')[:60]})")
+              else:
+                  say(f"CLICK REDIRECT FAIL HTTP {r.status_code}")
+          except Exception as e:
+              say(f"/v1/t/c probe failed: {e}")
+          try:
+              r = requests.get(f"{WORKER}/v1/t/u?c=ci_probe&u=ciprobe", timeout=30)
+              if r.ok and "text/html" in r.headers.get("content-type", "") and "unsubscribed" in r.text.lower():
+                  say(f"UNSUB PAGE OK ({len(r.text)} bytes html, public)")
+              else:
+                  say(f"UNSUB PAGE FAIL HTTP {r.status_code}")
+          except Exception as e:
+              say(f"/v1/t/u probe failed: {e}")
           PYEOF
           rm -f /tmp/sa.json
 

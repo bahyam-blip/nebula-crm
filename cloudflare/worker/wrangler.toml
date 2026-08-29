@@ -57,7 +57,7 @@ MAIL_BRAND_COLOR = "#6C8CFF"        # electric indigo — matches the app theme
 MAIL_LOGO_URL = ""
 MAIL_TIMEZONE = "Asia/Calcutta"
 MAIL_TEAM_ID = ""                   # optional: only sync contacts of this team (empty = all)
-MAIL_MAX_SYNC = "5000"              # cap on contacts pulled from Firestore per run
+MAIL_MAX_SYNC = "20000"             # cap on contacts pulled from D1 per run (hundreds/thousands are fine)
 MAIL_DRY_RUN = "false"              # live mode. The owner can flip this any time from the app (AI Email screen) or POST /v1/mail/config {"dry_run":true}.
 MAIL_CRON_ENABLED = "true"          # emergency brake: set to "false" (and redeploy) to stop ALL autonomous runs if you ever need to protect Firestore quota.
 MAIL_LOOKAHEAD_HOURS = "26"         # deliver emails up to this many hours ahead of the AI-chosen time
@@ -68,7 +68,8 @@ MC_CREATE_TEMPLATES = "true"        # save every AI template into MailerCloud's 
 MAIL_SENDER_EMAIL = "das@aidraft.bond"  # verified domain sender (secret MAILERCLOUD_SENDER_EMAIL overrides this)
 MAIL_FROM_NAME = "Nebula CRM"           # inbox display name
 MAIL_DELIVERY_MODE = "auto"             # auto | transactional | campaign
-MAIL_TRANSACTIONAL_MAX = "250"          # in auto mode: audiences up to this size go via the Email API (immediate, personalized), larger ones via scheduled campaign
+MAIL_TRANSACTIONAL_MAX = "1000"         # in auto mode: audiences up to this size go via the Email API (immediate, personalized 1:1, chunked + resumable), larger ones via scheduled campaign on a DEDICATED per-campaign list
+MAIL_FREQ_HOURS = "20"                  # frequency cap: a contact emailed within this window is skipped (unless explicitly named)
 
 [observability]
 enabled = true

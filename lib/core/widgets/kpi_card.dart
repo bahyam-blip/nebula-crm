@@ -5,8 +5,8 @@ import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 import '../utils/extensions.dart';
 
-/// A KPI metric card with title, value, delta vs. previous period,
-/// and an icon chip. Used heavily on the dashboard.
+/// A KPI metric card with title, value, an optional delta or a REAL
+/// context sublabel, and an icon chip. Used heavily on the dashboard.
 class KpiCard extends StatelessWidget {
   const KpiCard({
     super.key,
@@ -15,6 +15,7 @@ class KpiCard extends StatelessWidget {
     required this.icon,
     this.delta,
     this.deltaSuffix = 'vs last period',
+    this.sublabel,
     this.accentColor = AppColors.primary,
     this.onTap,
   });
@@ -24,6 +25,11 @@ class KpiCard extends StatelessWidget {
   final IconData icon;
   final double? delta;
   final String deltaSuffix;
+
+  /// Real context line under the value (e.g. "6 open deals"). Used
+  /// INSTEAD of [delta] when there is no honest period comparison —
+  /// inventing deltas looked like data and was worse than no delta.
+  final String? sublabel;
   final Color accentColor;
   final VoidCallback? onTap;
 
@@ -100,6 +106,18 @@ class KpiCard extends StatelessWidget {
                   child: Text(
                     deltaSuffix,
                     style: context.textTheme.labelSmall,
+                  ),
+                )
+              else if (sublabel != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    sublabel!,
+                    style: context.textTheme.labelSmall?.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],

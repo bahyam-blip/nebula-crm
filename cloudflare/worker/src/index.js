@@ -20,8 +20,9 @@ import {
   sendToTokens,
 } from './push.js';
 import { handleMail, runMailCron, mailConfigState } from './emailer/pipeline.js';
+import { handleAssistant } from './emailer/assistant.js';
 import { handleDataRequest } from './data_http.js';
-import { recordOpen, PNG_1X1 } from './emailer/track.js';
+import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -150,6 +151,8 @@ function isSafeKey(key) {
  * Avatars are owner-scoped: the uid in the path must match the token, so
  * one user cannot overwrite another's photo. Shared CRM records are open
  * to any authenticated teammate, matching the Firestore rules.
+ * branding/ holds the BUSINESS logo (Business Profile image upload) —
+ * team-shared like contacts/deals: any teammate may set the brand.
  */
 function mayWrite(key, uid) {
   if (key.startsWith('avatars/')) {
@@ -160,8 +163,50 @@ function mayWrite(key, uid) {
     key.startsWith('deals/') ||
     key.startsWith('tickets/') ||
     key.startsWith('articles/') ||
-    key.startsWith('teams/')
+    key.startsWith('teams/') ||
+    key.startsWith('branding/')
   );
+}
+
+/* ── Public engagement-tracking routes (no auth — mail clients) ─────
+ * These can only: bump metrics on a campaign doc that already exists,
+ * or add an address to the mailer's suppression list. Both are safe
+ * against abuse (unknown campaign ids are ignored). */
+
+function safeRedirectTarget(raw) {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+function unsubPage({ brandName, color, email, already = false }) {
+  const who = email ? `<p style="margin:10px 0 0 0;font-size:14px;color:#6b7280;">Address: <strong style="color:#374151;">${email.replace(/</g, '&lt;')}</strong></p>` : '';
+  const heading = already ? "You're already off the list" : "You're unsubscribed";
+  const body = already
+    ? 'This address was already removed from the mailing list. Nothing more will be sent.'
+    : 'You will not receive any more marketing emails from this business. If you change your mind, just reach out to them directly.';
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribed — ${brandName}</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="min-height:100vh;background:#f3f4f6;"><tr><td align="center" style="padding:40px 16px;">
+  <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:480px;background:#ffffff;border-radius:16px;overflow:hidden;">
+    <tr><td bgcolor="${color}" style="padding:28px 30px;" align="center">
+      <div style="font-size:19px;font-weight:700;color:#ffffff;letter-spacing:.3px;">${brandName.replace(/</g, '&lt;')}</div>
+    </td></tr>
+    <tr><td style="padding:32px 30px;" align="center">
+      <div style="width:52px;height:52px;border-radius:26px;background:#e8f7ee;font-size:26px;line-height:52px;">✓</div>
+      <h1 style="margin:16px 0 6px 0;font-size:21px;color:#111827;">${heading}</h1>
+      <p style="margin:0;font-size:14.5px;line-height:1.65;color:#4b5563;">${body}</p>
+      ${who}
+    </td></tr>
+  </table>
+  <p style="margin:16px 0 0 0;font-size:11.5px;color:#9ca3af;">Powered by the business's CRM email assistant</p>
+</td></tr></table>
+</body></html>`;
 }
 
 // ── Handler ──────────────────────────────────────────────────────
@@ -202,6 +247,49 @@ export default {
           'Cache-Control': 'no-store, max-age=0',
         },
       });
+    }
+
+    // ── Click tracking redirect ──
+    // CTA links in tracked emails point here first: one click is counted
+    // per unique (campaign, recipient) token, then the reader is 302'd to
+    // the real destination. Unknown campaigns / unsafe targets bounce to
+    // the domain root instead of erroring.
+    if (request.method === 'GET' && path === '/v1/t/c') {
+      const c = url.searchParams.get('c') || '';
+      const u = (url.searchParams.get('u') || '').slice(0, 64);
+      const target = safeRedirectTarget(url.searchParams.get('to') || '');
+      if (c && u) ctx.waitUntil(recordClick(env, c, u));
+      return Response.redirect(target || 'https://nebula-crm-storage.nebula-crm.workers.dev/v1/health', 302);
+    }
+
+    // ── One-click unsubscribe ──
+    // Renders a small branded confirmation page and (for a valid token)
+    // suppresses the address: campaign metrics.unsubscribes++, the email is
+    // added to the mailer's suppression list and the CRM contact is opted
+    // out, so the AI never emails them again.
+    if (request.method === 'GET' && path === '/v1/t/u') {
+      const c = url.searchParams.get('c') || '';
+      const u = (url.searchParams.get('u') || '').slice(0, 64);
+      let page = { brandName: 'The business', color: '#6C8CFF', email: '', already: false };
+      try {
+        const { applyUnsub } = await import('./emailer/unsub.js');
+        page = await applyUnsub(env, { campaignId: c, token: u });
+      } catch (e) {
+        console.warn('[track] unsub route failed:', e?.message || e);
+      }
+      return new Response(unsubPage(page), {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
+      });
+    }
+
+    // ── Agentic AI assistant (CRM-wide knowledge + actions) ──
+    // Authenticated above. The assistant can read CRM state, search
+    // contacts, quote analytics, teach memory, save the business profile
+    // and CREATE email tasks (which go through the same dry-run + pipeline
+    // gates as the app's own AI Email screen).
+    if (request.method === 'POST' && path === '/v1/assistant') {
+      return handleAssistant(request, env, { uid, ctx });
     }
 
     // ── Read ──

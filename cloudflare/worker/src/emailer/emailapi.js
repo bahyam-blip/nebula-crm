@@ -27,8 +27,10 @@ import { fetchWithBackoff } from './http.js';
 
 export const EMAIL_API_BASE = 'https://email-api.mailercloud.com';
 
-/** How many single-recipient requests run in parallel (rate-limit friendly). */
-export const SEND_CONCURRENCY = 5;
+/** How many single-recipient requests run in parallel (rate-limit friendly).
+ *  MailerCloud allows 50 req/s per IP; 8-way keeps a 1000-recipient blast
+ *  under ~3 minutes while staying far below the ceiling. */
+export const SEND_CONCURRENCY = 8;
 
 /** Kept for backwards compatibility — the batch endpoint no longer puts
  *  multiple recipients in one request (privacy bug: every recipient could
@@ -206,12 +208,20 @@ export async function sendEmail(env, { to, cc, bcc, subject, html, text, replyTo
  * whole audience to everyone). Merge vars ({{first_name}} …) are resolved
  * per recipient by MailerCloud.
  *
+ * Scale features:
+ *   onProgress(partialOut, sentEmails) — awaited between chunks so the
+ *     caller can persist live counters (the app shows the send moving).
+ *   shouldStop() — checked before every chunk; a cancelled task stops
+ *     cleanly and the caller resumes the remainder later.
+ *   out.sentEmails — every address that was ACCEPTED, in order; the caller
+ *     persists it so a retry only ever sends the unsent remainder.
+ *
  * recipients: [{ name, email, merge_vars: {first_name, company, …} }]
- * Returns { sent, deferred, failed, failures[], suppressions[] }.
+ * Returns { sent, deferred, failed, failures[], suppressions[], sentEmails[], stopped }.
  */
-export async function sendPersonalizedBatch(env, { subject, html, text, recipients, metadata, brand = null }) {
+export async function sendPersonalizedBatch(env, { subject, html, text, recipients, metadata, brand = null, onProgress = null, shouldStop = null }) {
   const sender = resolveSender(env, brand);
-  const out = { sent: 0, deferred: 0, failed: 0, failures: [], suppressions: [] };
+  const out = { sent: 0, deferred: 0, failed: 0, failures: [], suppressions: [], sentEmails: [], stopped: false };
 
   const rows = (recipients || [])
     .map((r) => ({
@@ -254,11 +264,23 @@ export async function sendPersonalizedBatch(env, { subject, html, text, recipien
   };
 
   // Small, polite parallelism: MailerCloud allows 50 req/s per IP; we stay
-  // far below it while a 250-recipient audience finishes in seconds.
+  // far below it while even a multi-thousand-recipient audience finishes in
+  // minutes. Progress is awaited between chunks; a stop check runs first.
   for (let i = 0; i < rows.length; i += SEND_CONCURRENCY) {
+    if (shouldStop && (await shouldStop())) {
+      out.stopped = true;
+      break;
+    }
     const slice = rows.slice(i, i + SEND_CONCURRENCY);
     const results = await Promise.all(slice.map((r, j) => sendOne(r, i + j)));
     for (let j = 0; j < slice.length; j++) record(out, slice[j].email, results[j]);
+    if (onProgress) {
+      try {
+        await onProgress({ sent: out.sent, deferred: out.deferred, failed: out.failed }, [...out.sentEmails]);
+      } catch (e) {
+        console.warn(`[emailapi] onProgress callback failed (non-fatal): ${e?.message || e}`);
+      }
+    }
   }
 
   return out;
@@ -268,6 +290,7 @@ function record(out, email, res) {
   const kind = classify(res.statusCode);
   if (kind === 'sent') {
     out.sent++;
+    out.sentEmails.push(email);
   } else if (kind === 'deferred') {
     out.deferred++;
   } else {

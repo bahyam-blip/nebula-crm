@@ -12,13 +12,17 @@ import '../../assistant/models/insight.dart';
 
 /// Top-level dashboard provider — combines multiple streams into a
 /// single snapshot for the dashboard screen.
-final dashboardDataProvider = FutureProvider<DashboardData>((ref) async {
+///
+/// WATCHES (not reads) the underlying streams: with `ref.read` the KPIs
+/// froze at whatever happened to be loaded on first build (usually zeros)
+/// and never refreshed. Deriving from watched values means the dashboard
+/// recomputes the moment contacts/deals streams emit.
+final dashboardDataProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
   final userId = ref.watch(currentUserIdProvider);
   final db = ref.watch(firestoreServiceProvider);
 
-  // Read each stream's current value via .future on a separate provider.
-  final contacts = ref.read(contactsProvider).valueOrNull ?? [];
-  final summary = ref.read(pipelineSummaryProvider);
+  final contacts = ref.watch(contactsProvider).valueOrNull ?? const [];
+  final summary = ref.watch(pipelineSummaryProvider);
   final insights = await _fetchInsights(ref, db, userId);
 
   return DashboardData(
@@ -41,7 +45,8 @@ Future<List<Insight>> _fetchInsights(
 ) async {
   try {
     final stream = db.watchInsights(userId: userId);
-    return await stream.first;
+    return await stream.first.timeout(const Duration(seconds: 15),
+        onTimeout: () => const []);
   } catch (_) {
     return const [];
   }

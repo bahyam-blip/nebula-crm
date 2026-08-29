@@ -39,3 +39,10 @@ final mailBusinessProvider =
     FutureProvider.autoDispose<BusinessProfile>((ref) {
   return ref.watch(mailApiProvider).businessProfile();
 });
+
+/// Suppressed addresses — who will never be emailed again (unsubs,
+/// bounces, spam reports, manual entries). Shown on the analytics card.
+final mailSuppressionsProvider =
+    FutureProvider.autoDispose<List<MailSuppression>>((ref) {
+  return ref.watch(mailApiProvider).suppressions();
+});

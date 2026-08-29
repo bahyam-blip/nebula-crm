@@ -103,6 +103,9 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
     try {
       await ref.read(mailApiProvider).analytics(refresh: true);
       ref.invalidate(mailAnalyticsProvider);
+      // The refresh also pulls provider-reported unsubscribes into the
+      // suppression list — keep the count honest alongside the metrics.
+      ref.invalidate(mailSuppressionsProvider);
       _toast('Analytics refreshed from MailerCloud.');
     } catch (e) {
       _toast(e.toString());
@@ -387,7 +390,11 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
               error: (_, __) => const SizedBox.shrink(),
               data: (a) => a == null
                   ? const SizedBox.shrink()
-                  : _AnalyticsCard(a: a, onRefresh: _refreshAnalytics),
+                  : _AnalyticsCard(
+                      a: a,
+                      onRefresh: _refreshAnalytics,
+                      suppressions: ref.watch(mailSuppressionsProvider).valueOrNull?.length,
+                    ),
             ),
 
             // ── Tasks ──
@@ -1057,9 +1064,13 @@ class _MemorySheet extends StatelessWidget {
 /* ── Analytics card ── */
 
 class _AnalyticsCard extends StatelessWidget {
-  const _AnalyticsCard({required this.a, required this.onRefresh});
+  const _AnalyticsCard({required this.a, required this.onRefresh, this.suppressions});
   final MailAnalytics a;
   final VoidCallback onRefresh;
+
+  /// Addresses that will never be emailed again (unsubs, bounces, spam
+  /// reports). Null = still loading (shows an ellipsis, never a fake 0).
+  final int? suppressions;
 
   @override
   Widget build(BuildContext context) {
@@ -1079,8 +1090,8 @@ class _AnalyticsCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           // The owner-facing truth: did the emails actually land, who opened,
-          // how many bounced. Numbers come from the provider + our own
-          // open-tracking pixel — never invented.
+          // who clicked, who opted out, how many bounced. Numbers come from
+          // the provider + our own tracking pixel — never invented.
           Row(
             children: [
               _Stat(
@@ -1097,6 +1108,22 @@ class _AnalyticsCard extends StatelessWidget {
                 label: 'Not delivered',
                 value: '${a.totals.notDelivered}',
                 color: AppColors.danger,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _Stat(label: 'Clicked', value: '${a.totals.clicks}', color: AppColors.accent),
+              _Stat(
+                label: 'Unsubscribed',
+                value: '${a.totals.unsubs}',
+                color: AppColors.warning,
+              ),
+              _Stat(
+                label: 'Suppressed',
+                value: '${suppressions ?? '…'}',
+                color: AppColors.textSecondary,
               ),
             ],
           ),
