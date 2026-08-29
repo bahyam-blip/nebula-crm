@@ -456,6 +456,21 @@ console.log('\n— 7. Agentic assistant: snapshot → tools → reply (+ create_
   });
   const r4 = await handleAssistant(req4, env, { uid: 'user_123', ctx: { waitUntil: () => {} } });
   ok(r4.status === 400, 'empty messages → 400');
+
+  // ── Route-order regression: /v1/assistant must sit AFTER auth in
+  // index.js (a TDZ there surfaced as Cloudflare 1101 in production). ──
+  const workerMod = await import('../cloudflare/worker/src/index.js');
+  const req5 = new Request('https://worker.test/v1/assistant', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer not-a-real-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'Hi' }] }),
+  });
+  try {
+    const r5 = await workerMod.default.fetch(req5, env, { waitUntil: () => {} });
+    ok(r5.status === 401, 'index.js routes /v1/assistant after auth (401, never 1101)', `got ${r5.status}`);
+  } catch (e) {
+    ok(false, 'index.js routes /v1/assistant after auth (401, never 1101)', String(e).slice(0, 120));
+  }
 }
 
 console.log('\n════════════════════════════════════════');

@@ -283,15 +283,6 @@ export default {
       });
     }
 
-    // ── Agentic AI assistant (CRM-wide knowledge + actions) ──
-    // Authenticated above. The assistant can read CRM state, search
-    // contacts, quote analytics, teach memory, save the business profile
-    // and CREATE email tasks (which go through the same dry-run + pipeline
-    // gates as the app's own AI Email screen).
-    if (request.method === 'POST' && path === '/v1/assistant') {
-      return handleAssistant(request, env, { uid, ctx });
-    }
-
     // ── Read ──
     if (request.method === 'GET' && path.startsWith('/v1/file/')) {
       const key = decodeURIComponent(path.slice('/v1/file/'.length));
@@ -322,6 +313,15 @@ export default {
     // the Worker enforces team/role rules (see src/data.js).
     if (path.startsWith('/v1/data/') || path === '/v1/admin/migrate-from-firestore') {
       return handleDataRequest(request, env, { path, claims });
+    }
+
+    // ── Agentic AI assistant (CRM-wide knowledge + actions) ──
+    // Authenticated above. The assistant can read CRM state, search
+    // contacts, quote analytics, teach memory, save the business profile
+    // and CREATE email tasks (which go through the same dry-run + pipeline
+    // gates as the app's own AI Email screen).
+    if (request.method === 'POST' && path === '/v1/assistant') {
+      return handleAssistant(request, env, { uid, ctx });
     }
 
     // ── AI mailer (Sarvam + MailerCloud) ──
