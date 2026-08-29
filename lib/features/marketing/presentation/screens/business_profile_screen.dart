@@ -199,7 +199,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                   ? const SizedBox(
                       width: 16, height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.branding_outlined, size: 18),
+                  : const Icon(Icons.style_outlined, size: 18),
               label: const Text('Save'),
             ),
           ),
@@ -282,7 +282,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                 const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
-                  icon: const Icon(Icons.branding_outlined, size: 18),
+                  icon: const Icon(Icons.style_outlined, size: 18),
                   label: const Text('Save business profile'),
                 ),
               ],
