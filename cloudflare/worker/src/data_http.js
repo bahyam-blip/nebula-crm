@@ -126,8 +126,9 @@ async function handleDataRequestInner(request, env, { path, claims }) {
       const existing = await getDoc(db, col, docId);
       const merged = merge ? { ...(existing?.data || {}), ...toStorage(data) } : toStorage(data);
       if (!canWrite(user, col, existing?.data || null, merged)) return deny('write denied by policy');
-      const stored = await putDoc(db, col, docId, merged, { merge: true });
-      // keep denormalized team readable by the writer
+      const stored = await putDoc(db, col, docId, merged, { merge: true, actor: user });
+      // putDoc stamps teamId/ownerId from the actor so the writer can always
+      // read their own write back.
       return json({ id: stored.id, updatedAt: stored.data.updatedAt });
     }
 
@@ -166,7 +167,7 @@ async function handleDataRequestInner(request, env, { path, claims }) {
           if (!canWrite(user, op.col, existing?.data || null, merged)) {
             throw Object.assign(new Error(`write denied for ${op.col}/${docId}`), { status: 403 });
           }
-          await putDoc(db, op.col, docId, merged, { merge: true });
+          await putDoc(db, op.col, docId, merged, { merge: true, actor: user });
           applied++;
         }
       } catch (e) {

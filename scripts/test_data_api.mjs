@@ -221,7 +221,39 @@ console.log('\n— 6. Batch: all-or-nothing semantics on denial —');
   ok(r.status === 403 && r.json.applied === 1, 'batch reports partial application on denial', JSON.stringify(r.json));
 }
 
-console.log(`\n════════════════════════════════════════`);
+console.log('\n— 7. Server-side stamps: a rep can always read/edit what they created —');
+{
+  // The field incident: a client path (CSV import, AI action, raw probe)
+  // creates a contact WITHOUT teamId/ownerId. The write succeeds, but the
+  // doc used to come back unreadable and un-editable for its own creator
+  // (403 on get/update/delete). The Worker must stamp teamId + ownerId
+  // itself — "keep denormalized team readable by the writer".
+  env.DB = makeD1();
+  await call(env, { __path: '/v1/data/bootstrap' }, 'u_owner');
+  await call(env, { __path: '/v1/data/bootstrap' }, 'u_rep');
+
+  const created = await call(env, {
+    __path: '/v1/data/set', col: 'contacts', id: 'bare',
+    data: { name: 'Bare Import', email: 'bare@x.dev', status: 'lead' }, // no teamId, no ownerId
+  }, 'u_rep');
+  ok(created.status === 200, 'rep creates a contact with no teamId/ownerId', String(created.status));
+
+  const back = await call(env, { __path: '/v1/data/get', col: 'contacts', id: 'bare' }, 'u_rep');
+  ok(back.status === 200 && back.json.doc?.data?.name === 'Bare Import', 'creator reads their own write back', JSON.stringify(back.json).slice(0, 100));
+  ok(back.json.doc?.data?.teamId === 'default-team', 'server stamped teamId', back.json.doc?.data?.teamId);
+  ok(back.json.doc?.data?.ownerId === 'u_rep', 'server stamped ownerId = creator', back.json.doc?.data?.ownerId);
+
+  const edit = await call(env, { __path: '/v1/data/set', col: 'contacts', id: 'bare', merge: true, data: { status: 'customer' } }, 'u_rep');
+  ok(edit.status === 200, 'creator can update their auto-stamped contact', String(edit.status));
+  const del = await call(env, { __path: '/v1/data/delete', col: 'contacts', id: 'bare' }, 'u_rep');
+  ok(del.status === 200, 'creator can delete their auto-stamped contact', String(del.status));
+
+  // Malformed where entries must be a 400, never a 500 from inside D1.
+  const badWhere = await call(env, { __path: '/v1/data/query', col: 'contacts', where: [['email', '==', 'x']] }, 'u_rep');
+  ok(badWhere.status === 400, 'malformed where clause → clean 400', String(badWhere.status));
+}
+
+console.log(`\n══════════════════════════════════════`);
 console.log(`  ${passed} passed, ${failed} failed`);
 if (failures.length) {
   console.log('Failures:');

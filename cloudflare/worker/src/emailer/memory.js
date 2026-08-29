@@ -65,8 +65,10 @@ export async function getMemory(store) {
 
 export async function saveMemory(store, mem) {
   mem.updatedAt = new Date().toISOString();
-  if (store) await store.put(MEMORY_KEY, JSON.stringify(mem));
-  return mem;
+  if (!store) return false;
+  // await BEFORE comparing — store.put() is a Promise; `promise !== false`
+  // would always be true and silently accept a failed write.
+  return (await store.put(MEMORY_KEY, JSON.stringify(mem))) !== false;
 }
 
 export async function resetMemory(store) {
@@ -213,7 +215,13 @@ export async function teach(env, store, { facts = {}, note = '', origin = 'owner
   }
 
   applyPatch(mem, patch);
-  await saveMemory(store, mem);
+  // Owner-taught content is precious: a swallowed write must NEVER read back
+  // as "Learned." — fail loudly so the app shows a real error and the owner
+  // can retry instead of believing the AI remembered.
+  const ok = await saveMemory(store, mem);
+  if (!ok) {
+    throw new Error('Could not save to the business memory (state store write failed). Nothing was lost — please try again.');
+  }
   return mem;
 }
 

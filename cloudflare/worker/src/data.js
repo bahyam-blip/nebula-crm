@@ -103,7 +103,7 @@ export async function getDoc(db, col, id) {
   return parseRow(row);
 }
 
-export async function putDoc(db, col, id, data, { merge = false, touchOnly = false } = {}) {
+export async function putDoc(db, col, id, data, { merge = false, touchOnly = false, actor = null } = {}) {
   if (!COL_RE.test(col)) throw Object.assign(new Error('bad collection path'), { status: 400 });
   if (!ID_RE.test(id)) throw Object.assign(new Error('bad document id'), { status: 400 });
 
@@ -112,6 +112,19 @@ export async function putDoc(db, col, id, data, { merge = false, touchOnly = fal
 
   let payload = merge && existing ? { ...existing, ...data } : { ...data };
   payload = applySentinels(payload, existing || {});
+
+  // Server-side stamps (the "keep denormalized team readable by the writer"
+  // contract): whatever client path wrote the doc — app screen, CSV import,
+  // AI action, server cron — the doc always ends up with a teamId, and a
+  // newly created team doc ends up owned by its creator. Without this, a
+  // client that forgets ownerId/ teamId creates records it can never read
+  // back or edit (the write succeeds, everything after 403s).
+  if (actor) {
+    if (!payload.teamId && actor.teamId) payload.teamId = actor.teamId;
+    if (!existing && AUTO_OWNER_COLS.has(col) && !payload.ownerId && actor.uid) {
+      payload.ownerId = actor.uid;
+    }
+  }
 
   const now = Date.now();
   const createdAt = existingRow?.createdAt ?? now;
@@ -148,7 +161,13 @@ export async function queryDocs(db, { col, where = [], limit = 100, orderByIdDes
   const clauses = ['col = ?'];
   const args = [col];
   for (const w of where) {
-    if (!w || !FIELD_RE.test(w.field)) throw Object.assign(new Error('bad query field'), { status: 400 });
+    // Malformed where entries (raw arrays, missing field) must be a clean
+    // 400 — they used to slip through as json_extract '$.undefined' and
+    // blow up inside D1 as a 500.
+    if (!w || typeof w !== 'object' || Array.isArray(w) || typeof w.field !== 'string') {
+      throw Object.assign(new Error('bad query field'), { status: 400 });
+    }
+    if (!FIELD_RE.test(w.field)) throw Object.assign(new Error('bad query field'), { status: 400 });
     if (w.op && w.op !== '==' && w.op !== '!=') throw Object.assign(new Error('only == / != supported'), { status: 400 });
     const val = w.value && typeof w.value === 'object' ? JSON.stringify(w.value) : w.value;
     const expr = `json_extract(json, '$.${w.field}')`;
@@ -208,6 +227,16 @@ const TEAM_COLLECTIONS = new Set([
 ]);
 const OWNER_COLLECTIONS = new Set(['notes', 'tasks', 'insights']);
 const PUBLIC_READ_COLLECTIONS = new Set(['articles']);
+
+/** Team collections where the creator becomes the (co-)owner on create.
+ * Mirrors the legacy rules ("isOwner can update/delete") — without a
+ * server-side stamp, a rep who creates a record without ownerId could
+ * never edit it again. settings/invites/teams/audit_logs are excluded:
+ * they are manager/system territory, not personal records. */
+const AUTO_OWNER_COLS = new Set([
+  'contacts', 'deals', 'activities', 'campaigns', 'tickets', 'articles',
+  'companies', 'commissions', 'call_logs',
+]);
 
 export function isSuperAdmin(user) {
   return user?.role === 'superAdmin';

@@ -557,6 +557,33 @@ console.log('\n— 9. Crash-proofing: state-layer failures must never 1101 the r
   ok(tl.res.status === 200 && tl.json.count === 0, 'tasks list survives corrupt index JSON');
 }
 
+console.log('\n— 10. Business Brain honesty: owner teaching must fail LOUDLY —');
+{
+  // The original sin: the state store swallows write errors, the memory
+  // route answered ok:true, the app toasted "Learned." and the owner's
+  // teaching silently vanished. Owner-taught memory is NOT advisory.
+  const env = await makeEnv();
+  env.DB.prepare = () => { throw new Error('simulated transient failure (429/network)'); };
+
+  const teach = await call(env, 'POST', '/v1/mail/memory', {
+    facts: { business_type: 'Handmade coffee', products: ['Beans'] },
+  });
+  ok(teach.res.status === 503, 'POST /memory with the store down → 503, NOT a fake ok:true', `got ${teach.res.status} ${JSON.stringify(teach.json).slice(0, 120)}`);
+  ok(!!teach.json.error && /save/i.test(teach.json.error), 'error explains the save failed and nothing was lost', teach.json.error);
+
+  const mem = await call(env, 'GET', '/v1/mail/memory');
+  ok(mem.res.status === 503, 'GET /memory with the store down → 503, not a fake "AI knows nothing"', `got ${mem.res.status}`);
+  ok(!!mem.json.state_error, 'GET /memory surfaces state_error', JSON.stringify(mem.json.state_error || '').slice(0, 100));
+}
+{
+  // Happy path still persists (guards the put() boolean contract).
+  const env = await makeEnv();
+  const t1 = await call(env, 'POST', '/v1/mail/memory', { facts: { business_type: 'Probe coffee co' } });
+  ok(t1.res.status === 200 && t1.json.ok === true, 'teach still ok:true when the store is healthy');
+  const g1 = await call(env, 'GET', '/v1/mail/memory');
+  ok(g1.json.memory.facts.business_type === 'Probe coffee co', 'taught fact persists across requests');
+}
+
 console.log(`\n════════════════════════════════════════`);
 console.log(`  ${passed} passed, ${failed} failed`);
 if (failures.length) {

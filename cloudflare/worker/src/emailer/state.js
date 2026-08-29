@@ -10,11 +10,15 @@
  *
  * The exported object mimics the tiny slice of the KV API the mailer uses:
  *   get(key)                     → string | null
- *   put(key, value, {ttl})       → void   (ttl in seconds, best-effort)
+ *   put(key, value, {ttl})       → boolean (false = write failed, skipped)
  *   delete(key)                  → void
  *
  * Every call is fail-soft (see createStore): a transient database error
  * degrades to null / a logged skip instead of crashing mail routes.
+ *
+ * put() still returns true/false so callers that carry precious owner input
+ * (Business Brain teaching) can detect a swallowed write and fail loudly
+ * instead of confirming a save that never happened.
  */
 
 /* ── D1 backend (primary) ───────────────────────────────────────── */
@@ -125,9 +129,11 @@ export function createStore(env) {
     put: async (key, value, opts) => {
       try {
         await backend.put(env, key, value, opts);
+        return true;
       } catch (e) {
         store.lastError = `${backend.name}.put(${key}) → ${e?.message || e}`;
         console.warn(`[mailer:state] ${store.lastError} — write skipped`);
+        return false;
       }
     },
     delete: async (key) => {

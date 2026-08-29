@@ -301,6 +301,12 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
   // start teaching the AI before every secret is in place.
   if (sub === '/memory' && request.method === 'GET') {
     const mem = await getMemory(store);
+    // A failed state read is NOT the same as "the AI knows nothing". If the
+    // store just errored and the memory looks empty, say so — otherwise the
+    // owner concludes their teaching was lost and re-teaches in panic.
+    if (store && store.lastError && !memoryContext(mem)) {
+      return json({ error: 'Business memory is temporarily unreadable (state store error). Your saved memory is almost certainly intact — retry in a moment.', state_error: store.lastError }, 503);
+    }
     return json({ memory: mem, context_preview: memoryContext(mem) });
   }
 
@@ -309,8 +315,15 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     const hasFacts = body.facts && typeof body.facts === 'object';
     const note = typeof body.note === 'string' ? body.note.trim() : '';
     if (!hasFacts && !note) return json({ error: 'send facts:{business_type,industry,products,audience,tone,offers} and/or a note:"…" to teach the AI' }, 400);
-    const mem = await teach(env, store, { facts: body.facts || {}, note, origin: 'owner' });
-    return json({ ok: true, memory: mem });
+    try {
+      const mem = await teach(env, store, { facts: body.facts || {}, note, origin: 'owner' });
+      return json({ ok: true, memory: mem });
+    } catch (e) {
+      return json(
+        { error: e?.message || 'Could not save the business memory.', state_error: store?.lastError || null },
+        503
+      );
+    }
   }
 
   if (sub === '/memory/reset' && request.method === 'POST') {
