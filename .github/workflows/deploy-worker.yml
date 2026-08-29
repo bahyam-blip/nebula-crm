@@ -437,14 +437,42 @@ jobs:
                       f"provider={json.dumps(body.get('provider'))[:400]}")
           except Exception as e:
               say(f"/v1/mail/test failed: {e}")
+
+          # 5) Planner-shaped AI call through the worker proxy. This is the
+          #    exact path campaign planning uses; it must return NON-EMPTY
+          #    content (the sarvam-105b reasoning-budget bug returned a
+          #    hollow 200 with finish_reason "length" and killed every
+          #    campaign). No emails are sent by this probe.
+          try:
+              r = requests.post(f"{WORKER}/v1/ai", headers=AH, timeout=120, json={
+                  "messages": [
+                      {"role": "system", "content": "You output only valid JSON."},
+                      {"role": "user", "content": 'Return a JSON object {"ok": true, "n": 1} and nothing else.'},
+                  ],
+                  "temperature": 0.2,
+                  "max_tokens": 512,
+                  "response_format": {"type": "json_object"},
+              })
+              body = r.json() if "json" in r.headers.get("content-type", "") else {}
+              content = ((body.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+              finish = ((body.get("choices") or [{}])[0]).get("finish_reason")
+              if r.ok and content.strip():
+                  say(f"AI PROXY OK (finish={finish}) content={content[:120]}")
+              else:
+                  say(f"AI PROXY EMPTY/FAIL HTTP {r.status_code} finish={finish} "
+                      f"detail={json.dumps(body)[:300]}")
+          except Exception as e:
+              say(f"/v1/ai probe failed: {e}")
           PYEOF
           rm -f /tmp/sa.json
 
-      # ── One-time data migration: Firestore → D1 ──────────────────────────
+      # ── Data migration: Firestore → D1 ──────────────────────────────────
       # Mints a token for the workspace owner (superAdmin in Firestore) and
-      # asks the Worker to copy every collection into D1. Idempotent: the
-      # Worker skips itself once a 'migrated_at' marker exists (force=1
-      # re-runs). Failure never blocks shipping.
+      # asks the Worker to copy every collection into D1. Runs with force on
+      # EVERY deploy as an incremental backfill: users rows are gap-filled
+      # (D1 wins non-empty — live edits are never clobbered), every other
+      # collection is INSERT ON CONFLICT DO NOTHING. Failure never blocks
+      # shipping.
       - name: Migrate CRM data Firestore -> D1
         if: always()
         env:
@@ -499,7 +527,7 @@ jobs:
               say("custom-token exchange failed"); raise SystemExit(0)
 
           r = requests.post(f"{WORKER}/v1/admin/migrate-from-firestore",
-                            headers={"Authorization": f"Bearer {id_token}"}, json={}, timeout=300)
+                            headers={"Authorization": f"Bearer {id_token}"}, json={"force": True}, timeout=300)
           body = r.json() if "json" in r.headers.get("content-type", "") else {"raw": r.text[:300]}
           say(f"migration HTTP {r.status_code}: {json.dumps(body)[:600]}")
           PYEOF

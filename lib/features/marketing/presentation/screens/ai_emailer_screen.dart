@@ -214,6 +214,19 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
     }
   }
 
+  Future<void> _retryTask(MailTask t) async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(mailApiProvider).retryTask(t.id);
+      ref.invalidate(mailTasksProvider);
+      _toast('Retry queued — the AI will take it from where it failed.');
+    } catch (e) {
+      _toast(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -394,6 +407,7 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
                         task: i.$2,
                         onDelete: () => _deleteTask(i.$2),
                         onCancel: () => _cancelTask(i.$2),
+                        onRetry: i.$2.status == 'failed' ? () => _retryTask(i.$2) : null,
                       ).animate().fadeIn(duration: 220.ms, delay: (i.$1 * 40).ms),
                   ],
                 );
@@ -1013,10 +1027,16 @@ class _Stat extends StatelessWidget {
 /* ── Task card ── */
 
 class _TaskCard extends StatefulWidget {
-  const _TaskCard({required this.task, required this.onDelete, required this.onCancel});
+  const _TaskCard({
+    required this.task,
+    required this.onDelete,
+    required this.onCancel,
+    this.onRetry,
+  });
   final MailTask task;
   final VoidCallback onDelete;
   final VoidCallback onCancel;
+  final VoidCallback? onRetry;
 
   @override
   State<_TaskCard> createState() => _TaskCardState();
@@ -1095,8 +1115,14 @@ class _TaskCardState extends State<_TaskCard> {
                     icon: const Icon(Icons.more_vert, size: 18, color: AppColors.textTertiary),
                     onSelected: (v) {
                       if (v == 'delete') widget.onDelete();
+                      if (v == 'retry') widget.onRetry?.call();
                     },
                     itemBuilder: (_) => [
+                      if (widget.onRetry != null)
+                        const PopupMenuItem(
+                          value: 'retry',
+                          child: Text('Retry failed campaign'),
+                        ),
                       const PopupMenuItem(value: 'delete', child: Text('Delete task')),
                     ],
                   ),

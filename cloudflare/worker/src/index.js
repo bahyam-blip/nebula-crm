@@ -234,7 +234,16 @@ export default {
     // APK: an APK can be decompiled, and a leaked key is billable to you.
     // The Worker only relays; it never decides what the AI may touch. The
     // app executes any resulting action with the signed-in user's own
-    // Firestore permissions, so the AI cannot escalate privileges.
+    // permissions, so the AI cannot escalate privileges.
+    //
+    // sarvam-105b reasons before answering and reasoning shares the token
+    // budget with the answer — an unlucky run returns finish_reason:"length"
+    // with EMPTY content (this killed campaign planning; see sarvam.js).
+    // Two defenses here:
+    //   • thinking is DISABLED unless the caller explicitly asks for it
+    //     (reasoning_effort: 'low'|'medium'|'high');
+    //   • an empty answer is retried once server-side, so the app never
+    //     has to parse a hollow 200.
     if (request.method === 'POST' && path === '/v1/ai') {
       if (!env.SARVAM_API_KEY) {
         return json({ error: 'AI is not configured on the server.' }, 503);
@@ -246,23 +255,54 @@ export default {
         return json({ error: 'invalid JSON body' }, 400);
       }
 
-      const upstream = await fetch('https://api.sarvam.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'api-subscription-key': env.SARVAM_API_KEY,
-        },
-        // Keep the payload minimal. Extra parameters are the usual cause of
-        // a 400 from providers that only accept a subset of the OpenAI shape.
-        body: JSON.stringify({
+      const forcedEffort = ['low', 'medium', 'high'].includes(
+        String(body.reasoning_effort || '').toLowerCase()
+      )
+        ? String(body.reasoning_effort).toLowerCase()
+        : null; // null = thinking off (documented switch)
+
+      const buildPayload = () =>
+        JSON.stringify({
           // sarvam-m was retired; the API names sarvam-105b as the replacement.
           model: body.model || 'sarvam-105b',
           messages: body.messages || [],
           temperature: body.temperature ?? 0.2,
-        }),
-      });
+          // Keep the payload minimal beyond what the app asked for. Extra
+          // parameters are the usual cause of a 400 from providers that
+          // only accept a subset of the OpenAI shape.
+          ...(Number.isFinite(Number(body.max_tokens)) && Number(body.max_tokens) > 0
+            ? { max_tokens: Math.min(Number(body.max_tokens), 4096) }
+            : {}),
+          ...(body.response_format && body.response_format.type === 'json_object'
+            ? { response_format: { type: 'json_object' } }
+            : {}),
+          reasoning_effort: forcedEffort,
+        });
 
-      const text = await upstream.text();
+      const callUpstream = async () =>
+        fetch('https://api.sarvam.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-subscription-key': env.SARVAM_API_KEY,
+          },
+          body: buildPayload(),
+        });
+
+      let upstream = await callUpstream();
+      let text = await upstream.text();
+
+      // Retry once when the model 200s but answers with nothing (its
+      // thinking ate the budget). Any real HTTP error still surfaces.
+      try {
+        const parsed = JSON.parse(text);
+        const content = parsed?.choices?.[0]?.message?.content;
+        if (upstream.ok && (!content || !String(content).trim())) {
+          upstream = await callUpstream();
+          text = await upstream.text();
+        }
+      } catch (_) { /* non-JSON body — fall through */ }
+
       if (!upstream.ok) {
         // Surface what the provider actually said; "error (400)" is useless
         // for diagnosis.

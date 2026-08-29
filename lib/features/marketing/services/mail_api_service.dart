@@ -426,6 +426,14 @@ class MailApiService {
         (map['task'] as Map?)?.cast<String, dynamic>() ?? {});
   }
 
+  /// Retry a failed task. A planning failure goes back to the AI; a partial
+  /// send failure requeues only the failed emails (sent ones never resend).
+  Future<MailTask> retryTask(String id) async {
+    final map = await _send('POST', '/v1/mail/tasks/$id/retry', body: {});
+    return MailTask.fromMap(
+        (map['task'] as Map?)?.cast<String, dynamic>() ?? {});
+  }
+
   Future<Map<String, dynamic>> run({bool force = false}) async {
     return _send('POST', '/v1/mail/run?force=${force ? 1 : 0}', body: {});
   }

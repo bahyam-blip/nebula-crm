@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -144,14 +145,30 @@ class ProfileScreen extends ConsumerWidget {
                     leading: const Icon(Icons.group_outlined, size: 20),
                     title: const Text('Team ID'),
                     subtitle: Text(user.teamId ?? 'No team'),
-                    trailing: user.role.canManageTeam
-                        ? const Icon(Icons.chevron_right, size: 20)
-                        : null,
-                    onTap: user.role.canManageTeam
-                        ? () => context.push('/team')
-                        : null,
+                    trailing: user.teamId == null || user.teamId!.isEmpty
+                        ? (user.role.canManageTeam
+                            ? const Icon(Icons.chevron_right, size: 20)
+                            : null)
+                        : const Icon(Icons.copy, size: 18),
+                    onTap: user.teamId == null || user.teamId!.isEmpty
+                        ? (user.role.canManageTeam ? () => context.push('/team') : null)
+                        : () async {
+                            await Clipboard.setData(
+                                ClipboardData(text: user.teamId!));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Team ID copied to clipboard')),
+                            );
+                          },
                   ),
                 ),
+
+                const SizedBox(height: 20),
+
+                // ── Notification preferences ─────────────────────
+                _SectionLabel('Notifications'),
+                _PreferencesCard(user: user),
 
                 const SizedBox(height: 20),
 
@@ -298,6 +315,97 @@ class _SectionLabel extends StatelessWidget {
         text,
         style: context.textTheme.labelMedium
             ?.copyWith(color: AppColors.textSecondary),
+      ),
+    );
+  }
+}
+
+/// Per-user notification switches, persisted on the user document
+/// (`preferences` map). Toggling writes the whole map back — the field is
+/// not role-privileged, so every teammate can manage their own.
+class _PreferencesCard extends ConsumerWidget {
+  const _PreferencesCard({required this.user});
+  final AppUser user;
+
+  Future<void> _toggle(
+    WidgetRef ref,
+    BuildContext context,
+    UserPreferences current, {
+    bool? notifyDealUpdates,
+    bool? notifyNewLeads,
+    bool? notifyTicketAssignments,
+    bool? notifyAiInsights,
+    bool? weeklyDigest,
+  }) async {
+    final next = UserPreferences(
+      notifyDealUpdates: notifyDealUpdates ?? current.notifyDealUpdates,
+      notifyNewLeads: notifyNewLeads ?? current.notifyNewLeads,
+      notifyTicketAssignments:
+          notifyTicketAssignments ?? current.notifyTicketAssignments,
+      notifyAiInsights: notifyAiInsights ?? current.notifyAiInsights,
+      weeklyDigest: weeklyDigest ?? current.weeklyDigest,
+      startScreen: current.startScreen,
+    );
+    try {
+      await withFirestoreRetry(
+        () => ref.read(remoteDataServiceProvider).update('users', user.id, {
+          'preferences': next.toMap(),
+          'updatedAt': const ServerTimestamp(),
+        }),
+      );
+      // Refresh immediately instead of waiting for the 60 s poll.
+      ref.invalidate(currentAppUserProvider);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeFirestoreError(e))),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final p = user.preferences;
+    return Card(
+      child: Column(
+        children: [
+          SwitchListTile(
+            secondary: const Icon(Icons.inventory_2_outlined, size: 20),
+            title: const Text('Deal updates'),
+            value: p.notifyDealUpdates,
+            onChanged: (v) => _toggle(ref, context, p, notifyDealUpdates: v),
+          ),
+          const Divider(height: 1, indent: 56),
+          SwitchListTile(
+            secondary: const Icon(Icons.person_add_alt_1_outlined, size: 20),
+            title: const Text('New leads'),
+            value: p.notifyNewLeads,
+            onChanged: (v) => _toggle(ref, context, p, notifyNewLeads: v),
+          ),
+          const Divider(height: 1, indent: 56),
+          SwitchListTile(
+            secondary: const Icon(Icons.assignment_outlined, size: 20),
+            title: const Text('Ticket assignments'),
+            value: p.notifyTicketAssignments,
+            onChanged: (v) =>
+                _toggle(ref, context, p, notifyTicketAssignments: v),
+          ),
+          const Divider(height: 1, indent: 56),
+          SwitchListTile(
+            secondary: const Icon(Icons.auto_awesome_outlined, size: 20),
+            title: const Text('AI insights'),
+            value: p.notifyAiInsights,
+            onChanged: (v) => _toggle(ref, context, p, notifyAiInsights: v),
+          ),
+          const Divider(height: 1, indent: 56),
+          SwitchListTile(
+            secondary: const Icon(Icons.mark_email_read_outlined, size: 20),
+            title: const Text('Weekly digest'),
+            value: p.weeklyDigest,
+            onChanged: (v) => _toggle(ref, context, p, weeklyDigest: v),
+          ),
+        ],
       ),
     );
   }

@@ -25,6 +25,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _phone;
+  late final TextEditingController _title;
   bool _saving = false;
   bool _seeded = false;
 
@@ -33,12 +34,14 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     super.initState();
     _name = TextEditingController();
     _phone = TextEditingController();
+    _title = TextEditingController();
   }
 
   @override
   void dispose() {
     _name.dispose();
     _phone.dispose();
+    _title.dispose();
     super.dispose();
   }
 
@@ -50,6 +53,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         () => ref.read(remoteDataServiceProvider).update('users', user.id, {
           'displayName': _name.text.trim(),
           'phone': _phone.text.trim(),
+          'title': _title.text.trim(),
           'updatedAt': const ServerTimestamp(),
         }),
       );
@@ -79,6 +83,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       _seeded = true;
       _name.text = user.displayName;
       _phone.text = user.phone ?? '';
+      _title.text = user.title ?? '';
     }
 
     return Scaffold(
@@ -101,6 +106,15 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
               controller: _phone,
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(labelText: 'Phone'),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _title,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Job title',
+                hintText: 'e.g. Sales Manager, Founder',
+              ),
             ),
             const SizedBox(height: 24),
             Container(

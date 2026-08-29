@@ -162,7 +162,22 @@ async function* pageFirestore(env, path) {
     const url = new URL(`${await fsBase(env)}/documents/${path}`);
     url.searchParams.set('pageSize', '500');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    // Transient 429/5xx get a short backoff (3 tries) — the project has a
+    // history of quota walls, and a mid-migration blip should not need a
+    // whole redeploy to recover. A hard daily quota still fails through
+    // and is retried on the next deploy.
+    let res = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status !== 429 && res.status < 500) break;
+      if (attempt < 2) {
+        const retryAfter = Number(res.headers.get('retry-after'));
+        const wait = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter, 30) * 1000
+          : (2 ** attempt) * 2000 + Math.floor(Math.random() * 800);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
     if (!res.ok) {
       const t = await res.text().catch(() => '');
       if (res.status === 404) return; // collection never existed
@@ -183,6 +198,38 @@ function fsDocToStorage(doc) {
   return { id, data };
 }
 
+/**
+ * Field-level merge for `users` rows.
+ *
+ * The D1 row usually already exists here: bootstrap() re-created every
+ * signed-in profile the moment the app moved to D1. A plain "DO NOTHING"
+ * would therefore skip the Firestore original FOREVER — the owner's real
+ * name, title, phone and uploaded avatar photo stayed stranded in
+ * Firestore even after the quota reset ("I created profile but it's not
+ * showing up").
+ *
+ * Rule: D1 wins for anything non-empty (it is newer — post-cutover edits
+ * land there); Firestore only FILLS gaps. One exception: an uploaded R2
+ * avatar (/v1/file/ URL) outranks a provider photo the bootstrap may have
+ * copied in, mirroring the app's own rule.
+ */
+export function coalesceUserDoc(d1Data, fsData) {
+  const out = { ...d1Data };
+  const isUpload = (s) => typeof s === 'string' && s.includes('/v1/file/');
+  for (const [k, v] of Object.entries(fsData || {})) {
+    if (v === null || v === undefined) continue;
+    const cur = out[k];
+    const curEmpty = cur === null || cur === undefined || cur === '';
+    if (k === 'photoUrl') {
+      if (isUpload(v) && !isUpload(cur)) out[k] = v;
+      else if (curEmpty) out[k] = v;
+      continue;
+    }
+    if (curEmpty && !(Array.isArray(v) && v.length === 0)) out[k] = v;
+  }
+  return out;
+}
+
 export async function migrateFromFirestore(env, db) {
   if (!env.FIREBASE_SERVICE_ACCOUNT) {
     throw new Error('FIREBASE_SERVICE_ACCOUNT not set — cannot read legacy Firestore');
@@ -192,6 +239,40 @@ export async function migrateFromFirestore(env, db) {
 
   const upsertBatch = async (col, rows) => {
     if (!rows.length) return;
+    const now = Date.now();
+
+    if (col === 'users') {
+      // Merge, don't skip: fill the gaps a bootstrap-created row left open.
+      for (const r of rows) {
+        const existingRow = await db
+          .prepare('SELECT json, created_at FROM docs WHERE col = ? AND id = ?')
+          .bind(col, r.id)
+          .first();
+        if (!existingRow) {
+          await db
+            .prepare(
+              `INSERT INTO docs (col, id, team_id, json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)`
+            )
+            .bind(col, r.id, r.teamId, r.json, now, now)
+            .run();
+          continue;
+        }
+        let d1Data = {};
+        try { d1Data = JSON.parse(existingRow.json); } catch { /* start fresh */ }
+        const merged = coalesceUserDoc(d1Data, JSON.parse(r.json));
+        const teamId = typeof merged.teamId === 'string' ? merged.teamId : r.teamId;
+        await db
+          .prepare(
+            `UPDATE docs SET json = ?, team_id = ?, updated_at = ?
+             WHERE col = ? AND id = ?`
+          )
+          .bind(JSON.stringify(merged), teamId, now, col, r.id)
+          .run();
+      }
+      return;
+    }
+
     // DO NOTHING, not DO UPDATE: D1 rows are the live database (post-cutover
     // truth, possibly edited by the team already); Firestore is an older
     // snapshot. Import must never clobber newer data with older. Rows that
@@ -201,7 +282,6 @@ export async function migrateFromFirestore(env, db) {
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(col, id) DO NOTHING`
     );
-    const now = Date.now();
     await db.batch(rows.map((r) => stmt.bind(col, r.id, r.teamId, r.json, now, now)));
   };
 

@@ -253,6 +253,61 @@ console.log('\n— 7. Server-side stamps: a rep can always read/edit what they c
   ok(badWhere.status === 400, 'malformed where clause → clean 400', String(badWhere.status));
 }
 
+console.log('\n— 8. Profile self-edit: unchanged privileged fields ride along safely —');
+{
+  // The reported bug: editing your own profile sent the MERGED document
+  // (existing + patch), which always still contains role/teamId. Treating
+  // presence as change made every self-edit 403 ("write denied by policy"),
+  // so the profile screen never updated and the avatar URL never saved.
+  env.DB = makeD1();
+  await call(env, { __path: '/v1/data/bootstrap' }, 'u_owner');
+  await call(env, { __path: '/v1/data/bootstrap' }, 'u_rep');
+
+  // Simulate the app: read the doc, then write back existing + patch.
+  const before = await call(env, { __path: '/v1/data/get', col: 'users', id: 'u_rep' }, 'u_rep');
+  const merged = { ...(before.json.doc?.data || {}), displayName: 'Ravi Rep', phone: '98765', photoUrl: 'https://worker.test/v1/file/avatars/u_rep/1.jpg' };
+  const selfEdit = await call(env, { __path: '/v1/data/set', col: 'users', id: 'u_rep', merge: true, data: merged }, 'u_rep');
+  ok(selfEdit.status === 200, 'rep self-edit with unchanged role/teamId in payload → 200 (was 403)', String(selfEdit.status));
+
+  const after = await call(env, { __path: '/v1/data/get', col: 'users', id: 'u_rep' }, 'u_rep');
+  ok(after.json.doc?.data?.displayName === 'Ravi Rep' && after.json.doc?.data?.phone === '98765', 'profile patch actually persisted', JSON.stringify(after.json.doc?.data || {}).slice(0, 120));
+  ok(String(after.json.doc?.data?.photoUrl || '').includes('/v1/file/'), 'avatar URL saved on the user doc');
+  ok(after.json.doc?.data?.role === 'salesRep', 'role untouched by the self-edit');
+
+  // A REAL change to a privileged field must still be denied.
+  const promote = await call(env, { __path: '/v1/data/set', col: 'users', id: 'u_rep', merge: true, data: { ...merged, role: 'admin' } }, 'u_rep');
+  ok(promote.status === 403, 'rep changing their own role is still 403', String(promote.status));
+  const move = await call(env, { __path: '/v1/data/set', col: 'users', id: 'u_rep', merge: true, data: { ...merged, teamId: 'other-team' } }, 'u_rep');
+  ok(move.status === 403, 'rep changing their own teamId is still 403', String(move.status));
+}
+
+console.log('\n— 9. Firestore backfill merge: fill profile gaps, never clobber —');
+{
+  // coalesceUserDoc: D1 (newer, often bootstrap-created and half empty) wins
+  // for anything non-empty; legacy Firestore only FILLS the gaps. An R2
+  // avatar upload outranks a provider photo.
+  const { coalesceUserDoc } = await import('../cloudflare/worker/src/bootstrap.js');
+
+  const d1Row = { email: 'o@x.dev', displayName: '', phone: null, title: undefined, photoUrl: 'https://lh3.googleusercontent.com/a/xyz', role: 'superAdmin', tags: [] };
+  const fsRow = { displayName: 'Nebula Owner', phone: '9876500000', title: 'Founder', photoUrl: 'https://worker.test/v1/file/avatars/uid9/1750000000.jpg', role: 'salesRep', tags: ['legacy'] };
+
+  const merged = coalesceUserDoc(d1Row, fsRow);
+  ok(merged.displayName === 'Nebula Owner', 'empty D1 name filled from Firestore', merged.displayName);
+  ok(merged.phone === '9876500000', 'missing phone filled');
+  ok(merged.title === 'Founder', 'missing title filled');
+  ok(merged.role === 'superAdmin', 'non-empty D1 role NOT clobbered by legacy role');
+  ok(merged.photoUrl.includes('/v1/file/'), 'uploaded R2 avatar outranks provider photo', merged.photoUrl);
+  ok(!Array.isArray(merged.tags) || merged.tags.length === 0, 'empty D1 array not replaced by legacy array (no accidental data resurrection)');
+
+  // D1 already has real data → Firestore changes nothing.
+  const full = coalesceUserDoc({ displayName: 'Live Edit', phone: '111' }, { displayName: 'Old Name', phone: '222' });
+  ok(full.displayName === 'Live Edit' && full.phone === '111', 'live D1 values win everywhere');
+
+  // Null/undefined Firestore values are ignored entirely.
+  const nulls = coalesceUserDoc({ displayName: 'A' }, { displayName: null, title: undefined, phone: '5' });
+  ok(nulls.displayName === 'A' && nulls.title === undefined && nulls.phone === '5', 'null Firestore fields skipped, real ones fill');
+}
+
 console.log(`\n══════════════════════════════════════`);
 console.log(`  ${passed} passed, ${failed} failed`);
 if (failures.length) {

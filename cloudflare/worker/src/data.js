@@ -282,10 +282,17 @@ export function canWrite(user, col, existingData, newData) {
       if (!isManagerUp(user)) return false;
       if (existingData.teamId !== user.teamId && !isSuperAdmin(user)) return false;
     }
+    // "Touching" a privileged field means CHANGING it — callers may hand us
+    // the merged document (existing + patch), which always still contains
+    // role/teamId. Treating presence as change made every self-edit of a
+    // profile 403 for reps ("write denied by policy"), because the merged
+    // payload happens to carry the unchanged fields along.
     const privileged = ['role', 'capabilities', 'teamId'];
-    const touchingPrivileged = privileged.some((k) => k in newData);
+    const changed = (k) =>
+      k in newData && JSON.stringify(newData[k] ?? null) !== JSON.stringify(existingData?.[k] ?? null);
+    const touchingPrivileged = privileged.some(changed);
     if (touchingPrivileged && !isManagerUp(user)) return false;
-    if (newData.role === 'superAdmin' && !isSuperAdmin(user)) return false;
+    if (changed('role') && newData.role === 'superAdmin' && !isSuperAdmin(user)) return false;
     if (touchingPrivileged && existingData && existingData.role === 'superAdmin' && !isSuperAdmin(user)) return false;
     return true;
   }

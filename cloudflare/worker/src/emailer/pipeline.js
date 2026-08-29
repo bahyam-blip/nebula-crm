@@ -62,7 +62,7 @@ import { fetchCrmContacts, upsertCampaignDoc, logActivity } from './firestore.js
 import { buildBusinessBrief, planTask } from './planner.js';
 import { writeEmail, renderHtml, saveTemplate } from './copywriter.js';
 import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled } from './analytics.js';
-import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, progressOf } from './tasks.js';
+import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, retryTaskState, progressOf } from './tasks.js';
 import { createStore, stateBackendName, safeParse } from './state.js';
 import { getMemory, saveMemory, resetMemory, teach, learnFromResults, memoryContext, syncBriefToMemory } from './memory.js';
 
@@ -368,6 +368,19 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
       return json({ ok: true, cancelled: changed, task: { ...t, progress: progressOf(t) } });
     }
 
+    case sub.startsWith('/tasks/') && sub.endsWith('/retry') && request.method === 'POST': {
+      const id = sub.split('/')[2];
+      const t = await getTask(store, id);
+      if (!t) return json({ error: 'task not found' }, 404);
+      const reset = retryTaskState(t);
+      if (!reset) {
+        return json({ error: `task is ${t.status} — only failed tasks can be retried` }, 409);
+      }
+      await putTask(store, reset);
+      ctx.waitUntil(runWhenFree(env, id));
+      return json({ ok: true, task: { ...reset, progress: progressOf(reset) } });
+    }
+
     case sub.startsWith('/tasks/') && request.method === 'DELETE': {
       const id = sub.split('/')[2];
       const t = await getTask(store, id);
@@ -425,7 +438,7 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     }
 
     default:
-      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'POST /v1/mail/tasks/:id/cancel', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config', 'GET/POST /v1/mail/memory', 'POST /v1/mail/memory/reset'] }, 404);
+      return json({ error: 'not found', routes: ['POST/GET /v1/mail/tasks', 'POST /v1/mail/tasks/:id/cancel', 'POST /v1/mail/tasks/:id/retry', 'DELETE /v1/mail/tasks/:id', 'POST /v1/mail/run', 'POST /v1/mail/sync', 'POST /v1/mail/test {to}', 'GET /v1/mail/analytics', 'GET /v1/mail/preview?task=', 'GET /v1/mail/status', 'POST /v1/mail/config', 'GET/POST /v1/mail/memory', 'POST /v1/mail/memory/reset'] }, 404);
   }
 }
 

@@ -177,13 +177,16 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     PLAN_SCHEMA_PROMPT,
   ].filter(Boolean).join('\n');
 
+  // NOTE: no reasoning_effort here — thinking is disabled by default in
+  // sarvam.js (reasoning once devoured the token budget and left every
+  // plan empty). Set MAIL_AI_REASONING=medium to re-enable deliberately.
   const plan = await sarvamChat(
     env,
     [
       { role: 'system', content: 'You are an autonomous email campaign planner. You convert owner instructions into precise, safe, executable campaign plans. You always output valid JSON.' },
       { role: 'user', content: user },
     ],
-    { json: true, temperature: 0.5, maxTokens: 2500, reasoningEffort: 'medium' }
+    { json: true, temperature: 0.5, maxTokens: 2500 }
   );
 
   // ── Sanitise (never trust the model blindly) ────────────────────

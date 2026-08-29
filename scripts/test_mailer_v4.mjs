@@ -78,6 +78,7 @@ function kvMock() {
 }
 
 const captured = { campaigns: [], activities: [], sends: [], templates: [], batches: [] };
+let lastSarvamEffort = 'unset'; // remembers the reasoning_effort of the last non-starved call
 let failStateFetch = false; // regression toggle: make Firestore state reads throw
 let contactsInCrm = [
   { name: 'Asha Rao', email: 'asha@example.com', status: 'lead', company: 'Acme' },
@@ -85,6 +86,7 @@ let contactsInCrm = [
   { name: 'No Email', email: '', status: 'lead', company: 'X' },
 ];
 let sarvamScript = []; // queue of {match(fn), reply(obj)}
+let sarvamStarveNext = 0; // >0: next N Sarvam calls return the budget-starved 200 (empty content + reasoning_content)
 
 function sarvamReplyFor(bodyText) {
   for (const s of sarvamScript) if (s.match(bodyText)) return s.reply;
@@ -104,7 +106,28 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith('https://api.sarvam.ai/')) {
     const parsed = JSON.parse(body);
     const text = parsed.messages.map((m) => m.content).join('\n');
-    return jsonRes(200, { choices: [{ message: { content: JSON.stringify(sarvamReplyFor(text)) } }] });
+    const effort = parsed.reasoning_effort;
+    if (sarvamStarveNext > 0) {
+      // Reproduce the production killer: reasoning ate the completion budget,
+      // HTTP 200, content EMPTY, reasoning_content filled, finish=length.
+      sarvamStarveNext--;
+      const draft = globalThis.__sarvamGarbageReasoning
+        ? 'pondering the request deeply but never drafting an answer'
+        : 'thinking… the owner wants… draft: ' + JSON.stringify(sarvamReplyFor(text));
+      return jsonRes(200, {
+        choices: [{
+          message: { content: '', reasoning_content: draft },
+          finish_reason: 'length',
+        }],
+        usage: { completion_tokens: 2048, prompt_tokens: 900 },
+      });
+    }
+    // Assert the thinking switch: payload must carry reasoning_effort (null = off).
+    if (!('reasoning_effort' in parsed)) {
+      return jsonRes(400, { error: { message: 'mock: reasoning_effort missing from payload' } });
+    }
+    lastSarvamEffort = effort;
+    return jsonRes(200, { choices: [{ message: { content: JSON.stringify(sarvamReplyFor(text)) }, finish_reason: 'stop' }] });
   }
   if (u.startsWith('https://email-api.mailercloud.com/')) {
     captured.sends.push({ url: u, body: JSON.parse(body) });
@@ -582,6 +605,118 @@ console.log('\n— 10. Business Brain honesty: owner teaching must fail LOUDLY �
   ok(t1.res.status === 200 && t1.json.ok === true, 'teach still ok:true when the store is healthy');
   const g1 = await call(env, 'GET', '/v1/mail/memory');
   ok(g1.json.memory.facts.business_type === 'Probe coffee co', 'taught fact persists across requests');
+}
+
+console.log('\n— 11. Sarvam starvation: the bug that failed every campaign —');
+{
+  // sarvam-105b shares one completion budget between thinking and the
+  // answer. When thinking eats it: HTTP 200, content "", reasoning_content
+  // filled, finish_reason "length". sarvam.js must (1) disable thinking by
+  // default, (2) recover a JSON draft from the reasoning trace, (3) retry.
+  const { sarvamChat } = await import('../cloudflare/worker/src/emailer/sarvam.js');
+  const env = { SARVAM_API_KEY: 'sarvam_test' };
+  sarvamScript = [{ match: () => true, reply: { subject: 'Recovered subject', ok: 1 } }];
+
+  // (a) thinking OFF by default — the payload carries reasoning_effort: null
+  sarvamStarveNext = 0;
+  await sarvamChat(env, [{ role: 'user', content: 'hello planner' }], { json: true });
+  ok(lastSarvamEffort === null, 'default payload disables thinking (reasoning_effort: null)', String(lastSarvamEffort));
+
+  // (b) empty content + JSON draft inside reasoning → recovered, no throw
+  sarvamStarveNext = 1;
+  const rec = await sarvamChat(env, [{ role: 'user', content: 'hello planner' }], { json: true });
+  ok(rec.subject === 'Recovered subject', 'JSON draft recovered from reasoning_content');
+
+  // (c) empty content + garbage reasoning → retried → second attempt answers
+  sarvamStarveNext = 1;
+  const origScript = sarvamScript;
+  sarvamScript = [{ match: () => true, reply: { subject: 'Second attempt', ok: 2 } }];
+  // starve with UNPARSEABLE reasoning: temporarily patch the mock toggle
+  globalThis.__sarvamGarbageReasoning = true;
+  const rec2 = await sarvamChat(env, [{ role: 'user', content: 'hello planner' }], { json: true });
+  ok(rec2.subject === 'Second attempt', 'empty answer retried and second attempt succeeded');
+  globalThis.__sarvamGarbageReasoning = false;
+  sarvamScript = origScript;
+
+  // (d) all attempts starve → clean, honest error (never a silent empty plan)
+  sarvamStarveNext = 9;
+  globalThis.__sarvamGarbageReasoning = true;
+  let threw = '';
+  try { await sarvamChat(env, [{ role: 'user', content: 'hello planner' }], { json: true }); }
+  catch (e) { threw = String(e.message); }
+  ok(/after 3 attempts/.test(threw), 'persistent starvation throws after 3 attempts', threw.slice(0, 80));
+  sarvamStarveNext = 0;
+  globalThis.__sarvamGarbageReasoning = false;
+}
+
+console.log('\n— 12. Task retry: failed campaigns are recoverable —');
+{
+  const { putTask } = await import('../cloudflare/worker/src/emailer/tasks.js');
+
+  // (a) planning failed ("Empty AI response") → retry re-plans and delivers
+  const env = await makeEnv();
+  // Script the BRIEF only — the planner call has no reply, so planTask
+  // throws exactly like the production "Empty AI response" did.
+  sarvamScript = [
+    { match: (t) => t.includes('build a marketing brief'), reply: {
+        business_type: 'Artisan coffee roastery', industry: 'F&B', target_audience: 'cafes',
+        value_props: ['fresh'], tone: 'warm', topics_pool: [], segment_hints: ['lead'], language: 'en',
+      } },
+  ];
+  sarvamStarveNext = 0;
+  const broken = await call(env, 'POST', '/v1/mail/tasks', { instruction: 'Promote monsoon sale' }, 'owner_uid_1');
+  await drain(broken.waits);
+  let t = (await call(env, 'GET', '/v1/mail/tasks')).json.tasks.find((x) => x.id === broken.json.task.id);
+  ok(t.status === 'failed', 'unscripted planning run ends failed (production repro)', t.status);
+  ok(/after 3 attempts|Empty AI|no scripted reply/i.test(t.error || ''), 'failure error is diagnostic', String(t.error).slice(0, 90));
+
+  sarvamScript = [
+    { match: (t) => t.includes('build a marketing brief'), reply: {
+        business_type: 'Artisan coffee roastery', industry: 'F&B', target_audience: 'cafes',
+        value_props: ['fresh'], tone: 'warm', topics_pool: [], segment_hints: ['lead'], language: 'en',
+      } },
+    { match: (t) => t.includes('OWNER TASK'), reply: {
+        understanding: 'u', audience: { segment: 'lead', max_recipients: 2 },
+        emails: [{ seq: 1, sendAt: new Date(Date.now() - 1000).toISOString(), goal: 'g', angle: 'a', tone: 't', template_style: 'offer' }],
+        reasoning: 'r',
+      } },
+    { match: (t) => t.includes('Write ONE high-engagement'), reply: {
+        subject: 'Retry worked', preheader: 'p', headline: 'h', intro: 'i', sections: [], cta_text: 'c', closing: 'cl', ps: '',
+      } },
+  ];
+  const retry = await call(env, 'POST', `/v1/mail/tasks/${t.id}/retry`, {});
+  ok(retry.res.status === 200 && retry.json.task.status === 'pending', 'failed task retry → 200, back to pending', JSON.stringify(retry.json).slice(0, 120));
+  await drain(retry.waits);
+  t = (await call(env, 'GET', '/v1/mail/tasks')).json.tasks.find((x) => x.id === t.id);
+  ok(t.status === 'done' && t.emails[0].status === 'sent' && t.emails[0].subject === 'Retry worked', 'retry re-planned and delivered the campaign', `${t.status}/${t.emails[0]?.status}`);
+
+  // (b) retrying a live/done task is a clean 409, not a state corruption
+  const retryLive = await call(env, 'POST', `/v1/mail/tasks/${t.id}/retry`, {});
+  ok(retryLive.res.status === 409, 'retry of a done task → 409', String(retryLive.res.status));
+
+  // (c) partial failure: only FAILED emails requeue — sent ones never resend
+  const env2 = await makeEnv();
+  const partial = {
+    id: 't_partial1', instruction: 'i', source: 'api', createdBy: 'u1',
+    status: 'failed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    plan: { understanding: 'u' },
+    emails: [
+      { seq: 1, status: 'sent', sendAt: new Date(Date.now() - 3600_000).toISOString(), subject: 'Already sent' },
+      { seq: 2, status: 'failed', sendAt: new Date(Date.now() - 1800_000).toISOString(), subject: 'Bounced', error: 'provider 500' },
+    ],
+    events: [], error: '1 of 2 sends failed',
+  };
+  await putTask(storeOf(env2), JSON.parse(JSON.stringify(partial)));
+  const pr = await call(env2, 'POST', '/v1/mail/tasks/t_partial1/retry', {});
+  ok(pr.res.status === 200 && pr.json.task.status === 'active', 'partial-failure retry → active', JSON.stringify(pr.json).slice(0, 100));
+  const pe = pr.json.task.emails;
+  ok(pe[0].status === 'sent' && pe[0].subject === 'Already sent', 'sent email untouched (no duplicate delivery)');
+  ok(pe[1].status === 'planned' && new Date(pe[1].sendAt).getTime() > Date.now(), 'failed email requeued ~10 min out', pe[1].sendAt);
+  ok(pr.json.task.emails.filter((e) => e.status === 'failed').length === 0, 'no failed emails remain after retry');
+
+  // (d) nothing to retry → 409
+  const nothing = await call(env2, 'POST', '/v1/mail/tasks/t_missing/retry', {});
+  ok(nothing.res.status === 404, 'retry of unknown task → 404', String(nothing.res.status));
 }
 
 console.log(`\n════════════════════════════════════════`);

@@ -90,6 +90,40 @@ export function cancelTaskState(task) {
   return touch(task);
 }
 
+/**
+ * Retry a failed task. Returns a fresh state or null when there is nothing
+ * to retry (unknown task / not failed / already live).
+ *
+ *   • Planning failed (no plan):  back to pending → the pipeline re-plans.
+ *   • Plan existed, sends failed: requeue only the failed emails, keep the
+ *     already-sent ones — nobody gets the same email twice.
+ */
+export function retryTaskState(task) {
+  if (task.status !== 'failed') return null;
+  task.error = null;
+  if (!task.plan || !Array.isArray(task.emails) || task.emails.length === 0) {
+    task.plan = null;
+    task.emails = [];
+    task.status = 'pending';
+    addEvent(task, 'Retry requested — queued for the AI again.', 'info');
+    return touch(task);
+  }
+  let requeued = 0;
+  for (const e of task.emails) {
+    if (e.status === 'failed') {
+      e.status = 'planned';
+      e.error = null;
+      // 10 minutes out so a retry never re-fires inside the same minute.
+      e.sendAt = new Date(Date.now() + 10 * 60 * 1000 + requeued * 60 * 60 * 1000).toISOString();
+      requeued++;
+    }
+  }
+  if (!requeued) return null;
+  task.status = 'active';
+  addEvent(task, `Retry requested — ${requeued} email(s) requeued.`, 'info');
+  return touch(task);
+}
+
 /** Derived progress for UI (not persisted). */
 export function progressOf(task) {
   const emails = task.emails || [];
