@@ -655,10 +655,51 @@ export async function runMailCron(env, ctx = null) {
   if (!state.ready) return;
   try {
     const r = await runPipeline(env, { trigger: 'cron' });
+    if (r?.preparesDeferred) {
+      // The analytics pull ate this run's subrequest budget — run once more
+      // immediately so preparing the owner's emails isn't delayed 5 min.
+      const r2 = await runPipeline(env, { trigger: 'cron-2' });
+      holdKicks(ctx, r2?.kicks);
+      return;
+    }
     holdKicks(ctx, r?.kicks);
   } catch (e) {
     console.error('[mailer:cron]', e);
   }
+}
+
+/** Live (non-terminal) tasks in ONE D1 query. listTasks() reads every task
+ *  doc individually — fine for the app's list route, fatal for the
+ *  pipeline's subrequest budget as the index grows. The D1 rows wrap the
+ *  task JSON in {value, expireAt} (see state.js) — unwrapped here. KV
+ *  deployments fall back to the per-key reads (legacy, small volumes). */
+async function listLiveTasks(env, store) {
+  if (env.DB) {
+    try {
+      const { results } = await env.DB
+        .prepare(
+          `SELECT id, json FROM docs
+           WHERE col = 'mail_state' AND id LIKE 'mail:task:%'
+           ORDER BY updated_at DESC LIMIT 60`
+        )
+        .all();
+      const now = Date.now();
+      const out = [];
+      for (const row of results || []) {
+        try {
+          const doc = JSON.parse(row.json);
+          if (doc.expireAt && Date.parse(doc.expireAt) < now) continue; // soft TTL
+          const inner = typeof doc.value === 'string' ? JSON.parse(doc.value) : doc.value;
+          if (inner && ['pending', 'planning', 'active'].includes(inner.status)) out.push(inner);
+        } catch { /* skip malformed */ }
+      }
+      return out.slice(0, 40);
+    } catch (e) {
+      console.warn(`[mailer] listLiveTasks D1 query failed (${e?.message || e}) — falling back`);
+    }
+  }
+  const all = await listTasks(store);
+  return all.filter((t) => ['pending', 'planning', 'active'].includes(t.status)).slice(0, 40);
 }
 
 /** Keep self-invocation fetches alive past the current response. */
@@ -690,7 +731,9 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
     const maxSync = parseInt(env.MAIL_MAX_SYNC || '5000', 10);
 
     // 1) Refresh analytics + AI learnings when due
+    let analyticsPulled = false;
     if (await analyticsDue(store, parseInt(env.MAIL_ANALYTICS_INTERVAL_HOURS || '20', 10))) {
+      analyticsPulled = true;
       log.push('analytics: pulling campaign performance…');
       const snap = await collectAnalytics(mc, env, store, {
         // Provider-reported unsubscribes (campaign mode) join the suppression
@@ -703,15 +746,17 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
     }
     const learnings = (await getLatestAnalytics(store))?.learnings ?? null;
 
-    // 2) Tasks first — the 5-min cron must be a cheap no-op when there is
-    //    nothing to plan or deliver (no contact pulls, no AI calls).
-    const tasks = (await listTasks(store)).filter((t) => !onlyTaskId || t.id === onlyTaskId);
+    // 2) LIVE tasks in one query — the 5-min cron must stay a cheap no-op
+    //    when there is nothing to plan or deliver.
+    let tasks = await listLiveTasks(env, store);
+    if (onlyTaskId) tasks = tasks.filter((t) => t.id === onlyTaskId);
     if (!tasks.length) {
-      await store.put('mail:last_run', JSON.stringify({ at: new Date().toISOString(), trigger, dryRun, log: ['idle — no tasks'] }));
+      await store.put('mail:last_run', JSON.stringify({ at: new Date().toISOString(), trigger, dryRun, log: ['idle — no live tasks'] }));
       return { ok: true, trigger, dryRun, durationMs: Date.now() - started, log, kicks };
     }
 
-    // 3) Audience — the CRM contacts collection IS the email list
+    // 3) Audience stats for the planner — the CRM contacts collection IS
+    //    the email list.
     const contacts = await fetchCrmContacts(env, { max: maxSync });
     log.push(`crm: ${contacts.length} emailable contact(s) loaded`);
     const stats = contactStats(contacts);
@@ -755,71 +800,63 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
       }
     }
 
-    // 6) PREPARE due emails, then hand each one to a CHUNKED delivery chain.
+    // 6) PREPARE + DELIVER — each phase runs in ITS OWN worker invocation.
     //
-    // Why chunks: Cloudflare Workers allow a hard-capped number of
-    // subrequests per invocation (50 on the free plan). A 200-recipient
-    // 1:1 send needs 200+ requests — impossible in one go (every large
-    // task died with "Too many subrequests" mid-send). The delivery is
-    // therefore split across chained worker invocations, each with a
-    // fresh budget: prepare (AI copy + audience) → chunk (≤N private
-    // sends + live progress) → self-invoke → … → finalize. A crashed
-    // chain resumes from the sent-ledger: nobody is ever double-sent.
+    // Why: Cloudflare Workers cap subrequests per invocation (50 on the
+    // free plan). A planning run that ALSO pulled contacts, wrote AI copy
+    // and kicked a chain blew the cap at request ~50 — the kick died and
+    // every large campaign with it. So this run only PLANS and KICKS:
+    //   plan run (here)      → analytics + live tasks + contact stats + plan
+    //   prepare invocation   → AI copy + audience + tracked HTML (fresh budget)
+    //   chunk invocations    → ≤25 private 1:1 sends each (fresh budget)
+    // A killed chain resumes from the sent-ledger; never double-sends.
     const nowMs = Date.now();
+    let prepareKicks = 0;
     for (const task of tasks) {
       if (task.status !== 'active' || !task.plan) continue;
 
       for (const mail of task.emails) {
         if (mail.status !== 'planned' && mail.status !== 'sending') continue;
-        // Re-read the task: the owner may have cancelled or deleted it
-        // while this run was in flight. Never resurrect either.
+        // Re-read the task: the owner may have cancelled or deleted it,
+        // and concurrent chains advance it while this loop runs.
         const fresh = await getTask(store, task.id);
         if (!fresh || fresh.status === 'cancelled') {
           task.status = 'cancelled';
           log.push(`task ${task.id}: cancelled/deleted mid-run — stopping`);
           break;
         }
-        const sendMs = Date.parse(mail.sendAt);
+        const fm = (fresh.emails || []).find((m) => m.seq === mail.seq) || mail;
+        const sendMs = Date.parse(fm.sendAt || mail.sendAt);
         if (!Number.isFinite(sendMs)) {
-          // Write through a FRESH read — concurrent chains may have advanced
-          // other emails of this task while this loop was running.
-          const f = (await getTask(store, task.id)) || task;
-          const fm = (f.emails || []).find((m) => m.seq === mail.seq);
-          if (fm) { fm.status = 'failed'; fm.error = 'bad sendAt'; await putTask(store, touch(f, {})); }
+          // Write through the FRESH read — never from a stale copy.
+          fm.status = 'failed';
+          fm.error = 'bad sendAt';
+          await putTask(store, touch(fresh, {}));
           continue;
         }
         if (sendMs - nowMs > lookahead) continue; // not due yet
-        // Already prepared (copy written, audience resolved)? Then just make
-        // sure a chain is running — the app's task polling lands here often.
-        if (mail.status === 'sending' && mail.exec && mail.exec.phase !== 'done') {
+
+        if (fm.exec) {
+          // Already prepared (copy written, audience resolved): make sure a
+          // chain is running — the app's task polling lands here often.
           if (!(await chainAlive(store, task.id, mail.seq))) {
             kicks.push(kickChain(env, {
               action: 'chunk', taskId: task.id, seq: mail.seq,
-              from: mail.exec.mode === 'campaign' ? (mail.exec.cursor || 0) : (Array.isArray(mail.sentEmails) ? mail.sentEmails.length : 0),
+              from: fm.exec.mode === 'campaign' ? (fm.exec.cursor || 0) : (Array.isArray(fm.sentEmails) ? fm.sentEmails.length : 0),
             }));
-            log.push(`task ${task.id} email ${mail.seq}: chain resumed at ${mail.exec.mode === 'campaign' ? `sync cursor ${mail.exec.cursor || 0}` : `${(mail.sentEmails || []).length} sent`}`);
+            log.push(`task ${task.id} email ${mail.seq}: chain resumed at ${fm.exec.mode === 'campaign' ? `sync cursor ${fm.exec.cursor || 0}` : `${(fm.sentEmails || []).length} sent`}`);
           }
           continue;
         }
 
-        try {
-          const kick = await prepareEmail(env, store, mc, { task, mail, contacts, brief, memory, learnings, brand, dryRun });
-          if (kick) kicks.push(kick);
-          if (!dryRun) {
-            log.push(`task ${task.id} email ${mail.seq}: prepared ${mail.exec?.audienceCount ?? '?'} recipient(s) via ${mail.exec?.mode} — delivery chain running`);
-          } else {
-            log.push(`task ${task.id} email ${mail.seq}: DRY RUN — would send "${mail.subject}" to ${mail.exec?.audienceCount ?? '?'} at ${mail.sendAt}`);
-          }
-        } catch (e) {
-          // Failure is persisted through a FRESH read for the same reason:
-          // a concurrent chain may have advanced this task meanwhile.
-          const f = (await getTask(store, task.id)) || task;
-          const fm = (f.emails || []).find((m) => m.seq === mail.seq) || mail;
-          fm.status = 'failed';
-          fm.error = e.message;
-          addEvent(f, `Email ${mail.seq} failed: ${e.message}`, 'error');
-          log.push(`task ${task.id} email ${mail.seq}: PREPARE FAILED — ${e.message}`);
-          await putTask(store, touch(f, {}));
+        // Not prepared yet: hand it to a dedicated PREPARE invocation with
+        // its own subrequest budget (AI copy + audience + render + kick).
+        if (prepareKicks < 5) {
+          kicks.push(kickChain(env, { action: 'prepare', taskId: task.id, seq: mail.seq }));
+          prepareKicks++;
+          log.push(`task ${task.id} email ${mail.seq}: queued for preparation (AI copy + audience)`);
+        } else {
+          log.push(`task ${task.id} email ${mail.seq}: prepare deferred — budget for this run is used; the next tick continues`);
         }
       }
 
@@ -1089,7 +1126,14 @@ export async function deliverInternal(env, payload, ctx = { waitUntil: () => {} 
   try {
     if (!taskId) return json({ error: 'taskId required' }, 400);
     if (action === 'prepare') {
-      // Advance the sequence: plan/prepare this task's next due email.
+      if (seq > 0) {
+        // Dedicated PREPARE invocation: AI copy + audience + tracked HTML
+        // with its OWN subrequest budget, then the first chunk kick.
+        const r = await runPrepare(env, store, taskId, seq);
+        holdKicks(ctx, r?.kick ? [r.kick] : []);
+        return json({ ok: true, ...r, kick: undefined });
+      }
+      // Task-level advance (legacy/compat): plan the next due email.
       const r = await runPipeline(env, { trigger: 'chain', onlyTaskId: taskId });
       holdKicks(ctx, r?.kicks);
       return json({ ok: true, ...(r.skipped ? { skipped: r.reason } : { log: r.log }) });
@@ -1114,6 +1158,39 @@ export async function deliverInternal(env, payload, ctx = { waitUntil: () => {} 
       }
     } catch { /* best effort */ }
     return json({ ok: false, error: String(e?.message || e) }, 500);
+  }
+}
+
+/** Dedicated PREPARE invocation (own subrequest budget): load context,
+ *  resolve the audience, write the AI copy once, persist the audience and
+ *  hand off to the first delivery chunk. */
+async function runPrepare(env, store, taskId, seq) {
+  const task = await getTask(store, taskId);
+  if (!task || task.status === 'cancelled') return { skipped: 'task gone or cancelled' };
+  const mail = (task.emails || []).find((m) => m.seq === seq);
+  if (!mail || !['planned', 'sending'].includes(mail.status)) return { skipped: 'nothing to prepare' };
+  if (mail.exec) return { skipped: 'already prepared' };
+
+  const mc = new MailerCloud(env);
+  const { dryRun } = await dryRunEffective(env, store);
+  const maxSync = parseInt(env.MAIL_MAX_SYNC || '5000', 10);
+  const contacts = await fetchCrmContacts(env, { max: maxSync });
+  const brief = await buildBusinessBrief(env, store, { crmStats: contactStats(contacts), recentInstructions: [task.instruction] });
+  const memory = await getMemory(store);
+  const learnings = (await getLatestAnalytics(store))?.learnings ?? null;
+  const profile = await getBusinessProfile(store);
+  const brand = brandFor(env, profile);
+  try {
+    const kick = await prepareEmail(env, store, mc, { task, mail, contacts, brief, memory, learnings, brand, dryRun });
+    return { prepared: true, kick };
+  } catch (e) {
+    // Persist the failure through the fresh task object we hold.
+    mail.status = 'failed';
+    mail.error = String(e?.message || e).slice(0, 300);
+    addEvent(task, `Email ${seq} failed: ${e?.message || e}`, 'error');
+    await putTask(store, touch(task, {}));
+    await finalizeTaskIfComplete(store, task);
+    return { failed: String(e?.message || e) };
   }
 }
 
@@ -1244,8 +1321,11 @@ async function finishTransactional(env, store, { task, mail, crmCampaignId, ctx 
   await clearAudience(store, crmCampaignId);
   await store.delete(chainKeyOf(task.id, mail.seq));
   await finalizeTaskIfComplete(store, task);
-  // Advance the sequence (no-op when the next email is scheduled for later).
-  holdKicks(ctx, [kickChain(env, { action: 'prepare', taskId: task.id, seq: '' })]);
+  // Advance the sequence: the NEXT due, not-yet-prepared email gets its
+  // own prepare invocation (no-op when nothing is due — the cron covers it).
+  const nextDue = (task.emails || []).find((m) => m.status === 'planned' && !m.exec
+    && Number.isFinite(Date.parse(m.sendAt)) && Date.parse(m.sendAt) - Date.now() <= lookaheadMs(env));
+  holdKicks(ctx, nextDue ? [kickChain(env, { action: 'prepare', taskId: task.id, seq: nextDue.seq })] : []);
   return { done: true, sent: sentCount, failed: failedCount, deferred: deferredCount };
 }
 
@@ -1321,7 +1401,9 @@ async function campaignChunk(env, store, mc, { task, mail, ctx, crmCampaignId })
     await clearAudience(store, crmCampaignId);
     await store.delete(chainKeyOf(task.id, mail.seq));
     await finalizeTaskIfComplete(store, task);
-    holdKicks(ctx, [kickChain(env, { action: 'prepare', taskId: task.id, seq: '' })]);
+    const nextDue = (task.emails || []).find((m) => m.status === 'planned' && !m.exec
+      && Number.isFinite(Date.parse(m.sendAt)) && Date.parse(m.sendAt) - Date.now() <= lookaheadMs(env));
+    holdKicks(ctx, nextDue ? [kickChain(env, { action: 'prepare', taskId: task.id, seq: nextDue.seq })] : []);
     return { scheduled: true, campaignId: String(campaignId) };
   }
   return { skipped: 'unknown campaign phase' };

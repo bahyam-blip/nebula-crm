@@ -21,7 +21,9 @@ export async function putTask(kv, task) {
   await kv.put(`mail:task:${task.id}`, JSON.stringify(task), { expirationTtl: TTL });
   const index = safeParse(await kv.get('mail:task:index'), []);
   if (!index.includes(task.id)) index.unshift(task.id);
-  await kv.put('mail:task:index', JSON.stringify(index.slice(0, 200)));
+  // 60 keeps every listTasks() call (one read per task) inside the worker's
+  // per-invocation subrequest budget even on the app's poll route.
+  await kv.put('mail:task:index', JSON.stringify(index.slice(0, 60)));
 }
 
 export async function getTask(kv, id) {
