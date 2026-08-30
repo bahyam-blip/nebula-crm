@@ -23,18 +23,25 @@ const PROFILE_KEY = 'biz:profile';
 const BRIEF_CACHE_KEY = 'biz:brief';
 
 /** Canonical template styles the AI can pick from (see copywriter.js). */
-export const TEMPLATE_STYLES = ['modern', 'classic', 'bold', 'minimal', 'gradient', 'editorial', 'spotlight'];
+export const TEMPLATE_STYLES = ['modern', 'classic', 'bold', 'minimal', 'gradient', 'editorial', 'spotlight', 'aurora', 'promo', 'letter'];
 
 /** Legacy planner values → canonical render styles. */
 const STYLE_ALIASES = {
   newsletter: 'classic',
   announcement: 'modern',
-  offer: 'bold',
-  story: 'minimal',
+  offer: 'promo',
+  discount: 'promo',
+  sale: 'promo',
+  story: 'letter',
+  personal: 'letter',
   tip: 'gradient',
   magazine: 'editorial',
   product: 'spotlight',
   launch: 'spotlight',
+  dark: 'aurora',
+  neon: 'aurora',
+  premium: 'aurora',
+  invite: 'aurora',
 };
 
 export function normalizeStyle(style) {

@@ -75,7 +75,7 @@ MAIL_LOOKAHEAD_MINUTES = "10"       # deliver emails due within this window; the
 MAIL_SEND_CHUNK = "25"              # private 1:1 emails per chain invocation (Workers free plan = 50 subrequests/invocation)
 MAIL_SYNC_ROWS = "1000"             # contacts uploaded to the dedicated campaign list per chain invocation (campaign mode, 1000s+)
 MAIL_MAX_SYNC = "20000"             # cap on contacts pulled from D1 per run (hundreds/thousands are fine)
-MAIL_ANALYTICS_INTERVAL_HOURS = "20"
+MAIL_ANALYTICS_INTERVAL_HOURS = "4" # harvest provider opens/clicks 6x a day so engagement shows up same-day
 MC_CREATE_TEMPLATES = "true"        # save every AI template into MailerCloud's template library
 
 # ── Sending identity & delivery engine ────────────────────────────────

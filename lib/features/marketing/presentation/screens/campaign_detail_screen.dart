@@ -39,17 +39,33 @@ class CampaignDetailScreen extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              // ── Branded header: gradient accent bar above the name ──
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  gradient: AppColors.primaryGradient,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 12),
               Text(c.name, style: context.textTheme.headlineSmall),
               const SizedBox(height: 6),
-              Text(
-                '${c.channel.label} · ${c.status.toUpperCase()}',
-                style: context.textTheme.bodySmall
-                    ?.copyWith(color: AppColors.textSecondary),
+              Row(
+                children: [
+                  Text(
+                    c.channel.label,
+                    style: context.textTheme.bodySmall
+                        ?.copyWith(color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusPill(status: c.status),
+                ],
               ),
               const SizedBox(height: 24),
 
-              // ── Performance metrics ──────────────────────
-              _MetricsGrid(campaign: c),
+              // ── Engagement dashboard: rates, funnel, live evidence ──
+              _EngagementPanel(campaign: c),
 
               const SizedBox(height: 24),
 
@@ -148,84 +164,404 @@ class CampaignDetailScreen extends ConsumerWidget {
   }
 }
 
-class _MetricsGrid extends StatelessWidget {
-  const _MetricsGrid({required this.campaign});
+/* ── Engagement panel ───────────────────────────────────────────── */
+
+/// The owner's answer to "was this REALLY delivered — did anyone read it?":
+/// rate KPIs, a delivery funnel, and live evidence of who opened/clicked.
+class _EngagementPanel extends StatelessWidget {
+  const _EngagementPanel({required this.campaign});
   final Campaign campaign;
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
-      childAspectRatio: 1.0,
+    final m = campaign.metrics;
+    final deliveredBase = m.delivered > 0 ? m.delivered : m.sent;
+    double pct(int n) =>
+        deliveredBase > 0 ? (n / deliveredBase) * 100 : 0.0;
+    final openRate = pct(m.opens);
+    final clickRate = pct(m.clicks);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('Engagement',
+                    style: context.textTheme.titleSmall),
+              ),
+              if (m.hasEngagement)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: AppColors.success.withValues(alpha: 0.4),
+                        width: 0.6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 5,
+                        height: 5,
+                        decoration: const BoxDecoration(
+                            color: AppColors.success, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 5),
+                      Text('Live opens tracked',
+                          style: context.textTheme.labelSmall?.copyWith(
+                              color: AppColors.success,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // ── Rate KPI tiles ──────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: _RateTile(
+                  label: 'Open rate',
+                  pct: openRate,
+                  caption: '${m.opens} unique opens',
+                  colors: const [AppColors.primary, AppColors.accent],
+                  icon: Icons.visibility_outlined,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _RateTile(
+                  label: 'Click rate',
+                  pct: clickRate,
+                  caption: '${m.clicks} clicks',
+                  colors: const [AppColors.tertiary, Color(0xFFFFB547)],
+                  icon: Icons.touch_app_outlined,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Funnel ──────────────────────────────────────────────
+          _EngBar(
+            label: 'Sent',
+            count: m.sent,
+            fraction: 1,
+            color: AppColors.textSecondary,
+          ),
+          _EngBar(
+            label: 'Delivered',
+            count: m.delivered,
+            fraction:
+                m.sent > 0 ? (m.delivered / m.sent).clamp(0.0, 1.0) : 0,
+            color: AppColors.success,
+          ),
+          _EngBar(
+            label: 'Opened',
+            count: m.opens,
+            fraction: deliveredBase > 0
+                ? (m.opens / deliveredBase).clamp(0.0, 1.0)
+                : 0,
+            color: AppColors.primary,
+          ),
+          _EngBar(
+            label: 'Clicked',
+            count: m.clicks,
+            fraction: deliveredBase > 0
+                ? (m.clicks / deliveredBase).clamp(0.0, 1.0)
+                : 0,
+            color: AppColors.accent,
+          ),
+          _EngBar(
+            label: 'Not delivered',
+            count: m.notDelivered,
+            fraction:
+                m.sent > 0 ? (m.notDelivered / m.sent).clamp(0.0, 1.0) : 0,
+            color: AppColors.danger,
+          ),
+          _EngBar(
+            label: 'Unsubs',
+            count: m.unsubscribes,
+            fraction: deliveredBase > 0
+                ? (m.unsubscribes / deliveredBase).clamp(0.0, 1.0)
+                : 0,
+            color: AppColors.warning,
+          ),
+
+          // ── Live evidence: who opened / clicked last ────────────
+          if (m.lastOpenEmail.isNotEmpty || m.lastClickEmail.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border, width: 0.5),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (m.lastOpenEmail.isNotEmpty)
+                    _EvidenceRow(
+                      icon: Icons.mark_email_read_outlined,
+                      color: AppColors.primary,
+                      text:
+                          'Last opened by ${m.lastOpenEmail} · ${_ago(m.lastOpenAt)}',
+                    ),
+                  if (m.lastClickEmail.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    _EvidenceRow(
+                      icon: Icons.ads_click,
+                      color: AppColors.accent,
+                      text:
+                          'Last clicked by ${m.lastClickEmail} · ${_ago(m.lastClickAt)}',
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
+          // ── Engaged readers (newest first) ──────────────────────
+          if (m.openedSample.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text('Recent openers',
+                style: context.textTheme.labelSmall
+                    ?.copyWith(color: AppColors.textTertiary)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: m.openedSample
+                  .take(8)
+                  .map((s) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 9, vertical: 5),
+                        decoration: BoxDecoration(
+                          color:
+                              AppColors.primary.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                              color: AppColors.primary
+                                  .withValues(alpha: 0.30),
+                              width: 0.6),
+                        ),
+                        child: Text(s['email']!,
+                            style: context.textTheme.labelSmall?.copyWith(
+                                color: AppColors.textPrimary,
+                                fontSize: 10.5)),
+                      ))
+                  .toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Human "time ago" for an ISO timestamp — no intl dependency.
+  static String _ago(String iso) {
+    final t = DateTime.tryParse(iso);
+    if (t == null) return 'just now';
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    return '${d.inDays}d ago';
+  }
+}
+
+class _RateTile extends StatelessWidget {
+  const _RateTile({
+    required this.label,
+    required this.pct,
+    required this.caption,
+    required this.colors,
+    required this.icon,
+  });
+  final String label;
+  final double pct;
+  final String caption;
+  final List<Color> colors;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final gradient = LinearGradient(colors: colors);
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colors.first.withValues(alpha: 0.14),
+            colors.last.withValues(alpha: 0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border:
+            Border.all(color: colors.first.withValues(alpha: 0.35), width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 13, color: colors.first),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: context.textTheme.labelSmall
+                      ?.copyWith(color: AppColors.textSecondary)),
+            ],
+          ),
+          const SizedBox(height: 7),
+          ShaderMask(
+            shaderCallback: (bounds) => gradient.createShader(bounds),
+            blendMode: BlendMode.srcIn,
+            child: Text(
+              '${pct.toStringAsFixed(1)}%',
+              style: context.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(caption,
+              style: context.textTheme.labelSmall
+                  ?.copyWith(color: AppColors.textTertiary, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+}
+
+class _EngBar extends StatelessWidget {
+  const _EngBar({
+    required this.label,
+    required this.count,
+    required this.fraction,
+    required this.color,
+  });
+  final String label;
+  final int count;
+  final double fraction;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = fraction.isNaN ? 0.0 : fraction;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 88,
+            child: Text(label,
+                style: context.textTheme.labelSmall
+                    ?.copyWith(color: AppColors.textSecondary)),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: Stack(
+                children: [
+                  Container(height: 8, color: AppColors.surfaceHigh),
+                  FractionallySizedBox(
+                    widthFactor: f,
+                    child: Container(
+                      height: 8,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(colors: [
+                          color.withValues(alpha: 0.55),
+                          color,
+                        ]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 40,
+            child: Text('$count',
+                textAlign: TextAlign.right,
+                style: context.textTheme.labelSmall?.copyWith(
+                    color: color, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EvidenceRow extends StatelessWidget {
+  const _EvidenceRow({
+    required this.icon,
+    required this.color,
+    required this.text,
+  });
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
       children: [
-        _MetricTile(
-          label: 'Sent',
-          value: campaign.metrics.sent.toString(),
-          color: AppColors.textPrimary,
-        ),
-        _MetricTile(
-          label: 'Delivered',
-          value: campaign.metrics.delivered.toString(),
-          color: AppColors.success,
-        ),
-        _MetricTile(
-          label: 'Not delivered',
-          value: campaign.metrics.notDelivered.toString(),
-          color: AppColors.danger,
-        ),
-        _MetricTile(
-          label: 'Opens',
-          value: campaign.metrics.opens.toString(),
-          color: AppColors.info,
-        ),
-        _MetricTile(
-          label: 'Clicks',
-          value: campaign.metrics.clicks.toString(),
-          color: AppColors.accent,
-        ),
-        _MetricTile(
-          label: 'Unsubs',
-          value: campaign.metrics.unsubscribes.toString(),
-          color: AppColors.warning,
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(text,
+              style: context.textTheme.labelSmall
+                  ?.copyWith(color: AppColors.textSecondary)),
         ),
       ],
     );
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final String label;
-  final String value;
-  final Color color;
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.status});
+  final String status;
 
   @override
   Widget build(BuildContext context) {
+    final s = status.toLowerCase();
+    final color = s == 'sent' || s == 'done'
+        ? AppColors.success
+        : s == 'scheduled'
+            ? AppColors.info
+            : s == 'failed'
+                ? AppColors.danger
+                : AppColors.warning;
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
       decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border, width: 0.5),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 0.6),
       ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            value,
-            style: context.textTheme.headlineSmall?.copyWith(color: color),
-          ),
-          Text(label, style: context.textTheme.labelSmall),
-        ],
+      child: Text(
+        s.toUpperCase(),
+        style: context.textTheme.labelSmall
+            ?.copyWith(color: color, fontSize: 9.5, fontWeight: FontWeight.w700),
       ),
     );
   }

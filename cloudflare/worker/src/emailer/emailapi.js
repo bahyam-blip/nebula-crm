@@ -28,9 +28,15 @@ import { fetchWithBackoff } from './http.js';
 export const EMAIL_API_BASE = 'https://email-api.mailercloud.com';
 
 /** How many single-recipient requests run in parallel (rate-limit friendly).
- *  MailerCloud allows 50 req/s per IP; 8-way keeps a 1000-recipient blast
- *  under ~3 minutes while staying far below the ceiling. */
-export const SEND_CONCURRENCY = 8;
+ *  MailerCloud allows 50 req/s per IP; 12-way keeps a 1000-recipient blast
+ *  under ~2 minutes while staying far below the ceiling. Override with the
+ *  MAIL_SEND_CONCURRENCY env var (1-32). */
+export const SEND_CONCURRENCY = 12;
+
+function concurrencyFor(env) {
+  const n = parseInt(env?.MAIL_SEND_CONCURRENCY || String(SEND_CONCURRENCY), 10);
+  return Number.isFinite(n) ? Math.max(1, Math.min(n, 32)) : SEND_CONCURRENCY;
+}
 
 /** Kept for backwards compatibility — the batch endpoint no longer puts
  *  multiple recipients in one request (privacy bug: every recipient could
@@ -209,10 +215,14 @@ export async function sendEmail(env, { to, cc, bcc, subject, html, text, replyTo
  * per recipient by MailerCloud.
  *
  * Scale features:
- *   onProgress(partialOut, sentEmails) — awaited between chunks so the
- *     caller can persist live counters (the app shows the send moving).
- *   shouldStop() — checked before every chunk; a cancelled task stops
- *     cleanly and the caller resumes the remainder later.
+ *   worker-pool concurrency — N workers pull recipients from a shared queue,
+ *     so one slow request NEVER stalls the whole batch (the old chunked
+ *     Promise.all waited for the slowest of every 8 sends between chunks).
+ *   onProgress(partialOut, sentEmails) — serialized + throttled (~1.5s),
+ *     awaited so the caller can persist live counters (the app shows the
+ *     send moving).
+ *   shouldStop() — re-checked (time-gated ~2s) while the pool runs; a
+ *     cancelled task stops cleanly and the caller resumes the remainder.
  *   out.sentEmails — every address that was ACCEPTED, in order; the caller
  *     persists it so a retry only ever sends the unsent remainder.
  *
@@ -263,25 +273,59 @@ export async function sendPersonalizedBatch(env, { subject, html, text, recipien
     return emailApiReq(env, '/email-api', body, 3);
   };
 
-  // Small, polite parallelism: MailerCloud allows 50 req/s per IP; we stay
-  // far below it while even a multi-thousand-recipient audience finishes in
-  // minutes. Progress is awaited between chunks; a stop check runs first.
-  for (let i = 0; i < rows.length; i += SEND_CONCURRENCY) {
-    if (shouldStop && (await shouldStop())) {
-      out.stopped = true;
-      break;
+  // ── Worker pool ─────────────────────────────────────────────────
+  // Shared cursor; each worker grabs the next index. A 9001-throttled
+  // request retries with backoff INSIDE its own worker while the other
+  // workers keep sending — throughput no longer depends on the slowest
+  // request in the batch.
+  const conc = Math.min(concurrencyFor(env), rows.length);
+  let next = 0;
+  let lastProgressAt = 0;
+  let progressChain = Promise.resolve();
+
+  const emitProgress = () => {
+    // Serialized + throttled: onProgress persists task state; concurrent
+    // writes could land out of order and show stale counters.
+    const now = Date.now();
+    if (!onProgress || now - lastProgressAt < 1500) return;
+    lastProgressAt = now;
+    progressChain = progressChain
+      .then(() => onProgress({ sent: out.sent, deferred: out.deferred, failed: out.failed }, [...out.sentEmails]))
+      .catch((e) => console.warn(`[emailapi] onProgress callback failed (non-fatal): ${e?.message || e}`));
+  };
+
+  // One SHARED stop-check per window (default ~2s): the whole pool costs ONE
+  // state read per window (not one per worker), yet still stops within
+  // seconds of the owner's cancel tap. MAIL_STOP_CHECK_MS overrides it.
+  const stopWindowMs = Math.max(0, parseInt(env?.MAIL_STOP_CHECK_MS || '2000', 10));
+  let stopCheckAt = -Infinity;
+  let stopCheckP = null;
+  const checkStop = () => {
+    if (!shouldStop) return Promise.resolve(false);
+    const now = Date.now();
+    if (now - stopCheckAt > stopWindowMs || !stopCheckP) {
+      stopCheckAt = now;
+      stopCheckP = Promise.resolve()
+        .then(() => shouldStop())
+        .catch(() => false);
     }
-    const slice = rows.slice(i, i + SEND_CONCURRENCY);
-    const results = await Promise.all(slice.map((r, j) => sendOne(r, i + j)));
-    for (let j = 0; j < slice.length; j++) record(out, slice[j].email, results[j]);
-    if (onProgress) {
-      try {
-        await onProgress({ sent: out.sent, deferred: out.deferred, failed: out.failed }, [...out.sentEmails]);
-      } catch (e) {
-        console.warn(`[emailapi] onProgress callback failed (non-fatal): ${e?.message || e}`);
-      }
+    return stopCheckP;
+  };
+
+  const worker = async () => {
+    while (true) {
+      if (await checkStop()) { out.stopped = true; return; }
+      const i = next;
+      if (i >= rows.length) return;
+      next += 1;
+      const res = await sendOne(rows[i], i);
+      record(out, rows[i].email, res);
+      emitProgress();
     }
-  }
+  };
+
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  if (progressChain !== Promise.resolve()) await progressChain.catch(() => {});
 
   return out;
 }

@@ -38,6 +38,15 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
     'One re-engagement email to customers who have not bought in a month',
   ];
 
+  /// One-tap design commands — the AI picks the matching premium template
+  /// and tone from the owner's wording. Teaches the command vocabulary.
+  static const _styleCommands = [
+    ('Festive & bold', Icons.celebration_outlined, 'Make it look festive and energetic with a bold offer layout.'),
+    ('Dark premium', Icons.dark_mode_outlined, 'Use a dark premium, high-end look.'),
+    ('Personal note', Icons.edit_note_outlined, 'Write it like a short personal note from the founder.'),
+    ('Product showcase', Icons.grid_view_outlined, 'Showcase the product with feature cards.'),
+  ];
+
   @override
   void dispose() {
     _poll?.cancel();
@@ -328,10 +337,28 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Give the AI a task', style: context.textTheme.titleSmall),
+                  Row(
+                    children: [
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          gradient: AppColors.premiumGradient,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.auto_awesome,
+                            size: 15, color: Colors.white),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Give the AI a task',
+                            style: context.textTheme.titleSmall),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 4),
                   Text(
-                    'Plain language. Say how many emails, to whom, and about what. The AI decides timing, audience and copy.',
+                    'Plain language. Say how many emails, to whom, and about what — even HOW it should look. The AI decides timing, audience, copy and design.',
                     style: context.textTheme.bodySmall
                         ?.copyWith(color: AppColors.textSecondary),
                   ),
@@ -367,6 +394,35 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
                           label: Text(ex.split(' ').take(5).join(' ') + '…',
                               style: context.textTheme.labelSmall),
                           onPressed: () => _instruction.text = ex,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text('Design commands — tap to append, or write your own:',
+                      style: context.textTheme.labelSmall
+                          ?.copyWith(color: AppColors.textTertiary, fontSize: 10)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final (label, icon, cmd) in _styleCommands)
+                        ActionChip(
+                          avatar: Icon(icon, size: 14, color: AppColors.primary),
+                          label: Text(label,
+                              style: context.textTheme.labelSmall
+                                  ?.copyWith(color: AppColors.primary)),
+                          side: BorderSide(
+                              color: AppColors.primary.withValues(alpha: 0.35),
+                              width: 0.6),
+                          onPressed: () {
+                            final t = _instruction.text.trim();
+                            _instruction.text = t.isEmpty
+                                ? cmd
+                                : (t.endsWith('.') || t.endsWith('!') || t.endsWith('?')
+                                    ? '$t $cmd'
+                                    : '$t. $cmd');
+                          },
                         ),
                     ],
                   ),
@@ -1074,88 +1130,140 @@ class _AnalyticsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = a.totals;
+    final deliveredBase = t.delivered > 0 ? t.delivered : 0;
+    double rateOf(int n) => deliveredBase > 0 ? (n / deliveredBase) * 100 : 0.0;
+    final openRate = rateOf(t.opens);
+    final clickRate = rateOf(t.clicks);
+    final unsubRate = rateOf(t.unsubs);
+    final deliveryPct = t.deliveryRate ?? (t.recipients > 0 ? (t.delivered / t.recipients) * 100 : 0.0);
+
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(child: Text('Performance', style: context.textTheme.titleSmall)),
+              Expanded(
+                child: Text('Engagement', style: context.textTheme.titleSmall),
+              ),
+              _RateChip(label: 'Delivery', pct: deliveryPct, color: AppColors.success),
+              const SizedBox(width: 6),
               IconButton(
                 onPressed: onRefresh,
                 icon: const Icon(Icons.refresh, size: 18, color: AppColors.textSecondary),
                 tooltip: 'Pull fresh numbers from MailerCloud',
+                visualDensity: VisualDensity.compact,
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          // The owner-facing truth: did the emails actually land, who opened,
-          // who clicked, who opted out, how many bounced. Numbers come from
-          // the provider + our own tracking pixel — never invented.
+          const SizedBox(height: 12),
+
+          // ── Hero KPI tiles: open & click rate, the two numbers the
+          //    owner actually markets against ──────────────────────
           Row(
             children: [
-              _Stat(
-                label: 'Delivered',
-                value: '${a.totals.delivered}',
-                color: AppColors.success,
+              Expanded(
+                child: _KpiTile(
+                  label: 'Open rate',
+                  pct: openRate,
+                  caption: '${t.opens} opened',
+                  colors: const [AppColors.primary, AppColors.accent],
+                  icon: Icons.visibility_outlined,
+                ),
               ),
-              _Stat(
-                label: 'Opened',
-                value: '${a.totals.opens}',
-                color: AppColors.info,
-              ),
-              _Stat(
-                label: 'Not delivered',
-                value: '${a.totals.notDelivered}',
-                color: AppColors.danger,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _Stat(label: 'Clicked', value: '${a.totals.clicks}', color: AppColors.accent),
-              _Stat(
-                label: 'Unsubscribed',
-                value: '${a.totals.unsubs}',
-                color: AppColors.warning,
-              ),
-              _Stat(
-                label: 'Suppressed',
-                value: '${suppressions ?? '…'}',
-                color: AppColors.textSecondary,
+              const SizedBox(width: 10),
+              Expanded(
+                child: _KpiTile(
+                  label: 'Click rate',
+                  pct: clickRate,
+                  caption: '${t.clicks} clicked',
+                  colors: const [AppColors.tertiary, Color(0xFFFFB547)],
+                  icon: Icons.touch_app_outlined,
+                ),
               ),
             ],
           ),
-          if (a.totals.recipients > 0) ...[
-            const SizedBox(height: 4),
-            Text(
-              '${a.totals.recipients} sent across ${a.campaigns} campaign${a.campaigns == 1 ? '' : 's'}'
-              '${a.totals.deliveryRate != null ? ' · ${a.totals.deliveryRate!.toStringAsFixed(1)}% delivered' : ''}',
-              style: context.textTheme.labelSmall
-                  ?.copyWith(color: AppColors.textTertiary),
+          const SizedBox(height: 16),
+
+          // ── Delivery funnel — each stage as a share of the last ──
+          _FunnelBar(
+            label: 'Delivered',
+            count: t.delivered,
+            fraction: t.recipients > 0 ? (t.delivered / t.recipients).clamp(0.0, 1.0) : 0,
+            color: AppColors.success,
+          ),
+          _FunnelBar(
+            label: 'Opened',
+            count: t.opens,
+            fraction: t.delivered > 0 ? (t.opens / t.delivered).clamp(0.0, 1.0) : 0,
+            color: AppColors.primary,
+          ),
+          _FunnelBar(
+            label: 'Clicked',
+            count: t.clicks,
+            fraction: t.delivered > 0 ? (t.clicks / t.delivered).clamp(0.0, 1.0) : 0,
+            color: AppColors.accent,
+          ),
+          _FunnelBar(
+            label: 'Not delivered',
+            count: t.notDelivered,
+            fraction: t.recipients > 0 ? (t.notDelivered / t.recipients).clamp(0.0, 1.0) : 0,
+            color: AppColors.danger,
+          ),
+          _FunnelBar(
+            label: 'Unsubscribed',
+            count: t.unsubs,
+            fraction: t.delivered > 0 ? (t.unsubs / t.delivered).clamp(0.04, 1.0) : 0,
+            color: AppColors.warning,
+            minBarPct: unsubRate,
+          ),
+          const SizedBox(height: 12),
+
+          // ── Footer facts strip ───────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border, width: 0.5),
             ),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _Stat(label: 'Campaigns', value: '${a.campaigns}', color: AppColors.textSecondary),
-              _Stat(
-                label: 'Avg open',
-                value: '${a.avgOpenRate.toStringAsFixed(1)}%',
-                color: AppColors.success,
-              ),
-              _Stat(
-                label: 'Avg click',
-                value: '${a.avgClickRate.toStringAsFixed(1)}%',
-                color: AppColors.accent,
-              ),
-              if (a.bestSendHour != null)
-                _Stat(label: 'Best hour', value: '${a.bestSendHour}:00', color: AppColors.warning),
-            ],
+            child: Row(
+              children: [
+                Expanded(
+                  child: _MiniFact(
+                    label: 'Sent',
+                    value: '${t.recipients}',
+                  ),
+                ),
+                const _DotDivider(),
+                Expanded(
+                  child: _MiniFact(
+                    label: 'Campaigns',
+                    value: '${a.campaigns}',
+                  ),
+                ),
+                const _DotDivider(),
+                Expanded(
+                  child: _MiniFact(
+                    label: 'Suppressed',
+                    value: '${suppressions ?? '…'}',
+                  ),
+                ),
+                if (a.bestSendHour != null) ...[
+                  const _DotDivider(),
+                  Expanded(
+                    child: _MiniFact(
+                      label: 'Best hour',
+                      value: '${a.bestSendHour}:00',
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
           if (a.recommendations.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             for (final r in a.recommendations.take(3))
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -1180,25 +1288,201 @@ class _AnalyticsCard extends StatelessWidget {
   }
 }
 
-class _Stat extends StatelessWidget {
-  const _Stat({required this.label, required this.value, required this.color});
+/// Big gradient KPI tile — rate + supporting count. The gradient text makes
+/// the primary engagement numbers pop like a premium analytics product.
+class _KpiTile extends StatelessWidget {
+  const _KpiTile({
+    required this.label,
+    required this.pct,
+    required this.caption,
+    required this.colors,
+    required this.icon,
+  });
   final String label;
-  final String value;
+  final double pct;
+  final String caption;
+  final List<Color> colors;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final gradient = LinearGradient(colors: colors);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colors.first.withValues(alpha: 0.14),
+            colors.last.withValues(alpha: 0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.first.withValues(alpha: 0.35), width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: colors.first),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: context.textTheme.labelSmall
+                      ?.copyWith(color: AppColors.textSecondary)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ShaderMask(
+            shaderCallback: (bounds) => gradient.createShader(bounds),
+            blendMode: BlendMode.srcIn,
+            child: Text(
+              '${pct.toStringAsFixed(1)}%',
+              style: context.textTheme.headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(caption,
+              style: context.textTheme.labelSmall
+                  ?.copyWith(color: AppColors.textTertiary)),
+        ],
+      ),
+    );
+  }
+}
+
+/// One funnel stage: label, proportional track bar, count.
+class _FunnelBar extends StatelessWidget {
+  const _FunnelBar({
+    required this.label,
+    required this.count,
+    required this.fraction,
+    required this.color,
+    this.minBarPct,
+  });
+  final String label;
+  final int count;
+  final double fraction;
+  final Color color;
+  final double? minBarPct;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = fraction.isNaN ? 0.0 : fraction;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(label,
+                style: context.textTheme.labelSmall
+                    ?.copyWith(color: AppColors.textSecondary)),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: Stack(
+                children: [
+                  Container(
+                    height: 8,
+                    color: AppColors.surfaceHigh,
+                  ),
+                  FractionallySizedBox(
+                    widthFactor: f,
+                    child: Container(
+                      height: 8,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(colors: [
+                          color.withValues(alpha: 0.55),
+                          color,
+                        ]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 52,
+            child: Text(
+              '$count${minBarPct != null && minBarPct! > 0 ? ' · ${minBarPct!.toStringAsFixed(1)}%' : ''}',
+              textAlign: TextAlign.right,
+              style: context.textTheme.labelSmall
+                  ?.copyWith(color: color, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact rate chip used in card headers.
+class _RateChip extends StatelessWidget {
+  const _RateChip({required this.label, required this.pct, required this.color});
+  final String label;
+  final double pct;
   final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(value,
-              style: context.textTheme.titleMedium?.copyWith(color: color)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: context.textTheme.labelSmall
-                  ?.copyWith(color: AppColors.textTertiary)),
-        ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 0.6),
+      ),
+      child: Text(
+        '$label ${pct.toStringAsFixed(0)}%',
+        style: context.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Small label/value fact for the footer strip.
+class _MiniFact extends StatelessWidget {
+  const _MiniFact({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(value,
+            style: context.textTheme.titleSmall
+                ?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 1),
+        Text(label,
+            style: context.textTheme.labelSmall
+                ?.copyWith(color: AppColors.textTertiary, fontSize: 10)),
+      ],
+    );
+  }
+}
+
+class _DotDivider extends StatelessWidget {
+  const _DotDivider();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 3,
+      height: 3,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: const BoxDecoration(
+        color: AppColors.textTertiary,
+        shape: BoxShape.circle,
       ),
     );
   }

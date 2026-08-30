@@ -195,8 +195,8 @@ const copy = {
 /* ── 1. Templates: 7 styles + tracked CTA + unsubscribe ─────────── */
 console.log('\n— 1. Seven branded templates, tracked CTA + one-click unsubscribe —');
 {
-  ok(TEMPLATE_STYLES.length === 7 && TEMPLATE_STYLES.includes('editorial') && TEMPLATE_STYLES.includes('spotlight'),
-    'TEMPLATE_STYLES = 7 with editorial + spotlight', JSON.stringify(TEMPLATE_STYLES));
+  ok(TEMPLATE_STYLES.length === 10 && TEMPLATE_STYLES.includes('editorial') && TEMPLATE_STYLES.includes('spotlight') && TEMPLATE_STYLES.includes('aurora') && TEMPLATE_STYLES.includes('promo') && TEMPLATE_STYLES.includes('letter'),
+    'TEMPLATE_STYLES = 10 with editorial/spotlight/aurora/promo/letter', JSON.stringify(TEMPLATE_STYLES));
 
   const tracked = { campaignId: 'ai_t1_1', base: 'https://worker.test', wrap: true, unsub: true };
   const htmls = {};

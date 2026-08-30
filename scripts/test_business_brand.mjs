@@ -405,8 +405,8 @@ console.log('\n— 5. Template styles: five distinct branded renders —');
 
   const tracked = renderHtml(env, copy, { brand, track: { campaignId: 'c1' } });
   ok(tracked.includes('v1/t/o.png?c=c1&u=%7B%7Bopen_uid%7D%7D'), 'tracking pixel + merge-var token');
-  ok(normalizeStyle('newsletter') === 'classic' && normalizeStyle('offer') === 'bold' && normalizeStyle('story') === 'minimal'
-     && normalizeStyle('tip') === 'gradient' && normalizeStyle('announcement') === 'modern', 'legacy planner styles map');
+  ok(normalizeStyle('newsletter') === 'classic' && normalizeStyle('offer') === 'promo' && normalizeStyle('story') === 'letter'
+     && normalizeStyle('tip') === 'gradient' && normalizeStyle('announcement') === 'modern' && normalizeStyle('dark') === 'aurora', 'legacy + new planner styles map');
   ok(normalizeStyle('nonsense') === '' && normalizeStyle('') === '', 'unknown style rejected');
 
   // Fallback brand (no profile at all) still renders coherently
@@ -429,7 +429,7 @@ console.log('\n— 6. mergeProfilePatch + profileToFacts unit behavior —');
   const sender = resolveSender(env, brand);
   ok(sender.fromName === 'Co HQ', 'resolveSender: brand.fromName beats env', sender.fromName);
   ok(sender.replyTo === 'hi@co.in', 'resolveSender: profile contact_email → reply-to', sender.replyTo);
-  ok(SEND_CONCURRENCY >= 2 && SEND_CONCURRENCY <= 10, 'send concurrency sane', String(SEND_CONCURRENCY));
+  ok(SEND_CONCURRENCY >= 2 && SEND_CONCURRENCY <= 32, 'send concurrency sane', String(SEND_CONCURRENCY));
 
   const cfg = await mailConfigState(env, createStore(env));
   ok(cfg.sender.fromName === 'Nebula CRM', 'mailConfigState falls back to CRM name without profile');

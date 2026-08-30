@@ -730,9 +730,11 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
     const lookahead = lookaheadMs(env);
     const maxSync = parseInt(env.MAIL_MAX_SYNC || '5000', 10);
 
-    // 1) Refresh analytics + AI learnings when due
+    // 1) Refresh analytics + AI learnings when due (default every 4h so
+    //    provider-reported opens/clicks/unsubs reach the app the same day,
+    //    not a day later — owners watch engagement in near-real-time).
     let analyticsPulled = false;
-    if (await analyticsDue(store, parseInt(env.MAIL_ANALYTICS_INTERVAL_HOURS || '20', 10))) {
+    if (await analyticsDue(store, parseInt(env.MAIL_ANALYTICS_INTERVAL_HOURS || '4', 10))) {
       analyticsPulled = true;
       log.push('analytics: pulling campaign performance…');
       const snap = await collectAnalytics(mc, env, store, {

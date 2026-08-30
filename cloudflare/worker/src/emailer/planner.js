@@ -37,7 +37,8 @@ const PLAN_SCHEMA_PROMPT = `Return ONLY a JSON object:
      "goal": "what this email should achieve",
      "angle": "the creative angle/hook",
      "tone": "tone for this email",
-     "template_style": "modern|classic|bold|minimal|gradient|editorial|spotlight — pick what fits: offer/promo → bold, product/launch → spotlight, story → minimal or editorial, tip/how-to → gradient, news/announcement → modern, roundup → classic",
+     "template_style": "modern|classic|bold|minimal|gradient|editorial|spotlight|aurora|promo|letter — pick what fits: offer/discount → promo, product/launch → spotlight, story/personal → letter, tip/how-to → gradient, news/announcement → modern, roundup → classic, premium/invite/event → aurora, magazine → editorial, quiet update → minimal",
+     "design_notes": "styling/vibe the owner's own words demand (e.g. 'festive and energetic', 'dark premium', 'formal corporate', 'playful with emojis'). Omit when the owner gave no style direction.",
      "link_url": "OPTIONAL destination for the email's main button: the business website or main link from the brief. Omit to use the default."
    }
  ],
@@ -199,9 +200,10 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     `- sendAt must be in the future, between 08:00-20:00 in ${env.MAIL_TIMEZONE || 'Asia/Calcutta'}, never all at the same minute. EXCEPTION: urgent tasks (rule above) may send any time within the next 15 minutes.`,
     '- Vary angles across emails (story → proof → urgency, etc.).',
     '- Detect the campaign type (promotion, introduction, re-engagement, announcement, newsletter, follow-up) and let it shape the angles.',
+    '- OBEY the owner\'s styling commands: words like "festive", "dark", "premium", "formal", "playful", "colorful", "simple", "luxury", "urgent" map to template_style and design_notes — the copy and layout must feel the way the owner asked.',
     '- Reuse angles from the CREATIVE PLAYBOOK that are marked WINNER. Never repeat subjects of FLOP emails or of the recent campaign focus list.',
     '- The audience.segment MUST be one of the CRM statuses shown in contact_stats.segments, or null for everyone.',
-    `- template_style MUST be one of: ${TEMPLATE_STYLES.join('|')}. Pick per email goal (offer → bold, product/launch → spotlight, story → minimal or editorial, tip → gradient, announcement → modern, roundup → classic) and vary across emails.`,
+    `- template_style MUST be one of: ${TEMPLATE_STYLES.join('|')}. Pick per email goal (offer/discount → promo, product/launch → spotlight, story/personal → letter, tip → gradient, announcement → modern, roundup → classic, premium/invite/event → aurora) and vary across emails.`,
     '- link_url, when set, must be the business website / main link from the brief (https). Never invent domains that are not in the brief or memory.',
     '',
     PLAN_SCHEMA_PROMPT,
@@ -305,6 +307,9 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
       angle: String(e?.angle || 'Helpful update').slice(0, 300),
       tone: String(e?.tone || 'friendly, confident').slice(0, 120),
       template_style: String(e?.template_style || 'newsletter').slice(0, 40),
+      // Owner styling directives ("make it festive", "dark premium") flow
+      // into the copywriter so the wording AND the layout energy match.
+      design_notes: String(e?.design_notes || '').slice(0, 300),
       // Optional per-email button destination — only real http(s) URLs from
       // the owner's own links survive (renderHtml re-checks).
       link_url: /^https?:\/\//i.test(String(e?.link_url || '').trim()) ? String(e.link_url).trim().slice(0, 500) : '',

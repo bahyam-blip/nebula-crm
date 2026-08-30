@@ -40,8 +40,33 @@ export function openToken(campaignId, email) {
 const TRACK_PREFIX = 'track:';
 const MAX_UNIQUE = 5000;
 
+/**
+ * Shared engagement bookkeeping for opens/clicks/unsubs.
+ *
+ * Beyond the unique counter, the campaign doc carries a small "engagement
+ * evidence" block the app UI renders directly:
+ *   metrics.lastOpenAt / lastOpenEmail   — when + who opened last
+ *   metrics.lastClickAt / lastClickEmail — when + who clicked last
+ *   metrics.openedSample / clickedSample — up to 24 addresses (newest first)
+ * Owners kept asking "was it REALLY delivered? nobody is opening" — this
+ * turns an abstract counter into visible, human evidence.
+ */
+function bumpEngagement(metrics, kind, email, nowIso) {
+  metrics[kind === 'open' ? 'lastOpenAt' : 'lastClickAt'] = nowIso;
+  if (email) metrics[kind === 'open' ? 'lastOpenEmail' : 'lastClickEmail'] = email;
+  const sampleKey = kind === 'open' ? 'openedSample' : 'clickedSample';
+  const sample = Array.isArray(metrics[sampleKey]) ? metrics[sampleKey] : [];
+  const next = [{ email, at: nowIso }, ...sample.filter((s) => s.email !== email)];
+  metrics[sampleKey] = next.slice(0, 24);
+}
+
+/** token → email (best-effort; empty when the map has no entry). */
+async function emailForTokenQuiet(env, campaignId, token) {
+  try { return await emailForToken(env, campaignId, token); } catch { return ''; }
+}
+
 /** Record an open. Returns { ok, unique } — failures are logged, never thrown. */
-export async function recordOpen(env, campaignId, token) {
+export async function recordOpen(env, campaignId, token, { viaClick = false } = {}) {
   const out = { ok: false, unique: false };
   try {
     if (!env.DB || !campaignId || !/^[A-Za-z0-9_\-]{1,128}$/.test(campaignId)) return out;
@@ -76,6 +101,13 @@ export async function recordOpen(env, campaignId, token) {
     // opened", not "how many reloads happened"). Bump only on first open
     // so the counter can never run away from the unique set.
     if (out.unique) metrics.opens = (Number(metrics.opens) || 0) + 1;
+
+    // Engagement evidence — refresh the "who opened last" trail on EVERY
+    // accepted event (not just unique): re-opens are engagement too.
+    const nowIso = new Date().toISOString();
+    const email = await emailForTokenQuiet(env, campaignId, token);
+    bumpEngagement(metrics, 'open', email, nowIso);
+    if (viaClick && !metrics.openedVia) metrics.openedVia = 'click';
 
     const now = Date.now();
     await env.DB
@@ -126,12 +158,25 @@ export async function openStats(env, campaignId) {
 
 const CLICK_PREFIX = 'click:';
 
-/** Record a click. Returns { ok, unique } — failures never throw. */
+/**
+ * Record a click. Returns { ok, unique, openRecorded } — failures never throw.
+ *
+ * A click PROVES an open (the reader saw the email, scrolled and tapped),
+ * so the same token is folded into the open-uniques set when missing.
+ * Image-blocking clients otherwise undercount opens even for engaged
+ * readers — click-throughs keep the open metric honest.
+ */
 export async function recordClick(env, campaignId, token) {
-  const out = { ok: false, unique: false };
+  const out = { ok: false, unique: false, openRecorded: false };
   try {
     if (!env.DB || !campaignId || !/^[A-Za-z0-9_\-]{1,128}$/.test(campaignId)) return out;
     if (!token || token.length > 64 || /[^A-Za-z0-9_\-]/.test(token)) return out;
+
+    // Click implies open — fold into the open-uniques set first (if the
+    // pixel never fired, this is the reader's first counted open).
+    const openRes = await recordOpen(env, campaignId, token, { viaClick: true });
+    out.openRecorded = openRes.ok;
+
     const row = await env.DB
       .prepare("SELECT json FROM docs WHERE col = 'campaigns' AND id = ?")
       .bind(campaignId)
@@ -156,6 +201,10 @@ export async function recordClick(env, campaignId, token) {
     out.unique = uniques.length > before;
 
     if (out.unique) metrics.clicks = (Number(metrics.clicks) || 0) + 1;
+
+    const nowIso = new Date().toISOString();
+    const email = await emailForTokenQuiet(env, campaignId, token);
+    bumpEngagement(metrics, 'click', email, nowIso);
 
     const now = Date.now();
     await env.DB

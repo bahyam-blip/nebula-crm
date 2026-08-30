@@ -169,6 +169,12 @@ class CampaignMetrics extends Equatable {
     this.failed = 0,
     this.deferred = 0,
     this.revenue = 0,
+    this.lastOpenAt = '',
+    this.lastOpenEmail = '',
+    this.lastClickAt = '',
+    this.lastClickEmail = '',
+    this.openedSample = const [],
+    this.clickedSample = const [],
   });
 
   final int sent;
@@ -187,6 +193,24 @@ class CampaignMetrics extends Equatable {
   final int deferred;
   final double revenue;
 
+  // ── Engagement evidence (tracking pixel / click redirect) ──────
+  /// ISO timestamp of the most recent verified open — empty when none.
+  final String lastOpenAt;
+
+  /// Address that opened last (resolved server-side from the token map).
+  final String lastOpenEmail;
+  final String lastClickAt;
+  final String lastClickEmail;
+
+  /// Newest-first [{email, at}] engagement trail (up to 24 rows).
+  final List<Map<String, String>> openedSample;
+  final List<Map<String, String>> clickedSample;
+
+  /// True when ANY human engagement has been observed for this campaign —
+  /// the owner's "are these real deliveries?" answer at a glance.
+  bool get hasEngagement =>
+      opens > 0 || clicks > 0 || lastOpenAt.isNotEmpty || lastClickAt.isNotEmpty;
+
   /// Emails that did NOT reach an inbox: everything sent minus everything
   /// confirmed delivered. Falls back to failed+deferred when the sender
   /// didn't stamp a delivered count.
@@ -199,6 +223,20 @@ class CampaignMetrics extends Equatable {
   /// a hard `as int?` would throw for the whole metrics map.
   static int _int(dynamic v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
 
+  static String _str(dynamic v) => v == null ? '' : '$v';
+
+  static List<Map<String, String>> _sample(dynamic v) {
+    if (v is! List) return const [];
+    return v
+        .whereType<Map>()
+        .map((row) => {
+              'email': _str(row['email']),
+              'at': _str(row['at']),
+            })
+        .where((row) => row['email']!.isNotEmpty)
+        .toList();
+  }
+
   factory CampaignMetrics.fromMap(Map<String, dynamic> m) => CampaignMetrics(
         sent: _int(m['sent']),
         delivered: _int(m['delivered']),
@@ -210,6 +248,12 @@ class CampaignMetrics extends Equatable {
         failed: _int(m['failed']),
         deferred: _int(m['deferred']),
         revenue: (m['revenue'] as num?)?.toDouble() ?? 0,
+        lastOpenAt: _str(m['lastOpenAt']),
+        lastOpenEmail: _str(m['lastOpenEmail']),
+        lastClickAt: _str(m['lastClickAt']),
+        lastClickEmail: _str(m['lastClickEmail']),
+        openedSample: _sample(m['openedSample']),
+        clickedSample: _sample(m['clickedSample']),
       );
 
   Map<String, dynamic> toMap() => {

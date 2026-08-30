@@ -80,6 +80,9 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     'gradient': ('Gradient', 'Soft gradient card — tips & how-tos'),
     'editorial': ('Editorial', 'Magazine feel, serif type — thought pieces'),
     'spotlight': ('Spotlight', 'Product showcase cards — launches & features'),
+    'aurora': ('Aurora', 'Dark neon glow, premium — invites & luxury'),
+    'promo': ('Promo', 'Offer card with coupon chip — discounts & sales'),
+    'letter': ('Letter', 'Personal serif note from the founder — highest reply feel'),
   };
 
   @override

@@ -71,6 +71,8 @@ export async function writeEmail(env, task, planEmail, brief, learnings, memory 
     'THIS EMAIL:',
     JSON.stringify(planEmail),
     '',
+    `LAYOUT: this email renders in the "${planEmail.template_style || 'modern'}" template. Write copy that fits it: promo → punchy benefit-led lines and a concrete offer; letter → conversational, personal, first-person; aurora → bold vision language; minimal/editorial → thoughtful and quiet; spotlight → product features.`,
+    planEmail.design_notes ? `OWNER DESIGN DIRECTIVES (styling/vibe the owner asked for — honour them in wording, energy and angle): ${planEmail.design_notes}` : '',
     'CAMPAIGN CONTEXT:',
     `Owner task: ${task.instruction.slice(0, 500)}`,
     `Plan reasoning: ${String(task.plan?.reasoning || '').slice(0, 300)}`,
@@ -538,6 +540,155 @@ ${hiddenPreheader(copy)}
 </html>`;
 }
 
+/* ── Style 8: aurora — dark premium, glowing brand gradient ───── */
+function tplAurora(brand, copy, { personalize, pixel, cta, unsub }) {
+  const year = new Date().getUTCFullYear();
+  const dark = shade(brand.color, 0.72);
+  const near = shade(brand.color, 0.88);
+  const glow = tint(brand.color, 0.78);
+  const cards = copy.sections.map((s) => `
+      <tr><td style="padding:5px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${esc(near)};border:1px solid ${esc(shade(brand.color, 0.55))};border-radius:14px;">
+          <tr><td style="padding:16px 18px 14px 18px;">
+            <p style="margin:0 0 5px 0;font-size:14.5px;font-weight:700;color:${esc(glow)};">${esc(s.title)}</p>
+            <p style="margin:0;font-size:13.5px;line-height:1.65;color:#c3c9de;">${esc(s.body)}</p>
+          </td></tr>
+        </table>
+      </td></tr>`).join('');
+  const ctaBtn = cta ? `
+      <tr><td align="center" style="padding:26px 30px 8px 30px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td align="center" bgcolor="${esc(brand.color)}" style="border-radius:999px;box-shadow:0 0 24px ${esc(brand.color)}66;">
+            <a href="${esc(cta)}" style="display:inline-block;padding:15px 42px;font-family:Arial,Helvetica,sans-serif;font-size:15.5px;font-weight:800;color:#ffffff;text-decoration:none;border-radius:999px;">${esc(copy.cta_text)} →</a>
+          </td>
+        </tr></table>
+      </td></tr>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:#07080f;">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#07080f">
+<tr><td align="center" style="padding:26px 12px;">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#0d101d;border:1px solid ${esc(shade(brand.color, 0.5))};border-radius:22px;overflow:hidden;">
+    <tr><td style="background:linear-gradient(150deg,${esc(brand.color)}33 0%,#0d101d 55%);padding:34px 38px 24px 38px;" align="left">
+      ${brandMark(brand, { dark: true })}
+      <h1 style="margin:20px 0 0 0;font-size:29px;line-height:1.24;color:#ffffff;letter-spacing:-.4px;">${esc(copy.headline)}</h1>
+      <p style="margin:12px 0 0 0;font-size:15.5px;line-height:1.65;color:#aab1c9;">${esc(copy.intro)}</p>
+      ${salutationRow(personalize).replace('color:#374151', 'color:#8f97b4').replace('margin:0 0 6px 0', 'margin:16px 0 0 0')}
+    </td></tr>
+    ${ctaBtn}
+    <tr><td style="padding:16px 30px 8px 30px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${cards}</table>
+    </td></tr>
+    ${psRow(copy).replace('color:#6b7280;', 'color:#7c849f;').replace('border-top:1px solid #e5e7eb;', 'border-top:1px solid #232a44;')}
+    <tr><td style="padding:22px 38px 12px 38px;">${signatureBlock(brand, copy).replace(/color:#374151/g, 'color:#aab1c9').replace(/color:#111827/g, 'color:#ffffff')}</td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
+    <tr><td style="padding:18px 38px 24px 38px;border-top:1px solid #1c2340;">${footerBlock(brand, year, unsub).replace(/color:#9ca3af;/g, 'color:#5f6884;').replace(/color:#6b7280;/g, 'color:#6d7694;')}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/* ── Style 9: promo — offer card, coupon chip, urgency strip ───── */
+function tplPromo(brand, copy, { personalize, pixel, cta, unsub }) {
+  const year = new Date().getUTCFullYear();
+  const dark = shade(brand.color, 0.4);
+  const soft = tint(brand.color, 0.9);
+  const ctaBtn = cta ? `
+      <tr><td align="center" style="padding:24px 30px 4px 30px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td align="center" bgcolor="${esc(dark)}" style="border-radius:12px;">
+            <a href="${esc(cta)}" style="display:inline-block;padding:16px 46px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:800;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(copy.cta_text)} →</a>
+          </td>
+        </tr></table>
+      </td></tr>` : '';
+  const benefits = copy.sections.map((s) => `
+      <tr><td style="padding:7px 0;" valign="top">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td width="26" valign="top" style="font-size:15px;font-weight:800;color:${esc(brand.color)};">✓</td>
+          <td valign="top">
+            <p style="margin:0;font-size:14.5px;line-height:1.55;color:#1f2937;"><strong>${esc(s.title)}</strong> — ${esc(s.body)}</p>
+          </td>
+        </tr></table>
+      </td></tr>`).join('');
+  // The P.S. doubles as the offer/coupon line inside a dashed claim box.
+  const coupon = copy.ps ? `
+      <tr><td style="padding:18px 30px 0 30px;" align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:2px dashed ${esc(brand.color)};background:${esc(soft)};border-radius:12px;">
+          <tr><td align="center" style="padding:14px 18px;">
+            <p style="margin:0;font-size:14.5px;font-weight:700;color:${esc(dark)};letter-spacing:.2px;">${esc(copy.ps)}</p>
+          </td></tr>
+        </table>
+      </td></tr>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:${esc(soft)};">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${esc(soft)}">
+<tr><td align="center" style="padding:26px 12px;">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;">
+    <tr><td bgcolor="${esc(brand.color)}" align="center" style="padding:30px 36px 26px 36px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">${brandMark(brand, { dark: true })}</td></tr></table>
+      <h1 style="margin:18px 0 0 0;font-size:34px;line-height:1.18;color:#ffffff;letter-spacing:-.6px;">${esc(copy.headline)}</h1>
+      <p style="margin:12px 0 0 0;font-size:15.5px;line-height:1.6;color:rgba(255,255,255,.9);">${esc(copy.intro)}</p>
+    </td></tr>
+    <tr><td style="padding:22px 30px 0 30px;">
+      ${salutationRow(personalize)}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${benefits}</table>
+    </td></tr>
+    ${ctaBtn}${coupon}
+    <tr><td style="padding:22px 30px 12px 30px;">${signatureBlock(brand, copy)}</td></tr>
+    <tr><td style="padding:0;">${pixel}</td></tr>
+    <tr><td bgcolor="#111827" style="padding:18px 30px;">${footerBlock(brand, year, unsub).replace(/color:#9ca3af;/g, 'color:#8b91a0;')}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/* ── Style 10: letter — personal 1:1 note from the founder ─────── */
+function tplLetter(brand, copy, { personalize, pixel, cta, unsub }) {
+  const year = new Date().getUTCFullYear();
+  const serif = "Georgia,'Times New Roman',Times,serif";
+  const paras = copy.sections.map((s) => `
+      <p style="margin:0 0 14px 0;font-family:${serif};font-size:15.5px;line-height:1.8;color:#29303d;">${esc(s.body)}</p>`).join('');
+  const ctaRow = cta ? `
+      <p style="margin:18px 0 6px 0;font-family:${serif};font-size:15.5px;line-height:1.7;color:#29303d;">
+        <a href="${esc(cta)}" style="display:inline-block;padding:11px 26px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;background-color:${esc(brand.color)};">${esc(copy.cta_text)}</a>
+      </p>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>${headMeta(copy)}</head>
+<body style="margin:0;padding:0;background-color:#f6f4ef;">
+${hiddenPreheader(copy)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f6f4ef">
+<tr><td align="center" style="padding:28px 14px;">
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;background:#fffdf9;border:1px solid #e8e2d6;border-radius:10px;overflow:hidden;">
+    <tr><td style="padding:20px 34px;border-bottom:1px solid #eee7da;" align="left">
+      <span style="font-size:14px;font-weight:700;letter-spacing:.4px;color:#3d4454;">${esc(brand.name)}</span>
+    </td></tr>
+    <tr><td style="padding:30px 34px 8px 34px;">
+      ${salutationRow(personalize).replace('font-size:15.5px', `font-family:${serif};font-size:16px`).replace('color:#374151', 'color:#29303d')}
+      <p style="margin:0 0 14px 0;font-family:${serif};font-size:16px;line-height:1.8;color:#29303d;">${esc(copy.intro)}</p>
+      ${paras}${ctaRow}
+      <p style="margin:22px 0 0 0;font-family:${serif};font-size:15.5px;line-height:1.7;color:#29303d;">${esc(copy.closing)}</p>
+      <p style="margin:0 0 4px 0;font-family:${serif};font-size:16px;line-height:1.6;color:#111827;font-weight:700;">${esc(brand.signature)}</p>
+      ${copy.ps ? `<p style="margin:16px 0 0 0;font-family:${serif};font-size:13.5px;line-height:1.65;color:#7a7466;"><em>P.S. ${esc(copy.ps)}</em></p>` : ''}
+    </td></tr>
+    <tr><td style="padding:10px 34px 0 34px;">${pixel}</td></tr>
+    <tr><td style="padding:22px 34px 24px 34px;border-top:1px solid #eee7da;">${footerBlock(brand, year, unsub)}</td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
 const RENDERERS = {
   modern: tplModern,
   classic: tplClassic,
@@ -546,6 +697,9 @@ const RENDERERS = {
   gradient: tplGradient,
   editorial: tplEditorial,
   spotlight: tplSpotlight,
+  aurora: tplAurora,
+  promo: tplPromo,
+  letter: tplLetter,
 };
 
 /**
