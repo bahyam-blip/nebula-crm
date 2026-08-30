@@ -35,7 +35,7 @@ import { sarvamChat } from './sarvam.js';
 import { createStore, stateBackendName } from './state.js';
 import { getMemory, teach, memoryContext } from './memory.js';
 import { getBusinessProfile, saveBusinessProfile, brandFor, profileToFacts } from './business.js';
-import { mailConfigState } from './pipeline.js';
+import { mailConfigState, runWhenFree } from './pipeline.js';
 import { crmOverview, searchContacts, findMailerCampaigns } from './firestore.js';
 import { getLatestAnalytics } from './analytics.js';
 import { listTasks, newTask, putTask, progressOf, addEvent } from './tasks.js';
@@ -128,7 +128,7 @@ function safeCount(store) {
 }
 
 /** Execute one tool call. Returns a JSON-serialisable result for the model. */
-async function runTool(action, env, store, uid) {
+async function runTool(action, env, store, uid, ctx = { waitUntil: () => {} }) {
   const tool = String(action?.tool || '').trim();
   const args = action?.args && typeof action.args === 'object' ? action.args : {};
   switch (tool) {
@@ -180,10 +180,15 @@ async function runTool(action, env, store, uid) {
       const task = newTask(instruction, 'assistant', uid);
       addEvent(task, 'Queued by the AI assistant.', 'info');
       await putTask(store, task);
+      // Start planning NOW (retry politely while another run holds the lock)
+      // — a queued task that waits for the 5-min cron reads as "forgotten".
+      try {
+        ctx.waitUntil?.(runWhenFree(env, task.id).catch(() => {}));
+      } catch { /* kick is best-effort; the cron still picks it up */ }
       return {
         ok: true,
         taskId: task.id,
-        note: `Email task queued (${task.id}). The AI mailer will plan, write on-brand copy and deliver it; progress appears in the AI Email screen and via list_tasks.`,
+        note: `Email task queued and starting (${task.id}). The AI mailer plans, writes on-brand copy and delivers in live-tracked batches; progress appears in the AI Email screen and via list_tasks.`,
       };
     }
 
@@ -274,7 +279,7 @@ export async function handleAssistant(request, env, { uid, ctx = { waitUntil: ()
     for (let step = 0; step < MAX_STEPS; step++) {
       const out = await sarvamChat(env, convo, { json: true, temperature: 0.35, maxTokens: 2200 });
       if (out.action && out.action.tool) {
-        const result = await runTool(out.action, env, store, uid);
+        const result = await runTool(out.action, env, store, uid, ctx);
         actions.push({ tool: String(out.action.tool), ok: !!result.ok, summary: summarize(result) });
         convo.push({ role: 'user', content: `TOOL_RESULT (${out.action.tool}): ${JSON.stringify(result).slice(0, 3000)}\n\nContinue: reply to the user now, or chain ONE more tool if strictly necessary.` });
         continue;

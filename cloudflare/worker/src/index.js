@@ -19,7 +19,7 @@ import {
   teamMemberIds,
   sendToTokens,
 } from './push.js';
-import { handleMail, runMailCron, mailConfigState } from './emailer/pipeline.js';
+import { handleMail, runMailCron, mailConfigState, deliverInternal, verifyRunSig } from './emailer/pipeline.js';
 import { handleAssistant } from './emailer/assistant.js';
 import { handleDataRequest } from './data_http.js';
 import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
@@ -212,12 +212,12 @@ function unsubPage({ brandName, color, email, already = false }) {
 // ── Handler ──────────────────────────────────────────────────────
 
 export default {
-  /** ── Cron entrypoint (every 30 min via wrangler.toml [triggers]) ──
-   * Drives the AI mailer: refresh analytics, plan new owner tasks, create
-   * scheduled MailerCloud campaigns. No-ops cheaply when the mailer is
-   * not configured yet (see SETUP_INSTRUCTIONS → "AI mailer"). */
+  /** ── Cron entrypoint (every 5 min via wrangler.toml [triggers]) ──
+   * Drives the AI mailer: refresh analytics, plan new owner tasks, prepare
+   * due emails and kick their chunked delivery chains. No-ops cheaply when
+   * the mailer is not configured yet (see SETUP_INSTRUCTIONS → "AI mailer"). */
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runMailCron(env));
+    ctx.waitUntil(runMailCron(env, ctx));
   },
 
   async fetch(request, env, ctx) {
@@ -281,6 +281,21 @@ export default {
         status: 200,
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
       });
+    }
+
+    // ── Delivery chain self-invocation (HMAC-signed, no Firebase auth) ──
+    // Large campaigns are delivered across MANY short worker invocations —
+    // each fetch gets a fresh subrequest budget (the free plan caps a single
+    // invocation at 50; a 200-recipient 1:1 blast needs 200+ requests). The
+    // proof is HMAC(action|taskId|seq, MAILERCLOUD_API_KEY): the key never
+    // leaves the worker, so no outsider can forge a kick, and a replay is
+    // harmless (the sent-ledger makes every chunk idempotent).
+    if (request.method === 'POST' && path === '/v1/mail/deliver') {
+      const sig = request.headers.get('x-nebula-deliver') || '';
+      const body = await request.json().catch(() => ({}));
+      const legit = await verifyRunSig(env, `${body.action || 'chunk'}|${body.taskId || ''}|${body.seq ?? ''}`, sig);
+      if (!legit) return json({ error: 'forbidden' }, 403);
+      return deliverInternal(env, body, ctx);
     }
 
     // ── Read ──

@@ -33,8 +33,11 @@ export async function fetchCrmContacts(env, { max = 5000 } = {}) {
   let afterId = null;
 
   // Keyset pagination on (team_id, id) keeps pages stable and cheap.
+  // 500 rows/page ≈ 300KB — well under D1's per-query result cap, and few
+  // enough queries that a 9,000-contact pull (19 pages) fits the worker's
+  // subrequest budget alongside everything else a pipeline run does.
   while (out.length < max) {
-    const pageSize = Math.min(300, max - out.length + 100);
+    const pageSize = Math.min(500, max - out.length + 100);
     let sql = "SELECT id, json FROM docs WHERE col = 'contacts'";
     const args = [];
     if (teamFilter) {

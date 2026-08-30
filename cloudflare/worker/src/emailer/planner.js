@@ -186,12 +186,15 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     task.instruction,
     '',
     'RULES:',
-    '- Respect any explicit email count, recipient count, dates or deadlines in the task.',
+    '- Respect any explicit email count, recipient count, dates or deadlines in the task. The engine also enforces these deterministically — your numbers must match the owner\'s words, not your own preference.',
+    '- SINGULAR MEANS ONE: "send a marketing email to 200 contacts" is ONE email to 200 people — plan exactly 1 email. Only plan a multi-email sequence when the owner asks for a series, follow-ups, or an email count of 2 or more.',
+    '- "200 emails/contacts from the contacts" means 200 RECIPIENTS, not 200 separate campaigns. Set audience.max_recipients to the number the owner gave.',
+    '- "from the contacts" / "from my contacts" (no status word) means the WHOLE contacts list — audience.segment MUST be null. Only set a segment when the owner names a status (leads/customers/subscribers…).',
     '- If the task names specific email addresses, list them in explicit_recipients EXACTLY as written (they are sent to directly, bypassing the segment).',
     '- URGENCY: if the task says "right away", "now", "immediately", "asap" or "today", the FIRST email must go out within 15 minutes of the current time. Never push an urgent task days into the future.',
-    '- If the task does NOT mention a date/time/day/urgency, keep every sendAt within the next 48 hours — owners expect action, not a distant reservation.',
-    '- Only schedule beyond 48 hours when the task explicitly says so ("next Monday", "3 emails over 2 weeks", a named date).',
-    '- If the task gives no count, choose 1-3 emails spaced 2-5 days apart.',
+    '- If the task does NOT mention a date/time/day/urgency, treat it as immediate: first sendAt within 10 minutes. Owners expect action, not a distant reservation.',
+    '- Only schedule beyond 48 hours when the task explicitly says so ("next Monday", "3 emails over 2 weeks", a named date, "at 6pm", "tonight").',
+    '- If the task gives no count, choose 1-2 emails spaced 2-5 days apart — when in doubt, 1.',
     `- If the task gives no recipient count, cap at ${contactStats.total}.`,
     `- sendAt must be in the future, between 08:00-20:00 in ${env.MAIL_TIMEZONE || 'Asia/Calcutta'}, never all at the same minute. EXCEPTION: urgent tasks (rule above) may send any time within the next 15 minutes.`,
     '- Vary angles across emails (story → proof → urgency, etc.).',
@@ -220,6 +223,26 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
   const total = contactStats.total || 0;
   plan.audience = plan.audience || {};
   plan.audience.max_recipients = Math.max(1, Math.min(parseInt(plan.audience?.max_recipients, 10) || total, total || 1));
+
+  // ── Deterministic owner-intent extraction ─────────────────────
+  // The model drifts on counts and segments; the owner's WORDS do not.
+  // These overrides run after the model so "send a marketing email to 200
+  // emails from the contacts now" ALWAYS resolves to 1 email × 200
+  // recipients × everyone × immediate — whatever the model guessed.
+  const intent = parseOwnerIntent(task.instruction);
+  if (intent.recipients !== null) {
+    if (intent.recipients === 'all') {
+      plan.audience.max_recipients = Math.max(1, total || plan.audience.max_recipients);
+      plan.audience.segment = null;
+    } else {
+      plan.audience.max_recipients = Math.max(1, Math.min(intent.recipients, total || intent.recipients));
+      if (intent.segment !== undefined) plan.audience.segment = intent.segment;
+    }
+    // The owner's OWN WORDS named a count — the frequency cap yields to it
+    // (recently-emailed contacts may be included to reach the number).
+    plan.audience.owner_specified = true;
+  }
+  if (intent.emailCount) plan.emails = forceEmailCount(plan.emails, intent.emailCount);
   if (Array.isArray(plan.audience.segment)) plan.audience.segment = plan.audience.segment[0];
   if (plan.audience.segment != null) {
     const seg = String(plan.audience.segment).toLowerCase().trim();
@@ -246,9 +269,9 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
   plan.explicit_recipients = plan.explicit_recipients.slice(0, 100);
 
   const emails = Array.isArray(plan.emails) ? plan.emails.slice(0, 10) : [];
-  const base = Date.now() + 30 * 60 * 1000; // earliest send: 30 min from now
+  const base = Date.now() + 5 * 60 * 1000; // earliest send: 5 min from now
   const URGENT_RE = /right away|immediately|asap|urgent|send now|\bnow\b/i;
-  const SCHEDULED_RE = /tomorrow|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|this weekend|later|\d{4}-\d{2}-\d{2}|in \d+ (day|days|week|weeks)/i;
+  const SCHEDULED_RE = /tomorrow|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|this weekend|later|\d{4}-\d{2}-\d{2}|in \d+ (day|days|week|weeks|hour|hours|minute|minutes)|at \d{1,2}(:\d{2})?\s*(am|pm)|tonight|this (morning|afternoon|evening)/i;
   const instruction = String(task.instruction || '');
   const urgent = URGENT_RE.test(instruction);
   const explicitlyScheduled = SCHEDULED_RE.test(instruction);
@@ -257,16 +280,24 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
     let t = Date.parse(e?.sendAt);
     if (!Number.isFinite(t)) t = base + i * 48 * 3600 * 1000;
     // Urgent: the first email leaves within minutes, whatever the model chose.
-    if (urgent && i === 0) t = Date.now() + (2 + Math.floor(Math.random() * 6)) * 60 * 1000;
+    if (urgent && i === 0) t = Date.now() + (2 + Math.floor(Math.random() * 4)) * 60 * 1000;
     // No scheduling language and the model drifted days out → pull it back.
     // (Multi-day drift made owners believe sends were lost.) Later emails in
     // the sequence space 48h apart — matching the "spaced 2-5 days" rule and
-    // staying OUTSIDE the runner's 26h lookahead so a sequence never fires
+    // staying OUTSIDE the runner's lookahead so a sequence never fires
     // as one blast.
-    else if (!explicitlyScheduled && t - Date.now() > 48 * 3600 * 1000) {
+    else if (!explicitlyScheduled && !intent.emailCount && t - Date.now() > 48 * 3600 * 1000) {
       t = base + i * 48 * 3600 * 1000;
     }
-    t = Math.max(t, base + i * 60 * 60 * 1000);
+    // Floor: urgent first emails leave NOW (the old code floored them back
+    // up to +30 min, which owners read as "queued and forgotten"); otherwise
+    // 5 min + 5 min per sequence step. The pipeline executes any email whose
+    // send time is within the lookahead window, so a near-time floor means
+    // the campaign genuinely leaves within minutes of the ask.
+    const floor = urgent && i === 0
+      ? Date.now() + 2 * 60 * 1000
+      : Date.now() + (5 + i * 5) * 60 * 1000;
+    t = Math.max(t, floor);
     return {
       seq: i + 1,
       sendAt: new Date(t).toISOString(),
@@ -281,4 +312,101 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
   });
   if (plan.emails.length === 0) throw new Error('AI plan contained no emails');
   return plan;
+}
+
+/* ── Deterministic intent parsing ─────────────────────────────────────
+ * Owners write "send a marketing email to 200 emails from the contacts
+ * now". The model sometimes turns that into a 3-email sequence to 200
+ * leads at +30 min. These regexes read the owner's literal words and the
+ * pipeline enforces them AFTER the model — numbers win, every time. */
+
+const UNIT_STATUS = {
+  contacts: null, contact: null, emails: null, email: null, people: null,
+  person: null, subscribers: 'subscriber', subscriber: 'subscriber',
+  leads: 'lead', lead: 'lead', customers: 'customer', customer: 'customer',
+  recipients: null, recipient: null, users: null, user: null, addresses: null, address: null,
+};
+
+/** number | 'all' | null; segment override when the unit names a status. */
+export function parseOwnerIntent(instruction) {
+  const t = String(instruction || '').toLowerCase().replace(/,/g, ' ');
+  const out = { recipients: null, segment: undefined, emailCount: 0 };
+
+  // "all contacts" / "everyone" / "entire list" / "hundreds of contacts"
+  if (
+    /\b(?:all|every|each|entire|whole)\s+(?:of\s+)?(?:my\s+|the\s+)?(?:contacts?|subscribers?|lists?|audience|people|database)\b/.test(t) ||
+    /\beveryone\b/.test(t) ||
+    /\bhundreds?\s+of\b/.test(t) ||
+    /\bthousands?\s+of\b/.test(t)
+  ) {
+    if (/hundreds?\s+of/.test(t)) out.recipients = 500;
+    else if (/thousands?\s+of/.test(t)) out.recipients = 5000;
+    else out.recipients = 'all';
+  }
+
+  // "to 200 emails" / "to 200 contacts" / "200 leads" — recipient count.
+  let unitWasEmail = false;
+  if (out.recipients === null) {
+    const m = t.match(
+      /\b(?:to\s+)?(\d{1,5})\s*(?:\+)?\s*(emails?|contacts?|people|persons?|subscribers?|recipients?|customers?|leads?|users?|addresses?)\b/
+    );
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const unit = m[2];
+      const contactsContext = /\b(?:contacts?|subscribers?|leads|customers?|list|audience|database|crm)\b/.test(t);
+      const isRecipientMention =
+        /\bto\s+\d+\b/.test(t) || // "send to 200 emails …"
+        /\b(?:from|of|in)\s+(?:the\s+|my\s+)?(?:contacts?|crm|list|database)\b/.test(t) || // "… from the contacts"
+        contactsContext || // "… to my contacts"
+        (unit !== 'email' && unit !== 'emails'); // "500 leads", "200 contacts" are always recipients
+      if (isRecipientMention) {
+        out.recipients = n;
+        unitWasEmail = unit === 'email' || unit === 'emails';
+        if (unit in UNIT_STATUS) out.segment = UNIT_STATUS[unit];
+      }
+    }
+  }
+
+  // Email COUNT: "3 emails over 2 weeks", "send 2 emails" — but NOT
+  // "to 200 emails" (that's recipients) and not singular phrasing here
+  // (singular is handled below so "a marketing email" = 1).
+  const countM = t.match(/(?<!\bto\s)(?<!\bto\s\s)(\d{1,2})\s*(?:more\s+)?emails?\b/);
+  if (countM) out.emailCount = Math.max(1, Math.min(parseInt(countM[1], 10), 10));
+  else if (
+    /\b(?:a|an|one|single)\s+(?:marketing\s+|promotional\s+|introduct(?:ion|ory)\s+|follow[\s-]?up\s+|announcement\s+|welcome\s+|newsletter\s+)?emails?\b/.test(t) &&
+    !/\b(?:and|then|after that|follow[\s-]?ups?|sequence|series|second|third|another)\b.{0,30}\bemails?\b/.test(t)
+  ) {
+    out.emailCount = 1;
+  }
+  // "send 10 emails to my contacts" — the N is RECIPIENTS; one blast,
+  // unless the owner clearly asked for a series ("over 2 weeks", "sequence”).
+  if (
+    unitWasEmail && typeof out.recipients === 'number' &&
+    !/\b(?:over|across|during|series|sequence|follow[\s-]?ups?)\b/.test(t)
+  ) {
+    out.emailCount = 1;
+  }
+  return out;
+}
+
+/** Trim or extend the AI's email list to exactly the owner's count. */
+function forceEmailCount(emails, count) {
+  const list = Array.isArray(emails) ? emails.filter(Boolean) : [];
+  if (count <= 0) return list;
+  if (list.length > count) return list.slice(0, count);
+  while (list.length < count) {
+    const last = list[list.length - 1];
+    const i = list.length;
+    const at = last?.sendAt ? Date.parse(last.sendAt) : Date.now() + i * 48 * 3600e3;
+    list.push({
+      seq: i + 1,
+      sendAt: new Date(Number.isFinite(at) ? at + 48 * 3600e3 : Date.now() + i * 48 * 3600e3).toISOString(),
+      goal: last?.goal || 'Continue the conversation',
+      angle: last?.angle || 'Follow-up with a fresh angle',
+      tone: last?.tone || 'friendly, confident',
+      template_style: last?.template_style || 'modern',
+      link_url: last?.link_url || '',
+    });
+  }
+  return list;
 }

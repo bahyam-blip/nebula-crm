@@ -68,6 +68,16 @@ function kvMock() {
 }
 
 const captured = { sends: [], templates: [], batches: [], campaigns: [] };
+// Delivery chain self-invocation shim (chunked sending, see pipeline.js).
+let LIVE_ENV = null;
+const kickQueue = [];
+async function drainKicks() {
+  let guard = 0;
+  while (kickQueue.length && guard++ < 500) {
+    const batch = kickQueue.splice(0);
+    await Promise.allSettled(batch);
+  }
+}
 const contactsInCrm = [
   { name: 'Asha Rao', email: 'asha@example.com', status: 'lead', company: 'Acme' },
   { name: 'Vik Singh', email: 'vik@example.com', status: 'customer', company: 'Globex' },
@@ -80,6 +90,12 @@ globalThis.fetch = async (url, init = {}) => {
   const u = String(url instanceof Request ? url.url : url);
   const body = typeof init.body === 'string' ? init.body : '';
 
+  if (u === 'https://worker.test/v1/mail/deliver') {
+    const payload = JSON.parse(body);
+    const res = await deliverInternal(LIVE_ENV, payload, { waitUntil: (p) => kickQueue.push(Promise.resolve(p).catch(() => {})) });
+    await drainKicks();
+    return jsonRes(res.status, await res.json().catch(() => ({})));
+  }
   if (u.startsWith('https://oauth2.googleapis.com/token')) {
     return jsonRes(200, { access_token: 'mock-oauth-token', expires_in: 3600 });
   }
@@ -148,7 +164,7 @@ function fsVal(v) {
 }
 
 /* ── Modules under test ─────────────────────────────────────────── */
-const { handleMail, runPipeline, mailConfigState } = await import(
+const { handleMail, runPipeline, mailConfigState, deliverInternal } = await import(
   '../cloudflare/worker/src/emailer/pipeline.js'
 );
 const { createStore } = await import('../cloudflare/worker/src/emailer/state.js');
@@ -168,7 +184,7 @@ async function makeEnv() {
       tags: [], segments: [], createdAt: '2026-08-01T10:00:00.000Z', teamId: 'default-team',
     });
   }
-  return {
+  const env = {
     DB: db,
     FIREBASE_PROJECT_ID: 'p',
     FIREBASE_SERVICE_ACCOUNT: JSON.stringify(serviceAccount),
@@ -183,7 +199,10 @@ async function makeEnv() {
     MAIL_SENDER_EMAIL: 'das@aidraft.bond',
     MAIL_RUN_RETRY_MS: '20',
     MAIL_ANALYTICS_INTERVAL_HOURS: '24',
+    MAIL_SELF_URL: 'https://worker.test',
   };
+  LIVE_ENV = env;
+  return env;
 }
 
 async function call(env, method, path, body, uid = 'user_123') {
@@ -342,6 +361,7 @@ console.log('\n— 4. Pipeline send: branded, named, individual —');
 
   const tasks = (await call(env, 'GET', '/v1/mail/tasks')).json.tasks;
   const t = tasks.find((x) => x.id === created.json.task.id);
+  if (t?.emails?.[0]?.status !== 'sent') console.log('    [brand-debug]', JSON.stringify({ status: t?.status, emails: t?.emails?.map((e) => ({ s: e.status, err: e.error, d: e.delivery })) }));
   ok(t?.status === 'done' && t.emails[0].status === 'sent', 'task done + email sent', `${t?.status}/${t?.emails?.[0]?.status}`);
 
   const apiSends = captured.sends.filter((s) => s.url.endsWith('/email-api'));

@@ -209,11 +209,18 @@ export async function clickStats(env, campaignId) {
 const UNSUB_PREFIX = 'unsub:';
 const TOKENS_PREFIX = 'tokens:';
 
-/** Store the token→email map for a campaign (called once per send). */
+/**
+ * Store the token→email map for a campaign (called per send batch).
+ * MERGES into the existing map: delivery now runs in chunks (each chunk
+ * adds its own batch of tokens), and an overwrite would erase earlier
+ * batches — breaking unsubscribe attribution for everyone already emailed.
+ */
 export async function saveTokenMap(env, campaignId, map) {
   try {
     if (!env.DB || !campaignId || !map || typeof map !== 'object') return false;
-    const entries = Object.entries(map).slice(0, MAX_UNIQUE);
+    const existing = await emailForTokenAll(env, campaignId);
+    const merged = { ...existing, ...map };
+    const entries = Object.entries(merged).slice(0, MAX_UNIQUE);
     if (!entries.length) return false;
     await env.DB
       .prepare(
@@ -227,6 +234,20 @@ export async function saveTokenMap(env, campaignId, map) {
   } catch (e) {
     console.warn(`[track] token map save failed (${campaignId}): ${e?.message || e}`);
     return false;
+  }
+}
+
+/** Full token→email map for a campaign (empty on any failure). */
+async function emailForTokenAll(env, campaignId) {
+  try {
+    if (!env.DB || !campaignId) return {};
+    const row = await env.DB
+      .prepare("SELECT json FROM docs WHERE col = 'mail_state' AND id = ?")
+      .bind(TOKENS_PREFIX + campaignId)
+      .first();
+    return row ? (JSON.parse(row.json) || {}) : {};
+  } catch {
+    return {};
   }
 }
 

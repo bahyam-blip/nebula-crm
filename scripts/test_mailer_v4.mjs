@@ -78,6 +78,17 @@ function kvMock() {
 }
 
 const captured = { campaigns: [], activities: [], sends: [], templates: [], batches: [] };
+// The delivery chain calls ITSELF at MAIL_SELF_URL; the mock routes that
+// into the real deliverInternal and drains nested kicks synchronously.
+let LIVE_ENV = null;
+const kickQueue = [];
+async function drainKicks() {
+  let guard = 0;
+  while (kickQueue.length && guard++ < 500) {
+    const batch = kickQueue.splice(0);
+    await Promise.allSettled(batch);
+  }
+}
 let lastSarvamEffort = 'unset'; // remembers the reasoning_effort of the last non-starved call
 let failStateFetch = false; // regression toggle: make Firestore state reads throw
 let contactsInCrm = [
@@ -100,6 +111,12 @@ globalThis.fetch = async (url, init = {}) => {
   const u = String(url instanceof Request ? url.url : url);
   const body = typeof init.body === 'string' ? init.body : '';
 
+  if (u === 'https://worker.test/v1/mail/deliver') {
+    const payload = JSON.parse(body);
+    const res = await deliverInternal(LIVE_ENV, payload, { waitUntil: (p) => kickQueue.push(Promise.resolve(p).catch(() => {})) });
+    await drainKicks();
+    return jsonRes(res.status, await res.json().catch(() => ({})));
+  }
   if (u.startsWith('https://oauth2.googleapis.com/token')) {
     return jsonRes(200, { access_token: 'mock-oauth-token', expires_in: 3600 });
   }
@@ -224,7 +241,7 @@ function fsToPlain(fields) {
 
 /* ── Module under test (import AFTER fetch mock is installed) ───── */
 
-const { handleMail, runPipeline, mailConfigState } = await import(
+const { handleMail, runPipeline, mailConfigState, deliverInternal } = await import(
   '../cloudflare/worker/src/emailer/pipeline.js'
 );
 const { createStore } = await import('../cloudflare/worker/src/emailer/state.js');
@@ -243,7 +260,7 @@ async function makeEnv() {
       teamId: 'default-team',
     });
   }
-  return {
+  const env = {
     DB: db,
     FIREBASE_PROJECT_ID: 'nebula-crm-70f58',
     FIREBASE_SERVICE_ACCOUNT: JSON.stringify(serviceAccount),
@@ -258,7 +275,10 @@ async function makeEnv() {
     MAIL_SENDER_EMAIL: 'das@aidraft.bond',
     MAIL_RUN_RETRY_MS: '20',
     MAIL_ANALYTICS_INTERVAL_HOURS: '24',
+    MAIL_SELF_URL: 'https://worker.test',
   };
+  LIVE_ENV = env;
+  return env;
 }
 
 async function call(env, method, path, body, uid = 'user_123') {
@@ -381,10 +401,10 @@ console.log('\n— 3. Task lifecycle: plan → write → send → write-back →
   ok(t.emails[0].subject === 'Your monsoon brew is ready', 'subject recorded');
   ok(t.progress.total === 2 && t.progress.done === 1 && t.progress.pending === 1, 'progress computed', JSON.stringify(t.progress));
   // The owner gave no scheduling language, so the 3-day-out email 2 is
-  // pulled back to ~base+48h (30 min + 2 days) — still OUTSIDE the runner's
-  // 26h lookahead, i.e. it can never fire as an immediate second blast.
+  // pulled back to ~base+48h (5 min + 2 days) — still OUTSIDE the runner's
+  // lookahead window, i.e. it can never fire as an immediate second blast.
   const nextMs = Date.parse(t.progress.nextSendAt || '');
-  const wantMs = Date.now() + (30 * 60 + 48 * 3600) * 1000;
+  const wantMs = Date.now() + (5 * 60 + 48 * 3600) * 1000;
   ok(
     Number.isFinite(nextMs) && Math.abs(nextMs - wantMs) < 15 * 60 * 1000,
     'nextSendAt pulled back to ~+48h30m (outside lookahead)',
@@ -398,7 +418,7 @@ console.log('\n— 3. Task lifecycle: plan → write → send → write-back →
   ok(!!send && send.url.endsWith('/email-api'), 'delivered via Email API /email-api (transactional)');
   ok(send.body.version === '1.0' && send.body.email.from === 'das@aidraft.bond', 'send body: version 1.0 + verified sender');
   ok(send.body.email.recipients.to.length === 1 && send.body.email.recipients.to[0].merge_vars, 'mail merge per recipient');
-  ok(captured.batches.length >= 1, 'audience synced to MailerCloud list');
+  ok(captured.batches.length === 0, 'no master-list sync needed for private 1:1 transactional sends');
   ok(captured.templates.length === 1, 'template saved to MailerCloud library');
 
   // campaign doc written back to the CRM database (D1) with extras
@@ -554,6 +574,7 @@ console.log('\n— 8. Dry-run safety: pipeline plans but never sends —');
   const created = await call(env, 'POST', '/v1/mail/tasks', { instruction: 'Anything' });
   await drain(created.waits);
   const t = (await call(env, 'GET', '/v1/mail/tasks')).json.tasks.find((x) => x.id === created.json.task.id);
+  if (t.emails[0].status !== 'dry_run') console.log('    [dry-run debug]', JSON.stringify({ status: t.emails[0].status, err: t.emails[0].error, sendAt: t.emails[0].sendAt, exec: t.emails[0].exec || null, now: new Date().toISOString(), events: t.events.map((e) => e.text) }));
   ok(t.emails[0].status === 'dry_run', 'due email marked dry_run (nothing delivered)');
   ok(captured.sends.length === 0, 'zero provider sends in dry-run mode');
   await storeOf(env).delete('mail:dry_run_override');

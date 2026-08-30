@@ -11,10 +11,20 @@
  *   transactional — MailerCloud Email API (email-api.mailercloud.com),
  *                   personalized per recipient ({{first_name}} mail merge),
  *                   immediate + per-recipient outcomes. Used for audiences
- *                   up to MAIL_TRANSACTIONAL_MAX (default 250) in auto mode,
+ *                   up to MAIL_TRANSACTIONAL_MAX (default 1000) in auto mode,
  *                   and ALWAYS for /v1/mail/test.
- *   campaign      — Marketing API scheduled campaign (right tool for the
- *                   full list: opens/clicks/unsubs tracking at scale).
+ *   campaign      — Marketing API scheduled campaign on a DEDICATED
+ *                   per-campaign list (right tool for 1000s+).
+ *
+ * SCALE MODEL (Cloudflare Workers cap subrequests per invocation — 50 on
+ * the free plan): nothing large sends inline any more. runPipeline only
+ * PLANS + PREPARES (AI copy, audience, tracked HTML). Each email is then
+ * delivered by a CHAIN of short worker invocations, each with a fresh
+ * subrequest budget: POST /v1/mail/deliver (HMAC-signed self-call) sends
+ * the next ≤MAIL_SEND_CHUNK private 1:1 emails, persists the sent-ledger
+ * + live progress, and re-invokes itself until done. A killed chain
+ * resumes from the ledger (never double-sends); the 5-min cron and the
+ * app's task polling both re-kick stalled chains.
  *
  * Routes (all require a Firebase ID token — every signed-in teammate may use
  * the mailer; the AI mailer is a product feature, not an admin panel):
@@ -33,10 +43,11 @@
  *   POST   /v1/mail/memory          teach it {facts:{...}, note:"free text"}
  *   POST   /v1/mail/memory/reset    wipe the memory
  *
- * Cron: every 30 min (wrangler.toml) → runPipeline. Emails whose send time
- * falls within MAIL_LOOKAHEAD_HOURS (default 26) are delivered: small
- * audiences immediately via the Email API (at the AI-chosen minute ± cron
- * drift), large ones as scheduled MailerCloud campaigns.
+ * Cron: every 5 min (wrangler.toml) → runPipeline. Emails whose send time
+ * falls within MAIL_LOOKAHEAD_MINUTES (default 10) are prepared and their
+ * delivery chain kicked: small audiences via the Email API (private 1:1,
+ * chunked), large ones as scheduled MailerCloud campaigns on a dedicated
+ * list.
  *
  * State (tasks, locks, analytics cache) lives in Workers KV when the
  * binding exists, otherwise directly in Firestore — see state.js. Either
@@ -482,6 +493,26 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
 
     case sub === '/tasks' && request.method === 'GET': {
       const tasks = await listTasks(store);
+      // Opportunistic resume: while the app is open and polling, a due
+      // email whose delivery chain died (device closed mid-blast, worker
+      // eviction) gets a fresh chain kicked — no waiting for the cron.
+      // Throttled to one attempt per 45s and skipped while the planning
+      // lock is held; chunk chains themselves carry their own locks.
+      try {
+        const lookahead = lookaheadMs(env);
+        const due = tasks.some((t) => t.status === 'active' && (t.emails || []).some((m) =>
+          (m.status === 'planned' || m.status === 'sending') &&
+          Date.parse(m.sendAt) - Date.now() <= lookahead));
+        if (due) {
+          const last = safeParse(await store.get('mail:last_run'), null);
+          const idle = !last || Date.now() - Date.parse(last.at || 0) > 45 * 1000;
+          const lock = await store.get('mail:lock');
+          const lockFree = !lock || Date.now() - Number(lock) > 4 * 60 * 1000;
+          if (idle && lockFree && ctx?.waitUntil) {
+            ctx.waitUntil(runWhenFree(env, null, 1).catch(() => {}));
+          }
+        }
+      } catch { /* resume is best-effort */ }
       return json({ count: tasks.length, tasks: tasks.map((t) => ({ ...t, progress: progressOf(t) })) });
     }
 
@@ -580,7 +611,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * Run the pipeline as soon as the run-lock frees. A brand-new task should
  * start planning within seconds, not wait for the next cron tick — but if
  * another run is mid-flight we retry politely instead of force-stealing
- * the lock (overlapping runs could double-send).
+ * the lock (overlapping runs could double-plan). Planning runs are short
+ * now (delivery happens in separate chunk invocations), so 8 × 12s is
+ * ample; the 5-min cron is the safety net.
  */
 /** True when an error is a provider rate/quota wall — retrying only adds pressure. */
 function isQuotaError(e) {
@@ -588,34 +621,51 @@ function isQuotaError(e) {
   return /429|RESOURCE_EXHAUSTED|Quota exceeded|rate limit/i.test(m);
 }
 
-async function runWhenFree(env, onlyTaskId, attempts = 5) {
+export async function runWhenFree(env, onlyTaskId, attempts = 8) {
   for (let i = 0; i < attempts; i++) {
     const r = await runPipeline(env, { trigger: 'task', onlyTaskId }).catch((e) => {
       console.error('[mailer] background run failed:', e.message);
       return { error: e.message };
     });
-    // A quota/rate wall means Google is actively throttling the project:
+    // A quota/rate wall means the provider is actively throttling the project:
     // hammering it again in 12s turns one outage into a longer one. Bail out
     // and let the next cron tick (or the owner's manual run) take over.
     if (r?.error && isQuotaError({ message: r.error })) {
       console.warn('[mailer] background run aborted — provider quota/rate wall:', r.error);
       return { skipped: true, reason: `aborted on quota: ${r.error}` };
     }
-    if (!r?.skipped) return r;
+    if (!r?.skipped) {
+      // The kick fetches were started inside runPipeline; hold them so a
+      // returning HTTP response can't cancel the first delivery chunk.
+      await Promise.allSettled((r.kicks || []).filter(Boolean));
+      return r;
+    }
     await sleep(parseInt(env.MAIL_RUN_RETRY_MS || '12000', 10)); // lock held — retry
   }
   return { skipped: true, reason: 'pipeline stayed busy; the cron will pick this task up' };
 }
 
-/** Cron entry — called from the worker's scheduled() handler. */
-export async function runMailCron(env) {
-  if (stateBackendName(env) === 'none') return; // no KV, no Firestore — stay silent & cheap
+/** Cron entry — called from the worker's scheduled() handler (every 5 min). */
+export async function runMailCron(env, ctx = null) {
+  if (stateBackendName(env) === 'none') return; // no KV, no D1 — stay silent & cheap
   // Owner kill-switch: MAIL_CRON_ENABLED=false stops ALL autonomous runs
-  // (Firestore pressure, sends) while keeping the app's manual controls.
+  // (database pressure, sends) while keeping the app's manual controls.
   if (String(env.MAIL_CRON_ENABLED ?? 'true').toLowerCase() === 'false') return;
   const state = await mailConfigState(env);
   if (!state.ready) return;
-  await runPipeline(env, { trigger: 'cron' }).catch((e) => console.error('[mailer:cron]', e));
+  try {
+    const r = await runPipeline(env, { trigger: 'cron' });
+    holdKicks(ctx, r?.kicks);
+  } catch (e) {
+    console.error('[mailer:cron]', e);
+  }
+}
+
+/** Keep self-invocation fetches alive past the current response. */
+function holdKicks(ctx, kicks) {
+  const list = (kicks || []).filter(Boolean);
+  if (!ctx?.waitUntil || !list.length) return;
+  ctx.waitUntil(Promise.allSettled(list).then(() => {}));
 }
 
 export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, force = false } = {}) {
@@ -624,18 +674,19 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
   const store = createStore(env);
   const { dryRun } = await dryRunEffective(env, store);
   const log = [];
+  const kicks = [];
 
   if (!force) {
     const lock = await store.get('mail:lock');
-    if (lock && Date.now() - Number(lock) < 10 * 60 * 1000) {
+    if (lock && Date.now() - Number(lock) < 4 * 60 * 1000) {
       return { skipped: true, reason: 'another run is in progress', lockedAt: new Date(Number(lock)).toISOString() };
     }
   }
-  await store.put('mail:lock', String(Date.now()), { expirationTtl: 660 });
+  await store.put('mail:lock', String(Date.now()), { expirationTtl: 300 });
 
   try {
     const timezone = env.MAIL_TIMEZONE || 'Asia/Calcutta';
-    const lookahead = parseInt(env.MAIL_LOOKAHEAD_HOURS || '26', 10) * 3600 * 1000;
+    const lookahead = lookaheadMs(env);
     const maxSync = parseInt(env.MAIL_MAX_SYNC || '5000', 10);
 
     // 1) Refresh analytics + AI learnings when due
@@ -652,16 +703,23 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
     }
     const learnings = (await getLatestAnalytics(store))?.learnings ?? null;
 
-    // 2) Audience — the CRM contacts collection IS the email list
+    // 2) Tasks first — the 5-min cron must be a cheap no-op when there is
+    //    nothing to plan or deliver (no contact pulls, no AI calls).
+    const tasks = (await listTasks(store)).filter((t) => !onlyTaskId || t.id === onlyTaskId);
+    if (!tasks.length) {
+      await store.put('mail:last_run', JSON.stringify({ at: new Date().toISOString(), trigger, dryRun, log: ['idle — no tasks'] }));
+      return { ok: true, trigger, dryRun, durationMs: Date.now() - started, log, kicks };
+    }
+
+    // 3) Audience — the CRM contacts collection IS the email list
     const contacts = await fetchCrmContacts(env, { max: maxSync });
     log.push(`crm: ${contacts.length} emailable contact(s) loaded`);
     const stats = contactStats(contacts);
 
-    // 3) Understand the business (state-cached ~7 days) — learns from the
+    // 4) Understand the business (state-cached ~7 days) — learns from the
     //    owner profile, the CRM data itself, and past task instructions.
     const profile = await getBusinessProfile(store);
     const brand = brandFor(env, profile);
-    const tasks = (await listTasks(store)).filter((t) => !onlyTaskId || t.id === onlyTaskId);
     const recentInstructions = tasks
       .slice(0, 5)
       .map((t) => t.instruction)
@@ -671,7 +729,7 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
     syncBriefToMemory(memory, brief); // AI-inferred facts fill memory gaps (owner facts always win)
     if (memory.facts.business_type) await saveMemory(store, memory);
 
-    // 4) Plan pending tasks
+    // 5) Plan pending tasks
     for (const task of tasks) {
       if (task.status === 'pending' || task.status === 'planning') {
         try {
@@ -697,14 +755,21 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
       }
     }
 
-    // 5) Execute due emails
+    // 6) PREPARE due emails, then hand each one to a CHUNKED delivery chain.
+    //
+    // Why chunks: Cloudflare Workers allow a hard-capped number of
+    // subrequests per invocation (50 on the free plan). A 200-recipient
+    // 1:1 send needs 200+ requests — impossible in one go (every large
+    // task died with "Too many subrequests" mid-send). The delivery is
+    // therefore split across chained worker invocations, each with a
+    // fresh budget: prepare (AI copy + audience) → chunk (≤N private
+    // sends + live progress) → self-invoke → … → finalize. A crashed
+    // chain resumes from the sent-ledger: nobody is ever double-sent.
     const nowMs = Date.now();
     for (const task of tasks) {
       if (task.status !== 'active' || !task.plan) continue;
 
       for (const mail of task.emails) {
-        // 'sending' = a previous run crashed mid-send. Re-entering is safe:
-        // deliverTransactional skips every recipient already sent (mail.sentEmails).
         if (mail.status !== 'planned' && mail.status !== 'sending') continue;
         // Re-read the task: the owner may have cancelled or deleted it
         // while this run was in flight. Never resurrect either.
@@ -715,403 +780,666 @@ export async function runPipeline(env, { trigger = 'cron', onlyTaskId = null, fo
           break;
         }
         const sendMs = Date.parse(mail.sendAt);
-        if (!Number.isFinite(sendMs)) { mail.status = 'failed'; mail.error = 'bad sendAt'; continue; }
+        if (!Number.isFinite(sendMs)) {
+          // Write through a FRESH read — concurrent chains may have advanced
+          // other emails of this task while this loop was running.
+          const f = (await getTask(store, task.id)) || task;
+          const fm = (f.emails || []).find((m) => m.seq === mail.seq);
+          if (fm) { fm.status = 'failed'; fm.error = 'bad sendAt'; await putTask(store, touch(f, {})); }
+          continue;
+        }
         if (sendMs - nowMs > lookahead) continue; // not due yet
+        // Already prepared (copy written, audience resolved)? Then just make
+        // sure a chain is running — the app's task polling lands here often.
+        if (mail.status === 'sending' && mail.exec && mail.exec.phase !== 'done') {
+          if (!(await chainAlive(store, task.id, mail.seq))) {
+            kicks.push(kickChain(env, {
+              action: 'chunk', taskId: task.id, seq: mail.seq,
+              from: mail.exec.mode === 'campaign' ? (mail.exec.cursor || 0) : (Array.isArray(mail.sentEmails) ? mail.sentEmails.length : 0),
+            }));
+            log.push(`task ${task.id} email ${mail.seq}: chain resumed at ${mail.exec.mode === 'campaign' ? `sync cursor ${mail.exec.cursor || 0}` : `${(mail.sentEmails || []).length} sent`}`);
+          }
+          continue;
+        }
 
         try {
-          const planEmail = task.plan.emails.find((e) => e.seq === mail.seq);
-          // Explicit recipients named in the instruction ("send to x@y.com")
-          // WIN over segment selection — the owner named a person, not a
-          // filter. Without this the AI's segment pick silently sent the
-          // email to whatever the CRM segment happened to contain.
-          // Suppressed (unsubscribed/bounced) and recently-emailed contacts
-          // are filtered out of SEGMENT audiences; explicit recipients are
-          // honoured exactly as the owner asked.
-          const suppressed = await loadSuppressions(store);
-          const freqHours = parseInt(env.MAIL_FREQ_HOURS || '20', 10);
-          const recentSends = await loadRecentSends(store, freqHours);
-          const explicit = Array.isArray(task.plan.explicit_recipients) && task.plan.explicit_recipients.length
-            ? task.plan.explicit_recipients
-            : null;
-          const audienceAll = pickAudience(contacts, task.plan.audience, explicit);
-          const audience = explicit
-            ? audienceAll
-            : audienceAll.filter((c) => {
-                if (suppressed.has(c.email)) return false;
-                if (recentSends.has(c.email)) return false;
-                return true;
-              });
-          const heldBack = audienceAll.length - audience.length;
-          if (audience.length === 0) {
-            throw new Error(heldBack > 0
-              ? `all ${heldBack} matching contact(s) are suppressed or were emailed in the last ${freqHours}h`
-              : 'audience is empty');
-          }
-          if (heldBack > 0) {
-            addEvent(task, `Frequency/suppression guard: ${heldBack} contact(s) held back (recently emailed or unsubscribed).`, 'info');
-            log.push(`task ${task.id} email ${mail.seq}: ${heldBack} contact(s) held back by suppression/frequency guard`);
-          }
-
-          const copy = await writeEmail(env, task, planEmail, brief, learnings, memory);
-          const crmCampaignId = `ai_${task.id}_${mail.seq}`;
-          // personalize → the HTML carries {{first_name}} + {{open_uid}}
-          // which MailerCloud replaces per recipient; CTA links route
-          // through the click tracker and the footer carries the
-          // one-click unsubscribe link (campaign-mode tracking comes from
-          // MailerCloud's own reports instead).
-          const mode = pickDeliveryMode(env, audience.length);
-          const personalize = mode === 'transactional';
-          const html = renderHtml(env, copy, {
-            personalize,
-            track: personalize ? { campaignId: crmCampaignId, wrap: true, unsub: true } : null,
-            brand,
-            style: planEmail.template_style,
-          });
-
-          if (dryRun) {
-            mail.status = 'dry_run';
-            mail.subject = copy.subject;
-            mail.crmCampaignId = crmCampaignId;
-            log.push(`task ${task.id} email ${mail.seq}: DRY RUN — would send "${copy.subject}" to ${audience.length} at ${mail.sendAt}`);
-            continue;
-          }
-
-          // Sync recipients to the MailerCloud list first (tracking, segments,
-          // and campaign-mode delivery all rely on the list existing).
-          const listId = await mc.ensureList(store);
-          const synced = await mc.upsertContacts(listId, audience);
-          log.push(`task ${task.id} email ${mail.seq}: synced ${synced} recipient(s) to MailerCloud list ${listId}`);
-
-          const tpl = await saveTemplate(mc, env, copy, html, `${task.id.slice(-4)} #${mail.seq}`);
-          mail.templateId = tpl?.id ?? tpl?.data?.id ?? null;
-
-          mail.status = 'sending';
-          mail.delivery = { mode, sent: 0, failed: 0, deferred: 0 };
-          await putTask(store, touch(task, {}));
-
-          let delivery;
-          if (mode === 'transactional') {
-            delivery = await deliverTransactional(env, store, {
-              copy,
-              html,
-              audience,
-              crmCampaignId,
-              mail,
-              brand,
-              alreadySent: new Set(Array.isArray(mail.sentEmails) ? mail.sentEmails : []),
-              onProgress: async (partial, sentEmails) => {
-                mail.delivery = { mode, ...(partial.summary || partial) };
-                mail.sentEmails = sentEmails;
-                await putTask(store, touch(task, {}));
-              },
-              shouldStop: async () => {
-                const fresh = await getTask(store, task.id);
-                return !fresh || fresh.status === 'cancelled';
-              },
-            });
+          const kick = await prepareEmail(env, store, mc, { task, mail, contacts, brief, memory, learnings, brand, dryRun });
+          if (kick) kicks.push(kick);
+          if (!dryRun) {
+            log.push(`task ${task.id} email ${mail.seq}: prepared ${mail.exec?.audienceCount ?? '?'} recipient(s) via ${mail.exec?.mode} — delivery chain running`);
           } else {
-            delivery = await deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId, brand, store, audience });
+            log.push(`task ${task.id} email ${mail.seq}: DRY RUN — would send "${mail.subject}" to ${mail.exec?.audienceCount ?? '?'} at ${mail.sendAt}`);
           }
-
-          mail.campaignId = delivery.campaignId ?? null;
-          mail.subject = copy.subject;
-          mail.status = delivery.status;
-          mail.delivery = { mode, ...(delivery.summary || {}) };
-          mail.recipients = audience.map((c) => c.email);
-          addEvent(
-            task,
-            `"${copy.subject}" → ${mode} ${delivery.status}: ${delivery.summary?.sent ?? 0} delivered, ${delivery.summary?.failed ?? 0} failed, ${delivery.summary?.deferred ?? 0} deferred → ${describeRecipients(audience)}`,
-            'send'
-          );
-
-          // Remember who was emailed (frequency cap for future campaigns).
-          if (delivery.summary?.sentEmails?.length) {
-            await appendSentLog(store, delivery.summary.sentEmails);
-          }
-
-          // Re-read before ANY further write: the owner may have cancelled
-          // mid-send (the stop check halts the chunks, but our in-memory
-          // task object is stale) — never resurrect a cancelled task.
-          const freshAfter = await getTask(store, task.id);
-          if (!freshAfter || freshAfter.status === 'cancelled') {
-            task.status = 'cancelled';
-            log.push(`task ${task.id}: cancelled mid-send — stopping (already-sent recipients are never re-sent)`);
-            break;
-          }
-
-          // ── Make it visible in the app: write the campaign doc ──
-          const sentCount = delivery.summary?.sent ?? audience.length;
-          const bounceCount = (delivery.summary?.failed ?? 0) + (delivery.summary?.deferred ?? 0);
-          // sentEmails (every accepted address, for resume) lives on the TASK
-          // only — a 5k-recipient list in every campaign doc is dead weight.
-          const { sentEmails: _sentEmails, ...summaryForDoc } = delivery.summary || {};
-          await upsertCampaignDoc(env, {
-            id: crmCampaignId,
-            fields: {
-              name: `AI | ${task.id} #${mail.seq} | ${copy.subject.slice(0, 60)}`,
-              channel: 'email',
-              status: delivery.status === 'sent' ? 'sent' : delivery.status === 'partial' ? 'sent' : delivery.status,
-              ownerId: task.createdBy || 'ai-mailer',
-              teamId: env.MAIL_TEAM_ID || null,
-              audienceCount: audience.length,
-              subject: copy.subject,
-              previewText: copy.preheader,
-              // Actual recipient addresses (capped) — the owner can see WHO
-              // got an email without cross-referencing MailerCloud.
-              recipientsSample: audience.slice(0, 25).map((c) => c.email),
-              // Send-time provider truth (accepted/failed/deferred) — the
-              // analytics pull reads this as the delivery floor.
-              delivery: { mode, ...summaryForDoc },
-              bodyHtml: html,
-              bodyPlainText: plainOf(html),
-              ctaLabel: copy.cta_text,
-              ctaUrl: (copy.cta_url && /^https?:\/\//i.test(copy.cta_url) ? copy.cta_url : brand.ctaUrl) || env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '',
-              scheduleType: 'once',
-              scheduledAt: mail.sendAt,
-              metrics: {
-                sent: sentCount,
-                delivered: sentCount,
-                opens: 0, clicks: 0, conversions: 0,
-                bounces: bounceCount,
-                unsubscribes: 0, revenue: 0,
-                failed: delivery.summary?.failed ?? 0,
-                deferred: delivery.summary?.deferred ?? 0,
-              },
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              // mailer-specific extras (Dart parser ignores unknown fields)
-              source: 'ai-mailer',
-              aiTaskId: task.id,
-              mailercloudCampaignId: mail.campaignId,
-              mailercloudTemplateId: mail.templateId,
-              mailercloudListId: listId,
-              deliveryMode: mode,
-              deliverySummary: summaryForDoc,
-              templateStyle: planEmail.template_style,
-              aiPlan: { goal: planEmail.goal, angle: planEmail.angle, tone: planEmail.tone, reasoning: String(task.plan.reasoning || '').slice(0, 500) },
-            },
-          });
-          await logActivity(env, {
-            title: `AI email ${delivery.status === 'scheduled' ? 'scheduled' : 'sent'}: ${copy.subject}`,
-            description: describeDelivery(delivery, { mode, audience: audience.length, sendAt: mail.sendAt, taskId: task.id, instruction: task.instruction }),
-            campaignId: crmCampaignId,
-            metadata: {
-              mailercloudCampaignId: mail.campaignId,
-              audience: audience.length,
-              mode,
-              sent: delivery.summary?.sent ?? null,
-              failed: delivery.summary?.failed ?? null,
-            },
-          });
-
-          log.push(`task ${task.id} email ${mail.seq}: ${mode} → ${delivery.status} "${copy.subject}" (${describeDelivery(delivery, { audience: audience.length })})`);
         } catch (e) {
-          mail.status = 'failed';
-          mail.error = e.message;
-          addEvent(task, `Email ${mail.seq} failed: ${e.message}`, 'error');
-          log.push(`task ${task.id} email ${mail.seq}: SEND FAILED — ${e.message}`);
+          // Failure is persisted through a FRESH read for the same reason:
+          // a concurrent chain may have advanced this task meanwhile.
+          const f = (await getTask(store, task.id)) || task;
+          const fm = (f.emails || []).find((m) => m.seq === mail.seq) || mail;
+          fm.status = 'failed';
+          fm.error = e.message;
+          addEvent(f, `Email ${mail.seq} failed: ${e.message}`, 'error');
+          log.push(`task ${task.id} email ${mail.seq}: PREPARE FAILED — ${e.message}`);
+          await putTask(store, touch(f, {}));
         }
       }
 
       if (task.status === 'cancelled') continue; // owner cancelled mid-run — do not overwrite
-      const remaining = task.emails.filter((m) => m.status === 'planned' || m.status === 'sending');
-      const failed = task.emails.filter((m) => m.status === 'failed');
-      if (remaining.length === 0) {
-        const finalStatus = failed.length === task.emails.length ? 'failed' : 'done';
-        addEvent(task, finalStatus === 'done' ? 'All emails processed. Campaigns visible in the app.' : 'Every email failed — see email errors.', finalStatus === 'done' ? 'info' : 'error');
-        await putTask(store, touch(task, { status: finalStatus }));
-      } else {
-        // A 'sending' email that did not finish (cancelled mid-run or the
-        // runner died) stays queued — retry re-sends ONLY the unsent
-        // recipients (see deliverTransactional's alreadySent skip set).
-        for (const m of remaining) {
-          if (m.status === 'sending') {
-            m.status = 'planned';
-            m.sendAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-          }
-        }
-        await putTask(store, task);
-      }
+      await finalizeTaskIfComplete(store, task);
     }
 
     await store.put('mail:last_run', JSON.stringify({ at: new Date().toISOString(), trigger, dryRun, log }));
-    return { ok: true, trigger, dryRun, durationMs: Date.now() - started, log };
+    return { ok: true, trigger, dryRun, durationMs: Date.now() - started, log, kicks };
   } finally {
     await store.delete('mail:lock');
   }
 }
 
-/* ══════════════════════ Delivery engines ══════════════════════ */
-
-/**
- * Transactional engine — MailerCloud Email API, ONE private message per
- * recipient (individual 1:1 emails, personalized mail merge with each
- * contact's name), per-recipient outcome tracking, auto-suppression of
- * hard bounces/unsubs/spam reports.
+/* ══════════════════ Delivery chain (subrequest-safe) ══════════════════
  *
- * Scale-safe: sends in parallel chunks, persists live progress via
- * onProgress (the app shows the counter moving), SKIPS recipients already
- * sent (a retried/cancelled-then-resumed run never double-sends), records
- * the token→email map so one-click unsubscribes can suppress the right
- * person, and honours mid-send cancellations between chunks.
+ * prepareEmail   — one due email: resolve the audience (suppression is
+ *                  absolute; the frequency cap yields to an explicit owner
+ *                  count), write the copy ONCE, render the personalized
+ *                  tracked HTML, persist the audience in slices, and kick
+ *                  the chain.
+ * deliverInternal— the HMAC-protected self-invocation target. action
+ *                  "chunk" runs ONE batch of private 1:1 sends (≤25) and
+ *                  re-invokes itself until the audience is exhausted, then
+ *                  finalizes; action "prepare" plans/prepare the task's
+ *                  next due email (sequence advance).
+ * Each invocation owns a fresh subrequest budget, so audiences of
+ * hundreds/thousands complete in minutes — not die at #45.
  */
-async function deliverTransactional(env, store, { copy, html, audience, crmCampaignId, mail, brand = null, alreadySent = new Set(), onProgress = null, shouldStop = null }) {
+
+const AUD_SLICE = 400; // rows per state row (~35KB JSON — under D1's 100KB statement limit)
+
+function lookaheadMs(env) {
+  const min = parseInt(env.MAIL_LOOKAHEAD_MINUTES ?? '', 10);
+  if (Number.isFinite(min) && min > 0) return min * 60 * 1000;
+  const hrs = parseInt(env.MAIL_LOOKAHEAD_HOURS ?? '10', 10);
+  return (Number.isFinite(hrs) && hrs > 0 ? hrs : 10) * 3600 * 1000;
+}
+
+function sendChunkSize(env) {
+  const n = parseInt(env.MAIL_SEND_CHUNK || '25', 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 30) : 25;
+}
+
+function chainKeyOf(taskId, seq) {
+  return `mail:chain:ai_${taskId}_${seq}`;
+}
+
+/** Chain heartbeat: written at PREPARE time and renewed by every chunk
+ *  (and mid-chunk via send progress), so the pipeline never mistakes a
+ *  running chain for a dead one. Stale (>100s) = the runner died. */
+async function renewChain(store, taskId, seq, from) {
+  await store.put(chainKeyOf(taskId, seq), JSON.stringify({ at: Date.now(), from }), { expirationTtl: 300 });
+}
+
+async function chainAlive(store, taskId, seq) {
+  const raw = await store.get(chainKeyOf(taskId, seq));
+  if (!raw) return false;
+  const v = safeParse(raw, null);
+  const at = v && typeof v === 'object' ? Number(v.at) : Number(raw);
+  return Number.isFinite(at) && Date.now() - at < 100 * 1000;
+}
+
+async function saveAudience(store, crmCampaignId, rows) {
+  const slices = Math.max(1, Math.ceil(rows.length / AUD_SLICE));
+  await store.put(`mail:aud:${crmCampaignId}`, JSON.stringify({ count: rows.length, slices }));
+  for (let i = 0; i < slices; i++) {
+    await store.put(`mail:aud:${crmCampaignId}:${i}`, JSON.stringify(rows.slice(i * AUD_SLICE, (i + 1) * AUD_SLICE)));
+  }
+}
+
+async function loadAudience(store, crmCampaignId) {
+  const head = safeParse(await store.get(`mail:aud:${crmCampaignId}`), null);
+  if (!head || !head.slices) return [];
+  const rows = [];
+  for (let i = 0; i < head.slices; i++) {
+    rows.push(...safeParse(await store.get(`mail:aud:${crmCampaignId}:${i}`), []));
+  }
+  return rows;
+}
+
+async function clearAudience(store, crmCampaignId) {
+  const head = safeParse(await store.get(`mail:aud:${crmCampaignId}`), null);
+  await store.delete(`mail:aud:${crmCampaignId}`);
+  if (head) for (let i = 0; i < head.slices; i++) await store.delete(`mail:aud:${crmCampaignId}:${i}`);
+}
+
+/* ── HMAC for the self-invocation endpoint ───────────────────────────
+ * The chain talks to the worker's own /v1/mail/deliver route. The proof
+ * is HMAC(taskId|seq|action, MAILERCLOUD_API_KEY) — the key never leaves
+ * the worker, so nobody outside can forge a kick, and a replayed one is
+ * harmless (the send ledger makes every chunk idempotent). */
+
+async function runSig(env, s) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(String(env.MAILERCLOUD_API_KEY || 'nebula-unconfigured')),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(String(s)));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function verifyRunSig(env, s, sig) {
+  if (!env.MAILERCLOUD_API_KEY || !sig) return false;
+  const want = await runSig(env, s);
+  const a = new TextEncoder().encode(want);
+  const b = new TextEncoder().encode(String(sig));
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
+function kickChain(env, { action, taskId, seq = '', from = null }) {
+  const base = String(env.MAIL_SELF_URL || '').replace(/\/+$/, '');
+  if (!base) {
+    console.warn('[mailer] MAIL_SELF_URL not set — the delivery chain cannot self-continue; the cron will resume this task');
+    return null;
+  }
+  return (async () => {
+    try {
+      const sig = await runSig(env, `${action}|${taskId}|${seq}`);
+      const res = await fetch(`${base}/v1/mail/deliver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-nebula-deliver': sig },
+        body: JSON.stringify({ action, taskId, seq, from }),
+      });
+      return res.status;
+    } catch (e) {
+      console.warn(`[mailer] chain kick ${action} ${taskId}/${seq} failed: ${e?.message || e}`);
+      return null;
+    }
+  })();
+}
+
+/** Resolve the audience for one planned email.
+ *  Suppression (unsubscribed/bounced) is ABSOLUTE — never bypassed.
+ *  The recent-send frequency cap is advisory: when the owner asked for a
+ *  count the fresh pool can't reach, recently-emailed contacts top it up. */
+async function resolveAudience({ contacts, plan, explicit, suppressed, env, store }) {
+  if (Array.isArray(explicit) && explicit.length) {
+    const rows = pickAudience(contacts, plan.audience, explicit);
+    const clean = rows.filter((c) => !suppressed.has(c.email));
+    return { audience: clean, heldBack: rows.length - clean.length, toppedUp: 0 };
+  }
+  const asked = Math.max(1, parseInt(plan.audience?.max_recipients, 10) || contacts.length || 0);
+  // Uncapped-ish pool so a top-up can reach past the cap (freshest first).
+  const pool = pickAudience(
+    contacts,
+    { segment: plan.audience?.segment ?? null, max_recipients: Math.min(asked * 3 + 100, contacts.length || 1) },
+    null
+  );
+  const clean = pool.filter((c) => !suppressed.has(c.email));
+  const freqHours = parseInt(env.MAIL_FREQ_HOURS || '20', 10);
+  const recent = await loadRecentSends(store, freqHours);
+  const fresh = clean.filter((c) => !recent.has(c.email));
+  const audience = fresh.slice(0, asked);
+  let toppedUp = 0;
+  // Top-up ONLY when the owner's own words asked for a count ("send to 200
+  // contacts", "email everyone") the fresh pool can't reach. Default tasks
+  // keep the cap: never re-blast last night's audience by accident.
+  if (plan.audience?.owner_specified && audience.length < Math.min(asked, clean.length)) {
+    const top = clean.filter((c) => recent.has(c.email)).slice(0, Math.min(asked, clean.length) - audience.length);
+    toppedUp = top.length;
+    audience.push(...top);
+  }
+  return { audience, heldBack: clean.length ? pool.length - clean.length : 0, toppedUp };
+}
+
+/** Prepare one due email for delivery; returns the chain kick (or null). */
+async function prepareEmail(env, store, mc, { task, mail, contacts, brief, memory, learnings, brand, dryRun }) {
+  const planEmail = task.plan.emails.find((e) => e.seq === mail.seq) || {};
   const suppressed = await loadSuppressions(store);
+  const explicit = Array.isArray(task.plan.explicit_recipients) && task.plan.explicit_recipients.length
+    ? task.plan.explicit_recipients
+    : null;
+  const { audience, heldBack, toppedUp } = await resolveAudience({ contacts, plan: task.plan, explicit, suppressed, env, store });
+
+  if (!audience.length) {
+    throw new Error(heldBack > 0
+      ? `all ${heldBack} matching contact(s) are unsubscribed or bounced — remove them from the suppression list to email them again`
+      : 'audience is empty — no contact matches this task');
+  }
+  if (heldBack > 0) addEvent(task, `${heldBack} contact(s) skipped: unsubscribed or bounced. They will never be emailed.`, 'info');
+
+  const crmCampaignId = `ai_${task.id}_${mail.seq}`;
+  const mode = pickDeliveryMode(env, audience.length);
+
+  // ── Copy (written ONCE per email, stored on the task doc) ──
+  if (!mail.subject || !mail.html) {
+    const copy = await writeEmail(env, task, planEmail, brief, learnings, memory);
+    const personalize = mode === 'transactional';
+    const html = renderHtml(env, copy, {
+      personalize,
+      track: personalize ? { campaignId: crmCampaignId, wrap: true, unsub: true } : null,
+      brand,
+      style: planEmail.template_style,
+    });
+    mail.subject = copy.subject;
+    mail.copy = copy;
+    mail.html = html;
+    if (!dryRun && String(env.MC_CREATE_TEMPLATES ?? 'true') !== 'false') {
+      try {
+        const tpl = await saveTemplate(mc, env, copy, html, `${task.id.slice(-4)} #${mail.seq}`);
+        mail.templateId = tpl?.id ?? tpl?.data?.id ?? null;
+      } catch (e) {
+        console.warn(`[mailer] template save failed (non-fatal): ${e.message}`);
+      }
+    }
+  }
+
+  if (dryRun) {
+    mail.status = 'dry_run';
+    mail.exec = { mode, phase: 'done', audienceCount: audience.length };
+    addEvent(task, `DRY RUN — would send "${mail.subject}" to ${audience.length} recipient(s) at ${mail.sendAt}.`, 'info');
+    await putTask(store, touch(task, {})); // persist — nothing else writes this state
+    return null;
+  }
+
+  // Persist the resolved audience (compact rows, sliced for D1 limits).
+  await saveAudience(store, crmCampaignId, audience.map(toAudienceRow));
+
+  if (mode === 'campaign') {
+    // Very large audiences: a dedicated MailerCloud list is filled across
+    // several sync invocations, then the campaign is scheduled on it.
+    mail.exec = { mode, phase: 'sync', cursor: 0, audienceCount: audience.length, startedAt: new Date().toISOString() };
+    mail.delivery = { mode, sent: 0, failed: 0, deferred: 0, synced: 0 };
+  } else {
+    mail.exec = { mode: 'transactional', phase: 'send', audienceCount: audience.length, startedAt: new Date().toISOString() };
+    mail.delivery = { mode: 'transactional', sent: 0, failed: 0, deferred: 0 };
+  }
+  mail.status = 'sending';
+  addEvent(task, `Prepared "${mail.subject}" → ${audience.length} recipient(s) via ${mail.exec.mode}${toppedUp ? ` (${toppedUp} recently-emailed included to reach your count — unsubs are always excluded)` : ''}. Sending in batches…`, 'send');
+  // Chain heartbeat starts NOW (from = -1 sentinel: no real chunk runs at
+  // cursor −1, so the first chunk takes over cleanly) — before this run
+  // finishes, so the run's own finalization can't mistake the just-kicked
+  // chain for a dead one.
+  await renewChain(store, task.id, mail.seq, -1);
+  await putTask(store, touch(task, {}));
+  // The kick names the CURRENT ledger count — a resumed (crashed) task's
+  // ledger is already non-zero, and a from=0 kick would fence itself out.
+  const from = Array.isArray(mail.sentEmails) ? mail.sentEmails.length : 0;
+  return kickChain(env, { action: 'chunk', taskId: task.id, seq: mail.seq, from });
+}
+
+function toAudienceRow(c) {
+  return {
+    email: c.email,
+    name: [c.first_name, c.last_name].filter(Boolean).join(' ').slice(0, 100),
+    first_name: (c.first_name || '').trim() || 'there',
+    last_name: c.last_name || '',
+    company: c.company_name || '',
+  };
+}
+
+/** HMAC-verified self-invocation target (routed before auth in index.js). */
+export async function deliverInternal(env, payload, ctx = { waitUntil: () => {} }) {
+  const store = stateBackendName(env) !== 'none' ? createStore(env) : null;
+  if (!store) return json({ error: 'no state backend' }, 503);
+  const action = String(payload?.action || 'chunk');
+  const taskId = String(payload?.taskId || '');
+  const seq = parseInt(payload?.seq, 10) || 0;
+  const from = Number.isFinite(Number(payload?.from)) ? Number(payload.from) : null;
+  try {
+    if (!taskId) return json({ error: 'taskId required' }, 400);
+    if (action === 'prepare') {
+      // Advance the sequence: plan/prepare this task's next due email.
+      const r = await runPipeline(env, { trigger: 'chain', onlyTaskId: taskId });
+      holdKicks(ctx, r?.kicks);
+      return json({ ok: true, ...(r.skipped ? { skipped: r.reason } : { log: r.log }) });
+    }
+    const r = await runChunkDelivery(env, store, { taskId, seq, from, ctx });
+    return json({ ok: true, ...r });
+  } catch (e) {
+    console.error(`[mailer:deliver] ${action} ${taskId}/${seq} failed:`, e?.stack || e);
+    // Never leave an email stuck in 'sending' — mark it failed so the
+    // owner can retry (the sent-ledger guarantees no double-sends).
+    try {
+      const task = await getTask(store, taskId);
+      const mail = task && (task.emails || []).find((m) => m.seq === seq);
+      if (mail && mail.status === 'sending') {
+        mail.status = 'failed';
+        mail.error = String(e?.message || e).slice(0, 300);
+        if (task.status === 'active') {
+          addEvent(task, `Delivery chain error: ${e?.message || e}`, 'error');
+          await putTask(store, touch(task, {}));
+          await finalizeTaskIfComplete(store, task);
+        }
+      }
+    } catch { /* best effort */ }
+    return json({ ok: false, error: String(e?.message || e) }, 500);
+  }
+}
+
+async function runChunkDelivery(env, store, { taskId, seq, from, ctx }) {
+  const task = await getTask(store, taskId);
+  if (!task || task.status === 'cancelled') return { skipped: 'task gone or cancelled' };
+  const mail = (task.emails || []).find((m) => m.seq === seq);
+  // 'planned' with a live exec = prepared and mid-chain (a racing writer
+  // may have re-labelled it) — still deliverable; the heartbeat decides.
+  if (!mail || !mail.exec || mail.exec.phase === 'done' || !['sending', 'planned'].includes(mail.status)) {
+    return { skipped: 'nothing to deliver' };
+  }
+  const crmCampaignId = `ai_${taskId}_${seq}`;
+  // Cursor idempotence: the kick names the sent-count (or sync cursor) it
+  // expects. If the ledger already advanced past it, this kick is a stale
+  // duplicate — skip (this is what makes a kicked-twice chain never
+  // double-send). A same-cursor CONCURRENT chunk is fenced by the lock.
+  const current = mail.exec.mode === 'campaign'
+    ? (mail.exec.cursor || 0)
+    : (Array.isArray(mail.sentEmails) ? mail.sentEmails.length : 0);
+  if (from !== null && from !== current) return { skipped: `stale kick (cursor ${from} ≠ ${current})` };
+  const lockRaw = await store.get(chainKeyOf(taskId, seq));
+  const lock = safeParse(lockRaw, null);
+  const lockFrom = lock && typeof lock === 'object' ? Number(lock.from) : NaN;
+  const lockAt = lock && typeof lock === 'object' ? Number(lock.at) : Number(lockRaw);
+  const lockFresh = Number.isFinite(lockAt) && Date.now() - lockAt < 100 * 1000;
+  if (lockFresh && lockFrom === current) return { skipped: 'another chunk is mid-flight at this cursor' };
+  await renewChain(store, taskId, seq, current);
+
+  const mc = new MailerCloud(env);
+  if (mail.exec.mode === 'campaign') {
+    return campaignChunk(env, store, mc, { task, mail, ctx, crmCampaignId });
+  }
+  return transactionalChunk(env, store, mc, { task, mail, ctx, crmCampaignId });
+}
+
+/* ── Transactional chunk: ≤N private 1:1 sends per invocation ────── */
+async function transactionalChunk(env, store, mc, { task, mail, ctx, crmCampaignId }) {
+  const suppressed = await loadSuppressions(store);
+  const already = new Set(Array.isArray(mail.sentEmails) ? mail.sentEmails : []);
+  const rows = await loadAudience(store, crmCampaignId);
+  const pending = rows.filter((r) => !suppressed.has(r.email) && !already.has(r.email));
+  if (!pending.length) {
+    return finishTransactional(env, store, { task, mail, crmCampaignId, ctx });
+  }
+
+  const slice = pending.slice(0, sendChunkSize(env));
   const tokenMap = {};
-  const recipients = [];
-  for (const c of audience) {
-    if (suppressed.has(c.email)) continue;
-    if (alreadySent.has(c.email)) continue; // resume — never double-send
-    const token = openToken(crmCampaignId, c.email);
-    tokenMap[token] = c.email;
-    recipients.push({
-      name: [c.first_name, c.last_name].filter(Boolean).join(' ').slice(0, 100),
-      email: c.email,
+  const recipients = slice.map((r) => {
+    const token = openToken(crmCampaignId, r.email);
+    tokenMap[token] = r.email;
+    return {
+      name: r.name || '',
+      email: r.email,
       merge_vars: {
-        // Personalization: the contact's real name from the CRM — "Hi Rahul,".
-        // Falls back to "there" only when the CRM has no name for the contact.
-        first_name: (c.first_name || '').trim() || 'there',
-        last_name: c.last_name || '',
-        company: c.company_name || '',
-        // Per-recipient open/click/unsub tracking token, rendered into the
-        // pixel URL, the CTA redirect and the unsubscribe link.
+        first_name: r.first_name || 'there',
+        last_name: r.last_name || '',
+        company: r.company || '',
         open_uid: token,
       },
-    });
-  }
-  if (!recipients.length) {
-    return {
-      status: alreadySent.size ? 'sent' : 'failed',
-      campaignId: null,
-      summary: {
-        sent: alreadySent.size, deferred: 0, failed: 0,
-        accepted_rate: 100,
-        failures: [],
-        endpoint: `${EMAIL_API_BASE}/email-api`,
-        sentEmails: [...alreadySent],
-        resumed: alreadySent.size > 0,
-      },
     };
-  }
-
-  // token → email map lets /v1/t/u resolve WHO unsubscribed without any
-  // PII in the URL. Stored BEFORE the first send so even a mid-run crash
-  // leaves unsubs resolvable.
+  });
+  // MERGES — earlier batches' unsubscribe attribution survives.
   await saveTokenMap(env, crmCampaignId, tokenMap);
 
+  const brand = brandFor(env, await getBusinessProfile(store));
   const result = await sendPersonalizedBatch(env, {
-    subject: copy.subject,
-    html,
-    text: plainOf(html),
+    subject: mail.subject,
+    html: mail.html,
+    text: plainOf(mail.html || ''),
     recipients,
     brand,
     metadata: {
-      messageId: `${crmCampaignId}-${mail.seq}`.slice(0, 100),
+      messageId: crmCampaignId.slice(0, 100),
       custom: { campaign_id: crmCampaignId, source: 'nebula-ai-mailer' },
     },
-    onProgress: async (partial, sentEmails) => {
-      if (onProgress) await onProgress(partial, sentEmails);
+    // Keep the chain heartbeat fresh while sends run — a slow provider
+    // (retries with 30s backoffs) must never look like a dead chain.
+    // already.size IS this chunk's cursor (the ledger at chunk start).
+    onProgress: async () => {
+      await renewChain(store, task.id, mail.seq, already.size);
     },
-    shouldStop,
   });
 
   if (result.suppressions.length) {
     await addSuppressions(store, result.suppressions);
-    console.warn(`[mailer] suppressed ${result.suppressions.length} address(es) after provider outcomes`);
   }
 
-  const sentTotal = result.sent + alreadySent.size;
-  const status = sentTotal === 0 && result.failed > 0
-    ? 'failed'
-    : result.failed > 0 || result.deferred > 0
-      ? 'partial'
-      : 'sent';
+  const ledger = new Set([...already, ...result.sentEmails]);
+  mail.sentEmails = [...ledger];
+  mail.delivery.sent = ledger.size;
+  mail.delivery.failed = (mail.delivery.failed || 0) + result.failed;
+  mail.delivery.deferred = (mail.delivery.deferred || 0) + result.deferred;
+  addEvent(
+    task,
+    `Batch: +${result.sent} delivered — total ${mail.delivery.sent}/${mail.exec.audienceCount}${result.failed ? `, ${result.failed} failed` : ''}.`,
+    'send'
+  );
+  await appendSentLog(store, result.sentEmails);
+  await putTask(store, touch(task, {}));
 
-  return {
-    status,
-    campaignId: null, // Email API sends are tracked by metadata.custom.campaign_id
-    summary: {
-      sent: sentTotal,
-      deferred: result.deferred,
-      failed: result.failed,
-      accepted_rate: (recipients.length + alreadySent.size)
-        ? +((sentTotal / (recipients.length + alreadySent.size)) * 100).toFixed(1)
-        : 0,
-      failures: result.failures.slice(0, 25),
-      endpoint: `${EMAIL_API_BASE}/email-api`,
-      sentEmails: result.sentEmails,
-      skippedSuppressed: audience.length - recipients.length - alreadySent.size,
-    },
-  };
+  if (pending.length > slice.length) {
+    // Next chunk takes the lock over by cursor — no delete-gap, so a
+    // concurrent pipeline run can never see a heartbeat-less chain.
+    holdKicks(ctx, [kickChain(env, { action: 'chunk', taskId: task.id, seq: mail.seq, from: ledger.size })]);
+    return { sent: result.sent, remaining: pending.length - slice.length };
+  }
+  return finishTransactional(env, store, { task, mail, crmCampaignId, ctx });
 }
 
-/**
- * Campaign engine — Marketing API scheduled campaign (very large
- * audiences, 1000s+). The audience gets its OWN MailerCloud list (named
- * after the campaign, cached per campaign id) so the blast goes to
- * EXACTLY the planned recipients — never to whatever else sits in the
- * shared master list. Delivery at the AI-chosen minute; opens/clicks/
- * unsubs come back from MailerCloud's own reports (merged into analytics
- * + suppression by the analytics pull).
- */
-async function deliverCampaign(env, mc, { copy, html, listId, mail, timezone, crmCampaignId, brand = null, store = null, audience = [] }) {
-  // Per-campaign list → exact audience at any scale. Cached in the state
-  // store so a retry reuses the same list instead of piling up empties.
-  let targetListId = listId;
-  if (store && audience.length) {
-    const cacheKey = `mc:clist:${crmCampaignId}`;
-    let dedicated = await store.get(cacheKey);
-    if (!dedicated) {
-      const name = `AI ${crmCampaignId} (${audience.length})`.slice(0, 78);
-      try {
-        const created = await mc.createList(name);
-        const id = created?.id ?? created?.data?.id;
-        if (id) {
-          dedicated = String(id);
-          await store.put(cacheKey, dedicated);
-          await mc.upsertContacts(dedicated, audience);
-          console.log(`[mailer] dedicated list ${dedicated} with ${audience.length} recipient(s) for ${crmCampaignId}`);
-        }
-      } catch (e) {
-        console.warn(`[mailer] dedicated list creation failed (${e.message}) — falling back to the master list`);
+async function finishTransactional(env, store, { task, mail, crmCampaignId, ctx }) {
+  const sentCount = (mail.sentEmails || []).length;
+  const failedCount = mail.delivery.failed || 0;
+  const deferredCount = mail.delivery.deferred || 0;
+  mail.status = sentCount === 0 && failedCount > 0 ? 'failed' : failedCount + deferredCount > 0 ? 'partial' : 'sent';
+  mail.exec.phase = 'done';
+  mail.campaignId = null; // Email API sends are tracked by metadata.custom.campaign_id
+  mail.delivery.accepted_rate = sentCount + failedCount + deferredCount
+    ? +((sentCount / (sentCount + failedCount + deferredCount)) * 100).toFixed(1)
+    : 0;
+  addEvent(task, `"${mail.subject}" complete: ${sentCount} delivered, ${failedCount} failed, ${deferredCount} deferred of ${mail.exec.audienceCount}.`, 'send');
+  // Persist the terminal state EXPLICITLY — finalizeTaskIfComplete below
+  // only writes when the task completes or a dead chain is requeued, and
+  // an unpersisted 'sent' gets re-prepared by the next tick.
+  await putTask(store, touch(task, {}));
+
+  await writeCampaignDoc(env, store, { task, mail, crmCampaignId, mode: 'transactional', audienceCount: mail.exec.audienceCount, listId: null });
+  await clearAudience(store, crmCampaignId);
+  await store.delete(chainKeyOf(task.id, mail.seq));
+  await finalizeTaskIfComplete(store, task);
+  // Advance the sequence (no-op when the next email is scheduled for later).
+  holdKicks(ctx, [kickChain(env, { action: 'prepare', taskId: task.id, seq: '' })]);
+  return { done: true, sent: sentCount, failed: failedCount, deferred: deferredCount };
+}
+
+/* ── Campaign chunk: sync the dedicated list, then schedule ──────── */
+async function campaignChunk(env, store, mc, { task, mail, ctx, crmCampaignId }) {
+  const cacheKey = `mc:clist:${crmCampaignId}`;
+  let listId = await store.get(cacheKey);
+  if (!listId) {
+    const created = await mc.createList(`AI ${crmCampaignId} (${mail.exec.audienceCount})`.slice(0, 78));
+    listId = String(created?.id ?? created?.data?.id ?? '');
+    if (!listId) throw new Error('MailerCloud list creation returned no id');
+    await store.put(cacheKey, listId, { expirationTtl: 60 * 60 * 24 * 7 });
+    console.log(`[mailer] dedicated list ${listId} for ${crmCampaignId} (${mail.exec.audienceCount} recipients)`);
+  }
+
+  const timezone = env.MAIL_TIMEZONE || 'Asia/Calcutta';
+  if (mail.exec.phase === 'sync') {
+    // Re-derive the exact audience (fresh contacts, same deterministic
+    // order + guards) and upload the next slice to the dedicated list.
+    const contacts = await fetchCrmContacts(env, { max: parseInt(env.MAIL_MAX_SYNC || '5000', 10) });
+    const suppressed = await loadSuppressions(store);
+    const explicit = Array.isArray(task.plan.explicit_recipients) && task.plan.explicit_recipients.length
+      ? task.plan.explicit_recipients
+      : null;
+    const { audience } = await resolveAudience({ contacts, plan: task.plan, explicit, suppressed, env, store });
+    const rows = audience.map(toAudienceRow);
+    const syncRows = Math.max(200, parseInt(env.MAIL_SYNC_ROWS || '1000', 10));
+    const slice = rows.slice(mail.exec.cursor, mail.exec.cursor + syncRows);
+    if (slice.length) {
+      await mc.upsertContacts(listId, slice);
+      mail.exec.cursor += slice.length;
+      mail.delivery.synced = mail.exec.cursor;
+      addEvent(task, `Audience sync: ${mail.exec.cursor}/${mail.exec.audienceCount} uploaded to the campaign list.`, 'send');
+      await putTask(store, touch(task, {}));
+    }
+    if (mail.exec.cursor < Math.min(rows.length, mail.exec.audienceCount)) {
+      await renewChain(store, task.id, mail.seq, mail.exec.cursor);
+      holdKicks(ctx, [kickChain(env, { action: 'chunk', taskId: task.id, seq: mail.seq, from: mail.exec.cursor })]);
+      return { synced: mail.exec.cursor, remaining: Math.min(rows.length, mail.exec.audienceCount) - mail.exec.cursor };
+    }
+    mail.exec.phase = 'campaign';
+    await putTask(store, touch(task, {}));
+  }
+
+  if (mail.exec.phase === 'campaign') {
+    const sendMs = Date.parse(mail.sendAt);
+    // MailerCloud rejects past timestamps: once the chosen minute slipped
+    // by during the sync, publish immediately instead.
+    const scheduledAt = Number.isFinite(sendMs) && sendMs - Date.now() > 3 * 60 * 1000
+      ? isoToAccountTime(mail.sendAt, timezone)
+      : null;
+    const brand = brandFor(env, await getBusinessProfile(store));
+    const campaign = await mc.createAndPublishCampaign({
+      name: `AI | ${crmCampaignId} | ${String(mail.subject).slice(0, 60)}`,
+      subject: mail.subject,
+      html: mail.html,
+      preheader: mail.copy?.preheader,
+      listId,
+      scheduledAt,
+      brand,
+    });
+    const campaignId = campaign?.id ?? campaign?.data?.id ?? null;
+    if (!campaignId) throw new Error('MailerCloud campaign creation returned no id');
+    mail.campaignId = campaignId;
+    mail.status = 'scheduled';
+    mail.exec.phase = 'done';
+    mail.delivery = { mode: 'campaign', mailercloud_campaign: String(campaignId), scheduled_for: mail.sendAt, list: listId, synced: mail.exec.audienceCount };
+    addEvent(task, `MailerCloud campaign ${campaignId} ${scheduledAt ? `scheduled for ${mail.sendAt}` : 'publishing now'} → ${mail.exec.audienceCount} recipient(s). Opens/clicks/unsubs flow back via analytics.`, 'send');
+    // Persist the terminal state explicitly (same reason as transactional).
+    await putTask(store, touch(task, {}));
+
+    await writeCampaignDoc(env, store, { task, mail, crmCampaignId, mode: 'campaign', audienceCount: mail.exec.audienceCount, listId });
+    await clearAudience(store, crmCampaignId);
+    await store.delete(chainKeyOf(task.id, mail.seq));
+    await finalizeTaskIfComplete(store, task);
+    holdKicks(ctx, [kickChain(env, { action: 'prepare', taskId: task.id, seq: '' })]);
+    return { scheduled: true, campaignId: String(campaignId) };
+  }
+  return { skipped: 'unknown campaign phase' };
+}
+
+/** The campaign doc + activity entry that make a finished email visible in the app. */
+async function writeCampaignDoc(env, store, { task, mail, crmCampaignId, mode, audienceCount, listId }) {
+  try {
+    const sentCount = mode === 'campaign' ? audienceCount : (mail.sentEmails || []).length;
+    const bounceCount = (mail.delivery.failed || 0) + (mail.delivery.deferred || 0);
+    const status = mail.status === 'sent' || mail.status === 'scheduled' ? 'sent' : mail.status === 'partial' ? 'sent' : mail.status;
+    const html = mail.html || '';
+    const copy = mail.copy || {};
+    const planEmail = task.plan?.emails?.find((e) => e.seq === mail.seq) || {};
+    const brand = brandFor(env, await getBusinessProfile(store));
+    const audienceRows = await loadAudience(store, crmCampaignId);
+    await upsertCampaignDoc(env, {
+      id: crmCampaignId,
+      fields: {
+        name: `AI | ${task.id} #${mail.seq} | ${String(mail.subject).slice(0, 60)}`,
+        channel: 'email',
+        status,
+        ownerId: task.createdBy || 'ai-mailer',
+        teamId: env.MAIL_TEAM_ID || null,
+        audienceCount,
+        subject: mail.subject,
+        previewText: copy.preheader || '',
+        recipientsSample: audienceRows.slice(0, 25).map((r) => r.email),
+        delivery: {
+          mode,
+          sent: sentCount,
+          failed: mail.delivery.failed || 0,
+          deferred: mail.delivery.deferred || 0,
+          ...(mode === 'campaign' ? { mailercloud_campaign: String(mail.campaignId || ''), scheduled_for: mail.sendAt, list: listId } : {}),
+        },
+        bodyHtml: html,
+        bodyPlainText: plainOf(html),
+        ctaLabel: copy.cta_text || '',
+        ctaUrl: (copy.cta_url && /^https?:\/\//i.test(copy.cta_url) ? copy.cta_url : brand.ctaUrl) || env.MAIL_CTA_URL || env.MAIL_WEBSITE_URL || '',
+        scheduleType: 'once',
+        scheduledAt: mail.sendAt,
+        metrics: {
+          sent: sentCount,
+          delivered: sentCount,
+          opens: 0, clicks: 0, conversions: 0,
+          bounces: bounceCount,
+          unsubscribes: 0, revenue: 0,
+          failed: mail.delivery.failed || 0,
+          deferred: mail.delivery.deferred || 0,
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        source: 'ai-mailer',
+        aiTaskId: task.id,
+        mailercloudCampaignId: mail.campaignId,
+        mailercloudTemplateId: mail.templateId,
+        mailercloudListId: listId,
+        deliveryMode: mode,
+        templateStyle: planEmail.template_style,
+        aiPlan: { goal: planEmail.goal, angle: planEmail.angle, tone: planEmail.tone, reasoning: String(task.plan?.reasoning || '').slice(0, 500) },
+      },
+    });
+    await logActivity(env, {
+      title: `AI email ${mail.status === 'scheduled' ? 'scheduled' : 'sent'}: ${mail.subject}`,
+      description: mode === 'campaign'
+        ? `Campaign scheduled for ${mail.sendAt} → ${audienceCount} recipients (task ${task.id})`
+        : `${sentCount} accepted, ${mail.delivery.failed || 0} failed, ${mail.delivery.deferred || 0} deferred of ${audienceCount} recipients (task ${task.id}: ${String(task.instruction).slice(0, 120)})`,
+      campaignId: crmCampaignId,
+      metadata: { mailercloudCampaignId: mail.campaignId, audience: audienceCount, mode, sent: sentCount, failed: mail.delivery.failed || 0 },
+    });
+  } catch (e) {
+    console.warn(`[mailer] campaign doc write failed (non-fatal): ${e?.message || e}`);
+  }
+}
+
+/** Mark the task done/failed when nothing is left; requeue dead chains.
+ *  ALWAYS re-reads the task first: the delivery chain advances the
+ *  persisted state concurrently (it may even finish while this run is
+ *  still in its loop) — writing from a stale in-memory copy would
+ *  resurrect finished emails and clobber the sent-ledger. */
+async function finalizeTaskIfComplete(store, task) {
+  const fresh = (await getTask(store, task.id)) || task;
+  const emails = fresh.emails || [];
+  const remaining = emails.filter((m) => m.status === 'planned' || m.status === 'sending');
+  if (remaining.length) {
+    let dirty = false;
+    for (const m of remaining) {
+      if (m.status !== 'sending') continue;
+      // A 'sending' email whose chain lock is stale means the runner died
+      // mid-batch — requeue it (the ledger resumes exactly where it stopped).
+      if (!(await chainAlive(store, fresh.id, m.seq))) {
+        m.status = 'planned';
+        m.sendAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        dirty = true;
       }
     }
-    if (dedicated) targetListId = dedicated;
+    if (dirty) await putTask(store, touch(fresh, {}));
+    // Mirror authoritative status onto the caller's copy (log/UI only).
+    task.status = fresh.status;
+    return false;
   }
-
-  const campaign = await mc.createAndPublishCampaign({
-    name: `AI | ${crmCampaignId} | ${copy.subject.slice(0, 60)}`,
-    subject: copy.subject,
-    html,
-    preheader: copy.preheader,
-    listId: targetListId,
-    scheduledAt: isoToAccountTime(mail.sendAt, timezone),
-    brand,
-  });
-  const campaignId = campaign?.id ?? campaign?.data?.id ?? null;
-  if (!campaignId) throw new Error('MailerCloud campaign creation returned no id');
-  return { status: 'scheduled', campaignId, summary: { mailercloud_campaign: String(campaignId), scheduled_for: mail.sendAt, list: targetListId } };
-}
-
-function describeDelivery(delivery, { mode, audience, sendAt, taskId, instruction } = {}) {
-  const s = delivery.summary || {};
-  if (mode === 'transactional') {
-    return [
-      `Email ${sendAt ? `planned for ${sendAt}` : ''} of task ${taskId || ''}`,
-      `${s.sent ?? 0} accepted, ${s.failed ?? 0} failed, ${s.deferred ?? 0} deferred of ${audience ?? '?'} recipients`,
-      instruction ? `(${String(instruction).slice(0, 120)})` : '',
-    ].filter(Boolean).join(' → ');
+  const failed = emails.filter((m) => m.status === 'failed');
+  const finalStatus = failed.length === emails.length && emails.length > 0 ? 'failed' : 'done';
+  if (fresh.status !== finalStatus) {
+    addEvent(
+      fresh,
+      finalStatus === 'done'
+        ? 'All emails processed. Campaigns are visible in the app.'
+        : 'Every email failed — see the email errors. You can retry from the task card.',
+      finalStatus === 'done' ? 'info' : 'error'
+    );
+    await putTask(store, touch(fresh, { status: finalStatus }));
   }
-  return `Campaign ${s.mailercloud_campaign || ''} scheduled for ${s.scheduled_for || sendAt} to ${audience ?? '?'} recipients`;
+  task.status = fresh.status;
+  return true;
 }
 
 /* ══════════════════════ Helpers ══════════════════════ */
-
-function describeRecipients(audience) {
-  const emails = audience.map((c) => c.email);
-  if (emails.length <= 3) return emails.join(', ');
-  return `${emails.slice(0, 3).join(', ')} +${emails.length - 3} more`;
-}
 
 function contactStats(contacts) {
   const segs = {};

@@ -59,6 +59,17 @@ function ok(cond, name, extra = '') {
 /* ── Fetch mock ─────────────────────────────────────────────────── */
 const captured = { sends: [], lists: [], batches: [], campaigns: [] };
 let listCounter = 0;
+// The delivery chain calls ITSELF at MAIL_SELF_URL; the mock routes that
+// into the real deliverInternal and drains nested kicks synchronously.
+let LIVE_ENV = null;
+const kickQueue = [];
+async function drainKicks() {
+  let guard = 0;
+  while (kickQueue.length && guard++ < 500) {
+    const batch = kickQueue.splice(0);
+    await Promise.allSettled(batch);
+  }
+}
 const sarvamScript = [];
 function sarvamReplyFor(text) {
   for (const s of sarvamScript) if (s.match(text)) return s.reply;
@@ -69,6 +80,13 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url instanceof Request ? url.url : url);
   const body = typeof init.body === 'string' ? init.body : '';
+  if (u === 'https://worker.test/v1/mail/deliver') {
+    const payload = JSON.parse(body);
+    const { deliverInternal } = await import('../cloudflare/worker/src/emailer/pipeline.js');
+    const res = await deliverInternal(LIVE_ENV, payload, { waitUntil: (p) => kickQueue.push(Promise.resolve(p).catch(() => {})) });
+    await drainKicks();
+    return jsonRes(res.status, await res.json().catch(() => ({})));
+  }
   if (u.startsWith('https://api.sarvam.ai/')) {
     const parsed = JSON.parse(body);
     const text = parsed.messages.map((m) => m.content).join('\n');
@@ -126,7 +144,7 @@ async function makeEnv(overrides = {}) {
       tags: [], segments: [], createdAt: '2026-08-01T10:00:00.000Z', teamId: 'default-team',
     });
   }
-  return {
+  const env = {
     DB: db,
     FIREBASE_PROJECT_ID: 'nebula-crm-70f58',
     MAILERCLOUD_API_KEY: 'mc_test_key',
@@ -139,8 +157,11 @@ async function makeEnv(overrides = {}) {
     MAIL_SENDER_EMAIL: 'das@aidraft.bond',
     MAIL_RUN_RETRY_MS: '20',
     MAIL_ANALYTICS_INTERVAL_HOURS: '24',
+    MAIL_SELF_URL: 'https://worker.test',
     ...overrides,
   };
+  LIVE_ENV = env;
+  return env;
 }
 
 function storeOf(env) { return createStore(env); }
@@ -244,12 +265,12 @@ console.log('\n— 2. Click + unsub recording → suppression + contact opt-out 
   ok(junk.already === true && junk.fresh === false, 'malformed token ignored safely');
 }
 
-/* ── 3. Audience guards: suppression + frequency cap ────────────── */
-console.log('\n— 3. Audience guards: suppressed + recently-emailed are held back —');
+/* ── 3. Audience guards: unsubs absolute, owner count tops up ───── */
+console.log('\n— 3. Audience guards: unsubs never email; owner count tops the cap —');
 {
   const env = await makeEnv();
   const store = storeOf(env);
-  // Asha unsubscribed; Vik was emailed 2h ago; Maya is fair game.
+  // Asha unsubscribed; Vik was emailed 2h ago; Maya is fresh.
   await store.put('mail:suppressions', JSON.stringify([{ email: 'asha@example.com', code: 'unsub', at: new Date().toISOString() }]));
   await store.put('mail:sentlog', JSON.stringify([{ email: 'vik@example.com', at: new Date(Date.now() - 2 * 3600e3).toISOString() }]));
 
@@ -264,26 +285,29 @@ console.log('\n— 3. Audience guards: suppressed + recently-emailed are held ba
   const task = {
     id: 't_guard', instruction: 'email everyone', source: 'api', createdBy: 'u1',
     status: 'active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    plan: { audience: { segment: null, max_recipients: 100 }, explicit_recipients: [], emails: [{ seq: 1, sendAt: due, goal: 'g', angle: 'a', tone: 't', template_style: 'modern' }] },
+    plan: { audience: { segment: null, max_recipients: 100, owner_specified: true }, explicit_recipients: [], emails: [{ seq: 1, sendAt: due, goal: 'g', angle: 'a', tone: 't', template_style: 'modern' }] },
     emails: [{ seq: 1, sendAt: due, status: 'planned', subject: null, campaignId: null, crmCampaignId: null, templateId: null }],
     events: [], error: null,
   };
   await putTask(store, task);
 
   const run = await runPipeline(env, { trigger: 'test', onlyTaskId: 't_guard', force: true });
+  await Promise.allSettled((run.kicks || []).filter(Boolean));
   const sentTo = captured.sends.map((s) => s.body.email.recipients.to[0].email.toLowerCase());
-  ok(sentTo.length === 1 && sentTo[0] === 'maya@example.com',
-    `exactly 1 send — only the eligible contact (${JSON.stringify(sentTo)})`);
-  ok(run.log.some((l) => l.includes('held back')), 'run log reports the held-back count');
+  ok(!sentTo.includes('asha@example.com'), 'the UNSUBSCRIBED contact is never emailed', JSON.stringify(sentTo));
+  ok(sentTo.length === 2 && sentTo.includes('maya@example.com') && sentTo.includes('vik@example.com'),
+    'owner asked for everyone → fresh + recently-emailed both included', JSON.stringify(sentTo));
 
   const after = await getTask(store, 't_guard');
+  ok(after.events.some((e) => e.text.includes('unsubscribed or bounced')), 'event reports the suppressed contact', JSON.stringify(after.events.map((e) => e.text)));
   ok(after.emails[0].status === 'sent', 'email marked sent');
   ok(Array.isArray(after.emails[0].sentEmails) && after.emails[0].sentEmails[0] === 'maya@example.com',
-    'sentEmails persisted for resume');
-  ok(after.emails[0].delivery && after.emails[0].delivery.sent === 1, 'delivery summary on the task');
+    'sentEmails ledger persisted (fresh contacts first)');
+  ok(after.emails[0].delivery && after.emails[0].delivery.sent === 2, 'delivery summary on the task');
 
   const log = JSON.parse(await store.get('mail:sentlog'));
-  ok(log.some((r) => r.email === 'maya@example.com'), 'send log appended (frequency cap feeds itself)');
+  ok(log.some((r) => r.email === 'maya@example.com') && log.some((r) => r.email === 'vik@example.com'),
+    'send log appended (frequency cap feeds itself)');
 }
 
 /* ── 4. Resume: crashed mid-send never double-sends ─────────────── */
@@ -311,7 +335,8 @@ console.log('\n— 4. Resume: a crashed "sending" run only sends the remainder �
   };
   await putTask(store, task);
   captured.sends.length = 0;
-  await runPipeline(env, { trigger: 'test', onlyTaskId: 't_resume', force: true });
+  const runRes = await runPipeline(env, { trigger: 'test', onlyTaskId: 't_resume', force: true });
+  await Promise.allSettled((runRes.kicks || []).filter(Boolean));
   const sentTo = captured.sends.map((s) => s.body.email.recipients.to[0].email.toLowerCase());
   ok(!sentTo.includes('asha@example.com'), 'already-sent recipient skipped after crash', JSON.stringify(sentTo));
   ok(sentTo.length === 2, 'remaining two recipients delivered', JSON.stringify(sentTo));
@@ -341,7 +366,8 @@ console.log('\n— 5. Campaign mode: dedicated list = EXACTLY the asked recipien
   };
   await putTask(store, task);
   captured.lists.length = 0; captured.campaigns.length = 0; captured.batches.length = 0;
-  await runPipeline(env, { trigger: 'test', onlyTaskId: 't_big', force: true });
+  const bigRun = await runPipeline(env, { trigger: 'test', onlyTaskId: 't_big', force: true });
+  await Promise.allSettled((bigRun.kicks || []).filter(Boolean));
 
   const dedicated = captured.lists.find((l) => l.name.includes('ai_t_big_1'));
   ok(!!dedicated, 'dedicated list created for the campaign', JSON.stringify(captured.lists.map((l) => l.name)));
@@ -385,7 +411,9 @@ console.log('\n— 7. Agentic assistant: snapshot → tools → reply (+ create_
     { match: (t) => t.includes('TOOL_RESULT') && step === 1, reply: { action: { tool: 'create_email_task', args: { instruction: 'Send Maya an introduction email about Aidraft Legal' } } } },
     { match: (t) => t.includes('TOOL_RESULT') && step === 2, reply: { reply: 'Maya is at maya@example.com — and I queued an intro email task for her. You can watch it in the AI Email screen.' } },
   );
-  const advance = () => { step++; };
+  const advance = () => { step++ };
+  const pending = [];
+  const collectorCtx = { waitUntil: (p) => pending.push(Promise.resolve(p).catch(() => {})) };
 
   async function ask(messages) {
     const req = new Request('https://worker.test/v1/assistant', {
@@ -393,7 +421,7 @@ console.log('\n— 7. Agentic assistant: snapshot → tools → reply (+ create_
       headers: { Authorization: 'Bearer x', 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages }),
     });
-    const res = await handleAssistant(req, env, { uid: 'user_123', ctx: { waitUntil: () => {} } });
+    const res = await handleAssistant(req, env, { uid: 'user_123', ctx: collectorCtx });
     advance();
     return { res, json: await res.json() };
   }
@@ -402,14 +430,28 @@ console.log('\n— 7. Agentic assistant: snapshot → tools → reply (+ create_
   // step is not how the Worker works internally — the Worker loops itself —
   // so instead we script step-wise: run 1 does all steps internally).
   step = 0;
+  captured.sends.length = 0;
   sarvamScript.length = 0;
+  // Specific pipeline prompts FIRST (the create_email_task kick runs the
+  // mailer pipeline concurrently with the assistant loop), then the
+  // assistant's step-wise entries as catch-alls.
   sarvamScript.push(
-    { match: (t) => !t.includes('TOOL_RESULT ('), reply: { action: { tool: 'search_contacts', args: { query: 'maya', limit: 5 } } } },
-    { match: (t) => t.includes('TOOL_RESULT (search_contacts)') && !t.includes('TOOL_RESULT (create_email_task)'), reply: { action: { tool: 'create_email_task', args: { instruction: 'Send Maya a short introduction email about Aidraft Legal.' } } } },
+    { match: (t) => t.includes('build a marketing brief'), reply: { business_type: 'Aidraft Legal AI drafting', industry: 'Legal tech', target_audience: 'law practices', tone: 'premium', topics_pool: [], segment_hints: [], language: 'en' } },
+    { match: (t) => t.includes('OWNER TASK'), reply: {
+        understanding: 'Owner wants a short intro email to Maya.',
+        audience: { segment: null, max_recipients: 1 },
+        explicit_recipients: ['maya@example.com'],
+        emails: [{ seq: 1, sendAt: new Date(Date.now() + 60_000).toISOString(), goal: 'Introduce Aidraft Legal', angle: 'warm intro', tone: 'friendly', template_style: 'modern' }],
+        reasoning: 'Named recipient, immediate.',
+      } },
+    { match: (t) => t.includes('Write ONE high-engagement marketing email'), reply: { ...copy } },
     { match: (t) => t.includes('TOOL_RESULT (create_email_task)'), reply: { reply: 'Found Maya (maya@example.com, Initech) and queued an on-brand intro email — see the AI Email screen.' } },
+    { match: (t) => t.includes('TOOL_RESULT (search_contacts)'), reply: { action: { tool: 'create_email_task', args: { instruction: 'Send Maya a short introduction email about Aidraft Legal.' } } } },
+    { match: (t) => true, reply: { action: { tool: 'search_contacts', args: { query: 'maya', limit: 5 } } } },
   );
 
   const { res, json } = await ask([{ role: 'user', content: "What is Maya's email and can you intro her to Aidraft?" }]);
+  await Promise.allSettled(pending); // let the create_email_task kick finish planning
   ok(res.status === 200, 'POST /v1/assistant → 200', JSON.stringify(json).slice(0, 160));
   ok(json.reply && json.reply.includes('Maya'), 'final reply mentions the person', json.reply);
   ok(Array.isArray(json.actions) && json.actions.length === 2, 'two tool actions executed', JSON.stringify(json.actions));
@@ -419,7 +461,9 @@ console.log('\n— 7. Agentic assistant: snapshot → tools → reply (+ create_
   const tasks = await listTasks(store);
   const created = tasks.find((t) => t.source === 'assistant');
   ok(!!created && created.instruction.includes('Maya'), 'email task actually queued by the assistant');
-  ok(created.status === 'pending', 'queued task waits for the pipeline (same gates as the app)');
+  ok(created.status === 'done', 'assistant-queued task PLANNED AND DELIVERED (no waiting for cron)', created.status);
+  const mayaSent = captured.sends.some((s) => s.body?.email?.recipients?.to?.[0]?.email === 'maya@example.com');
+  ok(mayaSent, 'the assistant-queued campaign actually delivered to Maya', JSON.stringify(captured.sends.map((s) => s.body?.email?.recipients?.to?.[0]?.email)));
 
   // crm_overview from seeded D1
   const req2 = new Request('https://worker.test/v1/assistant', {
