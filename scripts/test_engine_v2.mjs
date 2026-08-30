@@ -69,10 +69,29 @@ function sarvamReplyFor(text) {
   throw new Error('sarvam mock: no scripted reply for: ' + text.slice(0, 90).replace(/\n/g, ' '));
 }
 
+// The delivery chain calls ITSELF at MAIL_SELF_URL; the mock routes that
+// into the real deliverInternal and drains nested kicks synchronously.
+let LIVE_ENV = null;
+const kickQueue = [];
+async function drainKicks() {
+  let guard = 0;
+  while (kickQueue.length && guard++ < 500) {
+    const batch = kickQueue.splice(0);
+    await Promise.allSettled(batch);
+  }
+}
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url instanceof Request ? url.url : url);
   const body = typeof init.body === 'string' ? init.body : '';
+  if (u === 'https://worker.test/v1/mail/deliver') {
+    const payload = JSON.parse(body);
+    const { deliverInternal } = await import('../cloudflare/worker/src/emailer/pipeline.js');
+    const res = await deliverInternal(LIVE_ENV, payload, { waitUntil: (p) => kickQueue.push(Promise.resolve(p).catch(() => {})) });
+    await drainKicks();
+    return jsonRes(res.status, await res.json().catch(() => ({})));
+  }
   if (u.startsWith('https://api.sarvam.ai/')) {
     const parsed = JSON.parse(body);
     const text = parsed.messages.map((m) => m.content).join('\n');
@@ -141,6 +160,7 @@ async function makeEnv(overrides = {}) {
     MAIL_BUSINESS_NAME: 'Aurora Labs',
     MAIL_BRAND_COLOR: '#7C5CFF',
     MAIL_WEBSITE_URL: 'https://auroralabs.example',
+    MAIL_SELF_URL: 'https://worker.test',
     ...overrides,
   };
 }
@@ -316,10 +336,11 @@ console.log('\n4) Worker-pool engine');
 }
 
 /* ══ 5. Overlapped list sync — outage is non-fatal ═══════════════ */
-console.log('\n5) List-sync resilience + overlap');
+console.log('\n5) Delivery chain through /list outage + design-note flow');
 {
   const { putTask, listTasks } = await import('../cloudflare/worker/src/emailer/tasks.js');
-  const env = await makeEnv({ MAIL_FREQ_HOURS: '0' });
+  const env = await makeEnv({ MAIL_FREQ_HOURS: '0', MAIL_SEND_CHUNK: '2' });
+  LIVE_ENV = env; // self-URL kicks route back into this env
   const store = createStore(env);
 
   sarvamScript.length = 0;
@@ -345,6 +366,7 @@ console.log('\n5) List-sync resilience + overlap');
   captured.batches.length = 0;
   failListEndpoint = true; // MailerCloud /list is DOWN
   const r = await runPipeline(env, { trigger: 'test', force: true });
+  await Promise.allSettled((r.kicks || []).filter(Boolean)); // drive the prepare/chunk chain
   failListEndpoint = false;
   ok(r.ok !== false, 'pipeline completed despite /list outage', JSON.stringify(r).slice(0, 300));
   ok(captured.sends.length === 3, 'all 3 transactional emails sent anyway', `sends=${captured.sends.length}`);
