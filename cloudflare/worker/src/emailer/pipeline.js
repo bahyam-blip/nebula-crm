@@ -982,17 +982,21 @@ function kickChain(env, { action, taskId, seq = '', from = null }) {
   return (async () => {
     try {
       const sig = await runSig(env, `${action}|${taskId}|${seq}`);
-      const req = new Request(`${base || 'https://self.local'}/v1/mail/deliver`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-nebula-deliver': sig },
-        body: JSON.stringify({ action, taskId, seq, from }),
-      });
+      const payload = JSON.stringify({ action, taskId, seq, from });
       // Prefer the service binding: a Worker on workers.dev cannot HTTP-fetch
       // itself (Cloudflare error 1042), and a bound invocation gets a FRESH
       // subrequest budget — the whole point of the chain.
       const res = env.SELF
-        ? await env.SELF.fetch(req)
-        : await fetch(req);
+        ? await env.SELF.fetch(new Request(`${base || 'https://self.local'}/v1/mail/deliver`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-nebula-deliver': sig },
+            body: payload,
+          }))
+        : await fetch(`${base}/v1/mail/deliver`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-nebula-deliver': sig },
+            body: payload,
+          });
       if (!res.ok) {
         // Make silent chain failures VISIBLE — the owner sees exactly why
         // nothing moved instead of a task that sits "queued" forever.
