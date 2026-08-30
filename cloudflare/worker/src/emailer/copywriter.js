@@ -26,7 +26,12 @@ const COPY_SCHEMA_PROMPT = `Return ONLY a JSON object:
 }
 Rules: no fake statistics, no fake testimonials, no invented customer names, no false scarcity.
 NEVER write a greeting/salutation (Hi …, Hello …, Dear …) anywhere — the template adds a
-personalized "Hi {{first_name}}," line automatically. Start the intro straight into the hook.`;
+personalized "Hi {{first_name}}," line automatically. Start the intro straight into the hook.
+FORBIDDEN TOPICS — the reader is a CUSTOMER of the business, so NEVER write about: email
+infrastructure (MailerCloud, SMTP, API keys, endpoints, deliverability, inbox placement, open
+rates), the CRM/admin tool, this campaign engine, testing/diagnostics, or the fact that this is
+a marketing email. If the owner's task mentions any of these, TRANSLATE them into customer-facing
+benefit language (what the customer gets, feels or achieves).`;
 
 /**
  * The creative playbook — what separates an elite email marketer from a
@@ -105,6 +110,56 @@ export async function writeEmail(env, task, planEmail, brief, learnings, memory 
     cta_url: String(planEmail.link_url || '').trim().slice(0, 500),
     closing: String(copy.closing || 'Talk soon,'),
     ps: String(copy.ps || '').slice(0, 300),
+  };
+}
+
+/**
+ * Static fallback sample campaign — used when the AI is unavailable or the
+ * owner just wants an instant preview. Reads like a REAL customer-facing
+ * campaign in the owner's brand voice (NEVER like infrastructure diagnostics:
+ * no API names, no endpoints, no "your email system works" meta talk).
+ * Adapts to whatever the Business Profile knows about the business.
+ */
+export function sampleCampaignCopy(brand, profile = null) {
+  const name = brand?.name || 'our business';
+  const p = profile || {};
+  const about = String(p.about || p.industry || '').trim();
+  const audience = String(p.audience || '').trim();
+  const products = Array.isArray(p.products) ? p.products.filter(Boolean) : [];
+  const focus = products[0] || '';
+  const site = brand?.website || '';
+
+  const subject = focus
+    ? `${focus} — a quick look at what ${name} does differently`
+    : `A quick look at what ${name} can do for you`;
+  const headline = brand?.tagline || `Real results, without the busywork`;
+  const intro = about
+    ? `${name} — ${about}. We help ${audience || 'people like you'} get there faster, with less friction. Here is what that looks like in practice.`
+    : `${name} helps ${audience || 'busy people like you'} get more done with less friction. Here is what that looks like in practice.`;
+
+  return {
+    subject: String(subject).slice(0, 120),
+    preheader: `A preview of the campaigns ${name} sends — your brand, your voice, ready for your audience.`,
+    headline: String(headline).slice(0, 120),
+    intro,
+    sections: [
+      {
+        title: 'Built around you',
+        body: focus
+          ? `Everything starts with ${focus}${products[1] ? ` and ${products[1]}` : ''} — shaped by what ${audience || 'our clients'} actually ask for, not by what is easy to build. You bring the goal; we bring the shortcut.`
+          : `Everything we make starts with a real problem, told to us by a real client. You bring the goal, we bring the shortcut — and you stay in control of every step.`,
+      },
+      {
+        title: site ? 'See it for yourself' : 'What happens next',
+        body: site
+          ? `One click below takes you straight to ${name} — no forms to fill in just to look around. Browse, get a feel for the work, and reach out when it clicks.`
+          : `Over the next few emails we will show you exactly how ${name} works, one idea at a time. Short, useful, never filler — starting with the one thing most ${audience || 'clients'} get wrong on day one.`,
+      },
+    ],
+    cta_text: site ? 'Visit us' : 'Learn more',
+    cta_url: brand?.ctaUrl || site || '',
+    closing: 'Talk soon,',
+    ps: `This is a sample from ${name}'s campaign set — every real email is written fresh by your AI for the moment you send it.`,
   };
 }
 

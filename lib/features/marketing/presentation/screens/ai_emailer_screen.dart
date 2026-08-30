@@ -149,21 +149,23 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
     }
   }
 
-  /// Go-live check: one REAL email through the transactional endpoint.
+  /// See exactly what your customers receive: a real, customer-facing sample
+  /// campaign in your brand voice (AI-drafted, honouring your instruction).
   Future<void> _sendTest() async {
     final controller = TextEditingController(
       text: FirebaseAuth.instance.currentUser?.email ?? '',
     );
+    final instruction = TextEditingController();
     final to = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Send a test email'),
+        title: const Text('Preview a sample campaign'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'One real email is sent right now from your verified sender (das@aidraft.bond) through MailerCloud\'s transactional API.',
+              'Your AI writes a fresh sample campaign in your brand voice and sends it to you — exactly what your customers will receive.',
               style: context.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -177,11 +179,21 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: instruction,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'What should it be about? (optional)',
+                hintText: 'e.g. festive Diwali offer for law firms',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Send test')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Send sample')),
         ],
       ),
     );
@@ -190,9 +202,10 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
 
     setState(() => _busy = true);
     try {
-      final r = await ref.read(mailApiProvider).sendTestEmail(to);
+      final r = await ref.read(mailApiProvider).sendTestEmail(to, instruction: instruction.text);
       if (r['ok'] == true) {
-        _toast('Sent to ${r['sent_to']} from ${r['from']} — check MailerCloud Logs to confirm.');
+        final subj = (r['subject'] ?? '').toString();
+        _toast('Sample sent to ${r['sent_to']} — open it to see what your customers get${subj.isNotEmpty ? ' ("$subj")' : ''}.');
       } else {
         final code = r['provider_status'] ?? '?';
         final err = (r['error'] ?? r['message'] ?? 'unknown error').toString();
@@ -270,7 +283,7 @@ class _AiEmailerScreenState extends ConsumerState<AiEmailerScreen> {
             icon: const Icon(Icons.psychology_alt_outlined, size: 20),
           ),
           IconButton(
-            tooltip: 'Send a test email (go-live check)',
+            tooltip: 'Preview a sample campaign — see what your customers receive',
             onPressed: _busy ? null : _sendTest,
             icon: const Icon(Icons.outgoing_mail, size: 20),
           ),
@@ -862,7 +875,7 @@ class _StatusCard extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: onTestSend,
                 icon: const Icon(Icons.outgoing_mail, size: 16),
-                label: const Text('Send test email — verify the connection'),
+                label: const Text('Preview a sample campaign'),
               ),
             ),
           ],

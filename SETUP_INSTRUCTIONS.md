@@ -208,17 +208,18 @@ identity is already pinned to the account's verified domain sender
    sender even when the optional secret is absent).
 
 3. **Go-live check (30 seconds)** — open the app → **AI Email** → tap the
-   **send (test) icon** (or **Send test email** on the status card) and enter
-   your own address. One real email is sent immediately through the
-   transactional endpoint `email-api.mailercloud.com/email` from
-   `das@aidraft.bond`. Then check **MailerCloud → Logs** — the message must
-   appear there. If the provider returns an error (e.g. `9011 sender not
-   verified`), the app shows the exact code to report.
+   **send (sample) icon** (or **Preview a sample campaign** on the status
+   card) and enter your own address. One real email arrives immediately: a
+   full sample campaign in your brand voice — exactly what your customers
+   will receive (add an instruction like "festive Diwali offer for law
+   firms" to steer the AI, or a `style` to demo any of the 10 templates).
+   If the provider returns an error (e.g. `9011 sender not verified`), the
+   app shows the exact code to report.
 
    Terminal equivalent:
    ```bash
    curl -X POST "$WORKER/v1/mail/test" -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" -d '{"to":"you@example.com"}'
+     -H "Content-Type: application/json" -d '{"to":"you@example.com","instruction":"festive Diwali offer","style":"aurora"}'
    ```
 
 4. **Optional** — edit `cloudflare/worker/wrangler.toml` vars to give the AI

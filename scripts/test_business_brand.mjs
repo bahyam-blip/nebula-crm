@@ -294,7 +294,9 @@ console.log('\n— 2. Test send goes out under the business brand —');
   const t = await call(env, 'POST', '/v1/mail/test', { to: 'owner@example.com' });
   ok(t.res.status === 200 && t.json.ok === true, 'POST /test → ok');
   ok(t.json.from === 'Aidraft Legal <das@aidraft.bond>', 'From display = business brand', t.json.from);
-  ok(t.json.subject.startsWith('Aidraft Legal test email'), 'subject fallback uses business name', t.json.subject);
+  ok(!/test email/i.test(t.json.subject) && t.json.subject.includes('Aidraft Legal'),
+    'subject is a real customer-facing campaign subject (no "test email")', t.json.subject);
+  ok(t.json.drafted_by === 'signature', 'no AI script → signature sample used', t.json.drafted_by);
 
   const send = captured.sends.at(-1);
   ok(send?.body?.email?.fromName === 'Aidraft Legal', 'provider payload fromName = brand', send?.body?.email?.fromName);
@@ -305,6 +307,35 @@ console.log('\n— 2. Test send goes out under the business brand —');
   ok(html.includes('Team Aidraft'), 'HTML signature = Team Aidraft');
   ok(!html.includes('Team Nebula CRM') && !html.includes('© ' + new Date().getUTCFullYear() + ' Nebula CRM'), 'no Nebula CRM branding leaks through');
   ok(html.includes('https://aidraft.bond'), 'website link present');
+  // THE regression the owner caught on 2026-08-30: the sample campaign must
+  // NEVER talk about the plumbing (MailerCloud / APIs / endpoints / "system
+  // works"). It reads like a real email a customer would receive.
+  const backendLeaks = ['MailerCloud', 'mailercloud', 'API key', 'API at', 'transactional', 'email system works', 'What this proves', 'One last thing to confirm'];
+  ok(backendLeaks.every((w) => !html.includes(w)), 'email body has ZERO backend/infrastructure talk', backendLeaks.filter((w) => html.includes(w)).join(', '));
+  ok(html.includes('quick look at what Aidraft Legal'), 'signature sample adapts to the business name', '');
+  ok(t.json.template_style === 'modern', 'default style = modern', t.json.template_style);
+
+  // Owner picks a different template → the SAME route renders it.
+  const t2 = await call(env, 'POST', '/v1/mail/test', { to: 'owner@example.com', style: 'aurora' });
+  ok(t2.res.status === 200 && t2.json.ok === true && t2.json.template_style === 'aurora', 'style param honoured', t2.json.template_style);
+  const html2 = captured.sends.at(-1)?.body?.email?.html || '';
+  ok(html2.includes('#07080f'), 'aurora template rendered (dark premium markup)');
+
+  // With the AI reachable, the sample is freshly drafted (drafted_by: ai).
+  sarvamScript = [
+    { match: (txt) => txt.includes('Write ONE high-engagement'), reply: {
+        subject: 'Three hours back, every single week', preheader: 'Drafting that used to take an afternoon',
+        headline: 'Your drafting, on autopilot', intro: 'Straight to the point.', sections: [{ title: 'Why', body: 'Because time wins cases.' }],
+        cta_text: 'See it live', closing: 'Cheers,', ps: '',
+      } },
+  ];
+  const t3 = await call(env, 'POST', '/v1/mail/test', { to: 'owner@example.com', instruction: 'focus on time saved' });
+  ok(t3.json.ok === true && t3.json.drafted_by === 'ai', 'AI available → sample freshly drafted', t3.json.drafted_by);
+  ok(t3.json.subject === 'Three hours back, every single week', 'AI subject used', t3.json.subject);
+  const html3 = captured.sends.at(-1)?.body?.email?.html || '';
+  ok(html3.includes('Your drafting, on autopilot'), 'AI copy rendered into the email');
+  ok(backendLeaks.every((w) => !html3.includes(w)), 'AI-drafted sample also free of backend talk');
+  sarvamScript = [];
 }
 
 console.log('\n— 3. 1:1 sending — every recipient gets a PRIVATE copy —');

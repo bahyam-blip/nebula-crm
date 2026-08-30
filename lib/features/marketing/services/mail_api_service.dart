@@ -827,14 +827,17 @@ class MailApiService {
         body: {'email': email, 'reason': reason});
   }
 
-  /// Send ONE real email to [to] through the transactional endpoint
-  /// (email-api.mailercloud.com/email) — the go-live check. Returns the
-  /// full provider reply: {ok, sent_to, from, endpoint, provider, next_step}
+  /// Send a SAMPLE CAMPAIGN to [to] — the owner sees exactly what their
+  /// customers receive: a real, customer-facing email in their brand voice
+  /// (AI-drafted honouring [instruction], rendered in [style]). Returns
+  /// {ok, sent_to, from, subject, template_style, drafted_by, next_step}
   /// or {ok:false, provider_status, error, message} on failure.
-  Future<Map<String, dynamic>> sendTestEmail(String to, {String? subject}) async {
+  Future<Map<String, dynamic>> sendTestEmail(String to, {String? subject, String? instruction, String? style}) async {
     return _send('POST', '/v1/mail/test', body: {
       'to': to,
       if (subject != null && subject.trim().isNotEmpty) 'subject': subject,
+      if (instruction != null && instruction.trim().isNotEmpty) 'instruction': instruction,
+      if (style != null && style.trim().isNotEmpty) 'style': style,
     });
   }
 }

@@ -71,7 +71,7 @@ import {
 } from './emailapi.js';
 import { fetchCrmContacts, upsertCampaignDoc, logActivity } from './firestore.js';
 import { buildBusinessBrief, planTask } from './planner.js';
-import { writeEmail, renderHtml, saveTemplate } from './copywriter.js';
+import { writeEmail, renderHtml, saveTemplate, sampleCampaignCopy } from './copywriter.js';
 import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled } from './analytics.js';
 import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, retryTaskState, progressOf } from './tasks.js';
 import { createStore, stateBackendName, safeParse } from './state.js';
@@ -330,9 +330,12 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     return json({ ok: true, profile, taught, brand: { name: brand.name, fromName: brand.fromName, signature: brand.signature, branded: brand.branded } });
   }
 
-  // ── TEST SEND — the go-live check. Sends ONE real email right now via
-  //    the transactional Email API. Needs only MAILERCLOUD_API_KEY; works
-  //    regardless of dry-run (it is explicit and owner-triggered).
+  // ── SAMPLE CAMPAIGN SEND — the owner sees EXACTLY what their customers
+  //    will receive. The email body is a real, customer-facing campaign in
+  //    the owner's brand voice (AI-drafted when Sarvam is reachable, premium
+  //    static sample otherwise) — NEVER infrastructure diagnostics. All the
+  //    provider/connection detail stays in this JSON response instead.
+  //    Body controls: { to, name?, subject?, style?, instruction? }.
   if (sub === '/test' && request.method === 'POST') {
     if (!state.canSend) return json({ error: 'MAILERCLOUD_API_KEY is not configured', ...state }, 503);
     const body = await request.json().catch(() => ({}));
@@ -342,37 +345,51 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
     const profile = await getBusinessProfile(store);
     const brand = brandFor(env, profile);
     const sender = resolveSender(env, brand);
-    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
-    const bizName = brand.name;
-    const copy = {
-      subject: String(body.subject || '').trim() || `${bizName} test email — ${stamp}`,
-      preheader: 'If this lands in your inbox, the CRM → MailerCloud connection works end to end.',
-      headline: 'Your email system works',
-      intro: `This is a live test email sent directly from ${bizName} through the MailerCloud Email API at ${EMAIL_API_BASE}/email — the transactional endpoint your CRM uses.`,
-      sections: [
-        {
-          title: 'What this proves',
-          body: `Your MailerCloud API key authenticated successfully, and the message was sent from the verified sender ${sender.from} (${sender.fromName}). The request used version 1.0 of the send-email contract with both HTML and plain-text parts for the best inbox placement.`,
-        },
-        {
-          title: 'One last thing to confirm',
-          body: 'Open your MailerCloud account and go to Logs — this message should appear there within a minute. Once you see it, every AI-planned campaign from the CRM will deliver through the same verified identity.',
-        },
-      ],
-      cta_text: brand.website ? 'Visit us' : 'Open Nebula CRM',
-      closing: 'Happy sending,',
-      ps: 'Re-run this test any time from the AI Email screen — it never touches your contact lists.',
-    };
-    const html = renderHtml(env, copy, { brand });
+    const style = normalizeStyle(String(body.style || '')) || normalizeStyle(brand.defaultStyle) || 'modern';
+    const instruction = String(body.instruction || '').trim().slice(0, 400);
+
+    // Draft the sample like a real campaign: AI first (it knows the business
+    // memory + the owner's instruction), static signature sample as fallback.
+    let copy = null;
+    let draftedBy = 'signature';
+    try {
+      const memory = await getMemory(store).catch(() => null);
+      const brief = {
+        business_name: brand.name,
+        tagline: brand.tagline || '',
+        about: profile?.about || '',
+        audience: profile?.audience || '',
+        products: Array.isArray(profile?.products) ? profile.products : [],
+        tone: profile?.tone || (brand.defaultStyle === 'letter' ? 'warm and personal' : 'confident and clear'),
+        website: brand.website || '',
+      };
+      const planEmail = {
+        seq: 1,
+        sendAt: new Date().toISOString(),
+        goal: instruction || 'A short sample campaign that shows exactly what this business sends its customers',
+        angle: instruction ? 'follow the owner instruction directly' : 'the single most compelling reason to care about this business',
+        tone: profile?.tone || 'friendly',
+        template_style: style,
+        design_notes: instruction,
+      };
+      copy = await writeEmail(env, { id: 'sample', instruction: planEmail.goal, plan: { emails: [planEmail], reasoning: 'sample preview' } }, planEmail, brief, null, memory);
+      draftedBy = 'ai';
+    } catch (e) {
+      console.warn(`[mailer] sample campaign AI draft unavailable (${e.message}) — using the signature sample.`);
+      copy = sampleCampaignCopy(brand, profile);
+    }
+    // An explicit owner subject always wins; AI subject next; static subject last.
+    const subject = String(body.subject || '').trim() || copy.subject;
+    const html = renderHtml(env, copy, { brand, style });
 
     const res = await sendEmail(env, {
       to: [{ name: String(body.name || '').slice(0, 100), email: to }],
-      subject: copy.subject,
+      subject,
       html,
       brand,
       metadata: {
-        messageId: `nebula-test-${Date.now().toString(36)}`,
-        custom: { campaign_id: 'nebula-test-send', source: 'nebula-ai-mailer' },
+        messageId: `nebula-sample-${Date.now().toString(36)}`,
+        custom: { campaign_id: 'nebula-sample-send', source: 'nebula-ai-mailer' },
       },
     });
 
@@ -381,11 +398,12 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
         ok: true,
         sent_to: to,
         from: `${sender.fromName} <${sender.from}>`,
-        subject: copy.subject,
+        subject,
+        template_style: style,
+        drafted_by: draftedBy,
         branded: brand.branded,
-        endpoint: `${EMAIL_API_BASE}/email`,
         provider: res.raw,
-        next_step: 'Open MailerCloud → Logs and confirm this message appears there. If it does, the integration is fully connected.',
+        next_step: 'Open the email — this is exactly what your customers receive. Try an instruction like "festive Diwali offer for law firms" or a different style to see the range.',
       });
     }
     // Surface the EXACT provider reply — support can identify a 400 instantly.
