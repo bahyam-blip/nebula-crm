@@ -35,13 +35,14 @@ class AppTheme {
     );
 
     return base.copyWith(
-      // ── Page transitions ─────────────────────────────────────
-      // Cupertino-style slide+parallax on every platform: feels native on
-      // Android (and enables back-swipe), removes the abrupt M3 zoom.
+      // ── Page transitions ──────────────────────────────────
+      // Fade-upwards slide on every platform: a calm, premium motion that
+      // has been stable across every Flutter release ( Cupertino's builder
+      // left the material export set in newer SDKs).
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: FadeUpwardsPageTransitionsBuilder(),
         },
       ),
 
@@ -321,9 +322,6 @@ class AppTheme {
         unselectedLabelColor: AppColors.textTertiary,
         indicatorColor: AppColors.primary,
         indicatorSize: TabBarIndicatorSize.label,
-        indicatorWeight: 3.0,
-        indicatorPadding:
-            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         labelStyle: AppTypography.textTheme.labelLarge,
         unselectedLabelStyle: AppTypography.textTheme.labelLarge,
         dividerColor: AppColors.border,
