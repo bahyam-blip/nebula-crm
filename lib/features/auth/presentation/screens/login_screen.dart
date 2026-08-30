@@ -60,14 +60,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+      body: DecoratedBox(
+        // Ambient brand glows — the sign-in should feel like the product.
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(-1.1, -0.9),
+            radius: 1.4,
+            colors: [Color(0x336C8CFF), Color(0x000A0E1A)],
+            stops: [0, 1],
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -80,
+              bottom: -60,
+              child: IgnorePointer(
+                child: Container(
+                  width: 260,
+                  height: 260,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        AppColors.accent.withValues(alpha: 0.10),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                 // ── Hero ──────────────────────────────────────
                 Center(
                   child: Image.asset(
@@ -200,6 +231,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   .slideY(begin: 0.05, duration: 400.ms),
             ),
           ),
+                ),
+              ),
+          ],
         ),
       ),
     );

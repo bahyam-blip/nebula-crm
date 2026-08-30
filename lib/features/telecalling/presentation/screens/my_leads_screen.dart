@@ -180,12 +180,28 @@ class _LeadCard extends ConsumerWidget {
         children: [
           Row(
             children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundColor: AppColors.surfaceHigh,
-                child: Text(
-                  Formatters.initials(contact.name),
-                  style: context.textTheme.bodySmall,
+              Container(
+                padding: const EdgeInsets.all(1.5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppColors.primary.withValues(alpha: 0.5),
+                      AppColors.primary.withValues(alpha: 0.1),
+                    ],
+                  ),
+                ),
+                child: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: AppColors.surfaceHigh,
+                  child: Text(
+                    Formatters.initials(contact.name),
+                    style: context.textTheme.bodySmall?.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),

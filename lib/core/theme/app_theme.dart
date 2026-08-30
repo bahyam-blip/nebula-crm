@@ -35,6 +35,16 @@ class AppTheme {
     );
 
     return base.copyWith(
+      // ── Page transitions ─────────────────────────────────────
+      // Cupertino-style slide+parallax on every platform: feels native on
+      // Android (and enables back-swipe), removes the abrupt M3 zoom.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
+
       // ── App bar ──────────────────────────────────────────────
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.background,
@@ -298,6 +308,11 @@ class AppTheme {
         subtitleTextStyle: AppTypography.textTheme.bodySmall,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        // Rounded ripple instead of a full-bleed rectangle — every list
+        // reads as a card row without per-screen work.
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
       ),
 
       // ── Tab bar ──────────────────────────────────────────────
@@ -306,9 +321,82 @@ class AppTheme {
         unselectedLabelColor: AppColors.textTertiary,
         indicatorColor: AppColors.primary,
         indicatorSize: TabBarIndicatorSize.label,
+        indicatorWeight: 3.0,
+        indicatorPadding:
+            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         labelStyle: AppTypography.textTheme.labelLarge,
         unselectedLabelStyle: AppTypography.textTheme.labelLarge,
         dividerColor: AppColors.border,
+      ),
+
+      // ── Checkbox / radio ─────────────────────────────────────
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return AppColors.primary;
+          }
+          return Colors.transparent;
+        }),
+        checkColor: WidgetStateProperty.all(Colors.white),
+        side: const BorderSide(color: AppColors.textTertiary, width: 1.5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(5),
+        ),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return AppColors.primary;
+          }
+          return AppColors.textTertiary;
+        }),
+      ),
+
+      // ── Dropdown menu ────────────────────────────────────────
+      dropdownMenuTheme: DropdownMenuThemeData(
+        textStyle: AppTypography.textTheme.bodyMedium,
+        menuStyle: MenuStyle(
+          backgroundColor:
+              WidgetStateProperty.all(AppColors.surfaceHigh),
+          surfaceTintColor: WidgetStateProperty.all(Colors.transparent),
+          shape: WidgetStateProperty.all(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: AppColors.border, width: 0.5),
+            ),
+          ),
+        ),
+      ),
+
+      // ── Scrollbar ────────────────────────────────────────────
+      scrollbarTheme: const ScrollbarThemeData(
+        thickness: WidgetStatePropertyAll(3),
+        radius: Radius.circular(3),
+        thumbColor: WidgetStatePropertyAll(Color(0x805B6680)),
+      ),
+
+      // ── Badges ───────────────────────────────────────────────
+      badgeTheme: BadgeThemeData(
+        backgroundColor: AppColors.tertiary,
+        textColor: Colors.white,
+        textStyle: AppTypography.textTheme.labelSmall
+            ?.copyWith(fontSize: 10, fontWeight: FontWeight.w700),
+      ),
+
+      // ── Expansion tiles ──────────────────────────────────────
+      expansionTileTheme: ExpansionTileThemeData(
+        backgroundColor: AppColors.surfaceElevated,
+        collapsedBackgroundColor: AppColors.surfaceElevated,
+        iconColor: AppColors.textSecondary,
+        collapsedIconColor: AppColors.textSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: AppColors.border, width: 0.5),
+        ),
+        collapsedShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: AppColors.border, width: 0.5),
+        ),
       ),
 
       // ── Slider ───────────────────────────────────────────────

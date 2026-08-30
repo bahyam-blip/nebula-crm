@@ -98,6 +98,18 @@ class TicketsScreen extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Drag handle — signals the sheet is movable.
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
               Text('New Ticket', style: context.textTheme.titleMedium),
               const SizedBox(height: 16),
               TextField(
@@ -185,8 +197,22 @@ class _TicketTile extends StatelessWidget {
                 width: 4,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: priorityColor,
                   borderRadius: BorderRadius.circular(2),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      priorityColor,
+                      priorityColor.withValues(alpha: 0.35),
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: priorityColor.withValues(alpha: 0.35),
+                      blurRadius: 6,
+                      offset: const Offset(1, 0),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 12),

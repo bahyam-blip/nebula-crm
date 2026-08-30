@@ -185,6 +185,9 @@ class _TaskCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final done = task.status == TaskStatus.completed;
+    final accent = task.isOverdue
+        ? AppColors.danger
+        : priorityColor(task.priority);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -193,10 +196,19 @@ class _TaskCard extends ConsumerWidget {
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: task.isOverdue ? AppColors.danger : AppColors.border,
+          color: task.isOverdue
+              ? AppColors.danger.withValues(alpha: 0.6)
+              : AppColors.border,
         ),
       ),
-      child: Row(
+      // Priority accent strip — urgency is scannable without reading a word.
+      foregroundDecoration: BoxDecoration(
+        border: Border(left: BorderSide(color: accent, width: 3)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Opacity(
+        opacity: done ? 0.55 : 1.0,
+        child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Checkbox(
@@ -262,6 +274,7 @@ class _TaskCard extends ConsumerWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }

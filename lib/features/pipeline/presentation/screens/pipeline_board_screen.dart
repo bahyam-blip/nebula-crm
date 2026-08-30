@@ -26,6 +26,14 @@ class _PipelineBoardScreenState extends ConsumerState<PipelineBoardScreen> {
   Widget build(BuildContext context) {
     final dealsByStage = ref.watch(dealsByStageProvider);
     final summary = ref.watch(pipelineSummaryProvider);
+    // Total open value across the board — feeds each column's weight bar.
+    final boardTotal = AppConstants.pipelineStages.fold<double>(
+      0,
+      (s, st) =>
+          s +
+          (dealsByStage[st] ?? const [])
+              .fold<double>(0, (a, d) => a + d.value),
+    );
 
     return Scaffold(
       body: NestedScrollView(
@@ -87,6 +95,7 @@ class _PipelineBoardScreenState extends ConsumerState<PipelineBoardScreen> {
                         child: _PipelineColumn(
                           stage: stage,
                           deals: dealsByStage[stage] ?? [],
+                          boardTotal: boardTotal,
                         ),
                       ),
                   ],
@@ -103,16 +112,24 @@ class _PipelineBoardScreenState extends ConsumerState<PipelineBoardScreen> {
 }
 
 class _PipelineColumn extends ConsumerWidget {
-  const _PipelineColumn({required this.stage, required this.deals});
+  const _PipelineColumn({
+    required this.stage,
+    required this.deals,
+    required this.boardTotal,
+  });
 
   final String stage;
   final List<Deal> deals;
+  final double boardTotal;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final color = AppColors.stageColor(stage);
     final total = deals.fold<double>(0, (s, d) => s + d.value);
     final label = AppConstants.stageLabels[stage] ?? stage;
+    // Share of the whole board's open value (0..1) — the column weight bar.
+    final weight =
+        boardTotal > 0 ? (total / boardTotal).clamp(0.0, 1.0) : 0.0;
 
     return SizedBox(
       width: 280,
@@ -128,7 +145,7 @@ class _PipelineColumn extends ConsumerWidget {
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
+              padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
               child: Row(
                 children: [
                   Container(
@@ -137,6 +154,13 @@ class _PipelineColumn extends ConsumerWidget {
                     decoration: BoxDecoration(
                       color: color,
                       shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.5),
+                          blurRadius: 6,
+                          spreadRadius: 1,
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -146,12 +170,13 @@ class _PipelineColumn extends ConsumerWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceHigh,
+                      color: color.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       '${deals.length}',
-                      style: context.textTheme.labelSmall,
+                      style: context.textTheme.labelSmall
+                          ?.copyWith(color: color),
                     ),
                   ),
                   const Spacer(),
@@ -161,6 +186,24 @@ class _PipelineColumn extends ConsumerWidget {
                         ?.copyWith(color: AppColors.textSecondary),
                   ),
                 ],
+              ),
+            ),
+            // Stage weight bar — share of the board's open value.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(end: weight),
+                  duration: const Duration(milliseconds: 500),
+                  builder: (_, v, __) => LinearProgressIndicator(
+                    value: v,
+                    minHeight: 3,
+                    backgroundColor: AppColors.surfaceHigh,
+                    color: color,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
             ),
             const Divider(height: 1),
@@ -217,6 +260,14 @@ class _DealCard extends ConsumerWidget {
             border: Border.all(color: AppColors.border, width: 0.5),
           ),
           padding: const EdgeInsets.all(12),
+          // Stage-coloured accent strip on the left edge — the eye groups
+          // cards by stage even in a dense board.
+          foregroundDecoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: stageColor, width: 3),
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

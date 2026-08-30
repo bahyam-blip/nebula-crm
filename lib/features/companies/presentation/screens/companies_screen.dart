@@ -83,11 +83,27 @@ class _CompaniesScreenState extends ConsumerState<CompaniesScreen> {
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.surfaceHigh,
-              child: Text(Formatters.initials(r.name),
-                  style: context.textTheme.bodySmall),
+            Container(
+              padding: const EdgeInsets.all(1.5),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.accent.withValues(alpha: 0.5),
+                    AppColors.accent.withValues(alpha: 0.1),
+                  ],
+                ),
+              ),
+              child: CircleAvatar(
+                radius: 16,
+                backgroundColor: AppColors.surfaceHigh,
+                child: Text(Formatters.initials(r.name),
+                    style: context.textTheme.bodySmall?.copyWith(
+                        color: AppColors.accent,
+                        fontWeight: FontWeight.w700)),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(

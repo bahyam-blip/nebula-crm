@@ -60,14 +60,34 @@ class DashboardScreen extends ConsumerWidget {
 
   SliverAppBar _buildHeader(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentAppUserValueProvider);
+    final name = (user?.displayName ?? '').trim();
     return SliverAppBar(
-      expandedHeight: 120,
+      expandedHeight: 128,
       pinned: true,
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
-        title: Text(
-          'Good ${_greeting()},',
-          style: context.textTheme.titleMedium,
+        titlePadding: const EdgeInsets.only(left: 20, right: 76, bottom: 14),
+        centerTitle: false,
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Good ${_greeting()},',
+              style: context.textTheme.labelSmall?.copyWith(
+                color: AppColors.textSecondary,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              name.isEmpty ? 'Welcome' : name.split(' ').first,
+              style: context.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
         background: Container(
           decoration: const BoxDecoration(
@@ -77,6 +97,33 @@ class DashboardScreen extends ConsumerWidget {
               colors: [AppColors.surface, AppColors.background],
             ),
           ),
+          child: Align(
+            alignment: Alignment.bottomLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 20, bottom: 64),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.border, width: 0.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.calendar_today,
+                        size: 11, color: AppColors.textTertiary),
+                    const SizedBox(width: 5),
+                    Text(
+                      Formatters.shortDate(DateTime.now()),
+                      style: context.textTheme.labelSmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
       actions: [
@@ -84,19 +131,11 @@ class DashboardScreen extends ConsumerWidget {
           padding: const EdgeInsets.only(right: 12),
           child: GestureDetector(
             onTap: () => context.push('/profile'),
-            child: CircleAvatar(
+            child: GlowAvatar(
               radius: 18,
-              backgroundColor: AppColors.primary.withValues(alpha: 0.2),
-              backgroundImage: user?.photoUrl != null
-                  ? NetworkImage(user!.photoUrl!)
-                  : null,
-              child: user?.photoUrl == null
-                  ? Text(
-                      (user?.displayName ?? '?').initials,
-                      style: context.textTheme.labelLarge
-                          ?.copyWith(color: AppColors.primary),
-                    )
-                  : null,
+              photoUrl: user?.photoUrl,
+              initials: (user?.displayName ?? '?').initials,
+              fontSize: 13,
             ),
           ),
         ),

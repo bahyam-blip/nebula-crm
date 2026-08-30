@@ -29,14 +29,33 @@ class EmptyState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // Glowing icon ring — reads as "nothing here, and that's fine",
+          // not as a broken list.
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
               shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border, width: 0.5),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppColors.primary.withValues(alpha: 0.35),
+                  AppColors.primary.withValues(alpha: 0.05),
+                ],
+              ),
             ),
-            child: Icon(icon, color: AppColors.textTertiary, size: 32),
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceElevated,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: AppColors.textSecondary,
+                size: 32,
+              ),
+            ),
           ),
           const SizedBox(height: 20),
           Text(
@@ -65,6 +84,90 @@ class EmptyState extends StatelessWidget {
         ],
       ),
     ).animate().fadeIn(duration: 300.ms);
+  }
+}
+
+/// Avatar with a subtle gradient ring and an optional status dot.
+///
+/// The ring lifts initials-avatars out of "generic circles" — used on the
+/// contacts list, dashboard header, profile and detail screens.
+class GlowAvatar extends StatelessWidget {
+  const GlowAvatar({
+    super.key,
+    this.photoUrl,
+    this.initials = '?',
+    this.radius = 22,
+    this.accentColor = AppColors.primary,
+    this.statusColor,
+    this.fontSize,
+  });
+
+  final String? photoUrl;
+  final String initials;
+  final double radius;
+  final Color accentColor;
+
+  /// When set, renders a small dot at the bottom-right (status/online).
+  final Color? statusColor;
+  final double? fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accentColor.withValues(alpha: 0.55),
+            accentColor.withValues(alpha: 0.12),
+          ],
+        ),
+      ),
+      child: CircleAvatar(
+        radius: radius,
+        backgroundColor: AppColors.surfaceElevated,
+        backgroundImage:
+            photoUrl != null ? NetworkImage(photoUrl!) : null,
+        child: photoUrl == null
+            ? Text(
+                initials,
+                style: (fontSize != null
+                        ? TextStyle(
+                            fontSize: fontSize,
+                            fontWeight: FontWeight.w700,
+                          )
+                        : context.textTheme.titleSmall)
+                    ?.copyWith(color: accentColor),
+              )
+            : null,
+      ),
+    );
+    if (statusColor == null) return avatar;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        avatar,
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Container(
+            width: radius * 0.42 + 4,
+            height: radius * 0.42 + 4,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.surfaceElevated,
+                width: 2,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -182,7 +285,7 @@ class ErrorState extends StatelessWidget {
   }
 }
 
-/// Section header — title + optional action link.
+/// Section header — accent bar + title + optional action link.
 class SectionHeader extends StatelessWidget {
   const SectionHeader({
     super.key,
@@ -190,12 +293,14 @@ class SectionHeader extends StatelessWidget {
     this.subtitle,
     this.actionLabel,
     this.onAction,
+    this.accentColor = AppColors.primary,
   });
 
   final String title;
   final String? subtitle;
   final String? actionLabel;
   final VoidCallback? onAction;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +309,23 @@ class SectionHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // Accent bar — quietly marks the section without a heavy header.
+          Container(
+            width: 3,
+            height: subtitle != null ? 34 : 20,
+            margin: const EdgeInsets.only(right: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  accentColor,
+                  accentColor.withValues(alpha: 0.25),
+                ],
+              ),
+            ),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

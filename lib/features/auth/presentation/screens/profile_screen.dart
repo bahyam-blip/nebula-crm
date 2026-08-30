@@ -52,24 +52,32 @@ class ProfileScreen extends ConsumerWidget {
                         child: Stack(
                           alignment: Alignment.bottomRight,
                           children: [
-                            CircleAvatar(
-                              radius: 56,
-                              backgroundColor:
-                                  _hexToColor(user.role.badgeColorHex)
-                                      .withValues(alpha: 0.2),
-                              backgroundImage: user.photoUrl != null
-                                  ? NetworkImage(resolveMediaUrl(user.photoUrl))
-                                  : null,
-                              child: user.photoUrl == null
-                                  ? Text(
-                                      user.displayName.initials,
-                                      style: context.textTheme.displaySmall
-                                          ?.copyWith(
-                                        color: _hexToColor(
-                                            user.role.badgeColorHex),
-                                      ),
-                                    )
-                                  : null,
+                            // Gradient halo behind the avatar — the profile
+                            // identity moment.
+                            Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: AppColors.premiumGradient,
+                              ),
+                              child: CircleAvatar(
+                                radius: 54,
+                                backgroundColor: AppColors.surfaceElevated,
+                                backgroundImage: user.photoUrl != null
+                                    ? NetworkImage(
+                                        resolveMediaUrl(user.photoUrl))
+                                    : null,
+                                child: user.photoUrl == null
+                                    ? Text(
+                                        user.displayName.initials,
+                                        style: context.textTheme.displaySmall
+                                            ?.copyWith(
+                                          color: _hexToColor(
+                                              user.role.badgeColorHex),
+                                        ),
+                                      )
+                                    : null,
+                              ),
                             ),
                             Container(
                               padding: const EdgeInsets.all(6),

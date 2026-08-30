@@ -65,20 +65,28 @@ class ContactDetailScreen extends ConsumerWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const SizedBox(height: 16),
-                          CircleAvatar(
-                            radius: 44,
-                            backgroundColor:
-                                AppColors.primary.withValues(alpha: 0.2),
-                            backgroundImage: c.photoUrl != null
-                                ? NetworkImage(c.photoUrl!)
-                                : null,
-                            child: c.photoUrl == null
-                                ? Text(
-                                    c.name.initials,
-                                    style: context.textTheme.headlineMedium
-                                        ?.copyWith(color: AppColors.primary),
-                                  )
-                                : null,
+                          // Gradient halo — matches the profile identity mark.
+                          Container(
+                            padding: const EdgeInsets.all(2.5),
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: AppColors.premiumGradient,
+                            ),
+                            child: CircleAvatar(
+                              radius: 42,
+                              backgroundColor: AppColors.surfaceElevated,
+                              backgroundImage: c.photoUrl != null
+                                  ? NetworkImage(c.photoUrl!)
+                                  : null,
+                              child: c.photoUrl == null
+                                  ? Text(
+                                      c.name.initials,
+                                      style: context.textTheme.headlineMedium
+                                          ?.copyWith(
+                                              color: AppColors.primary),
+                                    )
+                                  : null,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           Text(c.name,

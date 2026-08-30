@@ -92,6 +92,17 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
                           )
                         : null,
                     isDense: true,
+                    fillColor: AppColors.surfaceElevated,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(999),
+                      borderSide: const BorderSide(
+                          color: AppColors.border, width: 1),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(999),
+                      borderSide: const BorderSide(
+                          color: AppColors.primary, width: 1.5),
+                    ),
                   ),
                     ),
                   ],
@@ -119,7 +130,8 @@ class _ContactsListScreenState extends ConsumerState<ContactsListScreen> {
                   final c = list[i];
                   return _ContactTile(contact: c)
                       .animate()
-                      .fadeIn(duration: 200.ms, delay: (i * 30).ms);
+                      .fadeIn(duration: 200.ms, delay: (i * 30).ms)
+                      .slideX(begin: 0.02, duration: 200.ms);
                 },
               );
             },
@@ -152,7 +164,7 @@ class _ContactTile extends StatelessWidget {
     return ListTile(
       onTap: () => context.push('/contacts/${contact.id}'),
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      leading: _Avatar(contact: contact),
+      leading: _Avatar(contact: contact, statusColor: statusColor),
       title: Row(
         children: [
           Expanded(
@@ -245,24 +257,17 @@ String _contactSubtitle(Contact c) {
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.contact});
+  const _Avatar({required this.contact, this.statusColor});
   final Contact contact;
+  final Color? statusColor;
 
   @override
   Widget build(BuildContext context) {
-    if (contact.photoUrl != null) {
-      return CircleAvatar(
-        radius: 22,
-        backgroundImage: NetworkImage(contact.photoUrl!),
-      );
-    }
-    return CircleAvatar(
-      radius: 22,
-      backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-      child: Text(
-        contact.name.initials,
-        style: context.textTheme.titleSmall?.copyWith(color: AppColors.primary),
-      ),
+    return GlowAvatar(
+      radius: 21,
+      photoUrl: contact.photoUrl,
+      initials: contact.name.initials,
+      statusColor: statusColor,
     );
   }
 }

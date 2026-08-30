@@ -238,8 +238,27 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
   Widget _empty() => ListView(
         padding: const EdgeInsets.fromLTRB(16, 28, 16, 16),
         children: [
-          const Icon(Icons.auto_awesome, size: 34, color: AppColors.primary),
-          const SizedBox(height: 10),
+          // Glowing AI mark — the assistant's "face".
+          Center(
+            child: Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: AppColors.premiumGradient,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.35),
+                    blurRadius: 28,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.auto_awesome,
+                  size: 32, color: Colors.white),
+            ),
+          ),
+          const SizedBox(height: 16),
           Text('Ask, or tell me what to do',
               textAlign: TextAlign.center,
               style: context.textTheme.titleMedium),
@@ -261,17 +280,24 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                   _input.text = s;
                   _send();
                 },
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
                 child: Container(
                   width: double.infinity,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border, width: 0.5),
                   ),
-                  child: Text(s, style: context.textTheme.bodySmall),
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome,
+                          size: 13, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(s, style: context.textTheme.bodySmall)),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -286,11 +312,28 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             maxWidth: MediaQuery.of(context).size.width * 0.8,
           ),
           margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
           decoration: BoxDecoration(
             color: m.mine ? AppColors.primary : AppColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(14),
-            border: m.mine ? null : Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(m.mine ? 16 : 4),
+              bottomRight: Radius.circular(m.mine ? 4 : 16),
+            ),
+            border: m.mine
+                ? null
+                : Border.all(color: AppColors.border, width: 0.5),
+            boxShadow: m.pending
+                ? []
+                : [
+                    BoxShadow(
+                      color: (m.mine ? AppColors.primary : Colors.black)
+                          .withValues(alpha: m.mine ? 0.25 : 0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

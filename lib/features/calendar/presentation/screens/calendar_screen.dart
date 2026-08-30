@@ -1,3 +1,5 @@
+import 'dart:ui' show FontFeature;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -136,13 +138,42 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           final widgets = <Widget>[];
           for (final e in items) {
             final day = Formatters.date(e.when);
+            final isToday = day == Formatters.date(DateTime.now());
             if (day != lastDay) {
               lastDay = day;
               widgets.add(Padding(
-                padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
-                child: Text(day,
-                    style: context.textTheme.labelMedium
-                        ?.copyWith(color: AppColors.textTertiary)),
+                padding: const EdgeInsets.fromLTRB(6, 16, 6, 6),
+                child: Row(
+                  children: [
+                    Text(day,
+                        style: context.textTheme.labelMedium?.copyWith(
+                          color: isToday
+                              ? AppColors.primary
+                              : AppColors.textTertiary,
+                          fontWeight: isToday
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        )),
+                    if (isToday) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text('TODAY',
+                            style: context.textTheme.labelSmall?.copyWith(
+                              color: AppColors.primary,
+                              fontSize: 9,
+                              letterSpacing: 0.8,
+                              fontWeight: FontWeight.w700,
+                            )),
+                      ),
+                    ],
+                  ],
+                ),
               ));
             }
             widgets.add(_row(e));
@@ -162,12 +193,21 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
           color: AppColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border, width: 0.5),
         ),
         child: Row(
           children: [
-            Icon(e.icon, size: 17, color: e.colour),
+            // Source-tinted icon chip — the timeline reads by colour first.
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: e.colour.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(e.icon, size: 16, color: e.colour),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -184,8 +224,10 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               ),
             ),
             Text(Formatters.time(e.when),
-                style: context.textTheme.bodySmall
-                    ?.copyWith(color: AppColors.textSecondary)),
+                style: context.textTheme.labelMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                  fontFeatures: [const FontFeature.tabularFigures()],
+                )),
           ],
         ),
       );
