@@ -38,6 +38,16 @@ crons = ["*/5 * * * *"]
 # binding = "NEBULA_EMAIL_KV"
 # id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
 
+# ── Self service binding (chunked delivery) ───────────────────────────
+# A Worker on workers.dev cannot HTTP-fetch ITSELF (Cloudflare error 1042),
+# so the delivery chain calls itself through this binding instead. Each
+# bound invocation runs with its OWN subrequest budget — that is what lets
+# a 200/1000/9000-recipient 1:1 campaign complete in short, fresh-budget
+# steps (see emailer/pipeline.js).
+[[services]]
+binding = "SELF"
+service = "nebula-crm-storage"
+
 [vars]
 FIREBASE_PROJECT_ID = "nebula-crm-70f58"
 DEFAULT_TEAM_ID = "default-team"

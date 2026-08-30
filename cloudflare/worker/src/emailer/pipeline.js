@@ -975,18 +975,24 @@ export async function verifyRunSig(env, s, sig) {
 
 function kickChain(env, { action, taskId, seq = '', from = null }) {
   const base = String(env.MAIL_SELF_URL || '').replace(/\/+$/, '');
-  if (!base) {
-    console.warn('[mailer] MAIL_SELF_URL not set — the delivery chain cannot self-continue; the cron will resume this task');
+  if (!base && !env.SELF) {
+    console.warn('[mailer] no MAIL_SELF_URL and no SELF binding — the delivery chain cannot self-continue; the cron will resume this task');
     return null;
   }
   return (async () => {
     try {
       const sig = await runSig(env, `${action}|${taskId}|${seq}`);
-      const res = await fetch(`${base}/v1/mail/deliver`, {
+      const req = new Request(`${base || 'https://self.local'}/v1/mail/deliver`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-nebula-deliver': sig },
         body: JSON.stringify({ action, taskId, seq, from }),
       });
+      // Prefer the service binding: a Worker on workers.dev cannot HTTP-fetch
+      // itself (Cloudflare error 1042), and a bound invocation gets a FRESH
+      // subrequest budget — the whole point of the chain.
+      const res = env.SELF
+        ? await env.SELF.fetch(req)
+        : await fetch(req);
       if (!res.ok) {
         // Make silent chain failures VISIBLE — the owner sees exactly why
         // nothing moved instead of a task that sits "queued" forever.
