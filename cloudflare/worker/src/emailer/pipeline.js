@@ -402,6 +402,7 @@ async function handleMailInner(request, env, { url, uid, ctx = { waitUntil: () =
         template_style: style,
         drafted_by: draftedBy,
         branded: brand.branded,
+        email_html: html,
         provider: res.raw,
         next_step: 'Open the email — this is exactly what your customers receive. Try an instruction like "festive Diwali offer for law firms" or a different style to see the range.',
       });
