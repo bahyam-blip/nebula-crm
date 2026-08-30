@@ -201,7 +201,6 @@ class _PipelineColumn extends ConsumerWidget {
                     minHeight: 3,
                     backgroundColor: AppColors.surfaceHigh,
                     color: color,
-                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
