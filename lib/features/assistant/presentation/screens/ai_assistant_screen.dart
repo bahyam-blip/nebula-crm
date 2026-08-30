@@ -318,8 +318,8 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(16),
               topRight: const Radius.circular(16),
-              bottomLeft: Radius.circular(m.mine ? 16 : 4),
-              bottomRight: Radius.circular(m.mine ? 4 : 16),
+              bottomLeft: Radius.circular(m.mine ? 16.0 : 4.0),
+              bottomRight: Radius.circular(m.mine ? 4.0 : 16.0),
             ),
             border: m.mine
                 ? null

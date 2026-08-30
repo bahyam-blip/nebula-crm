@@ -312,7 +312,7 @@ class SectionHeader extends StatelessWidget {
           // Accent bar — quietly marks the section without a heavy header.
           Container(
             width: 3,
-            height: subtitle != null ? 34 : 20,
+            height: subtitle != null ? 34.0 : 20.0,
             margin: const EdgeInsets.only(right: 10),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(2),
