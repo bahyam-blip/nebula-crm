@@ -987,12 +987,36 @@ function kickChain(env, { action, taskId, seq = '', from = null }) {
         headers: { 'Content-Type': 'application/json', 'x-nebula-deliver': sig },
         body: JSON.stringify({ action, taskId, seq, from }),
       });
+      if (!res.ok) {
+        // Make silent chain failures VISIBLE — the owner sees exactly why
+        // nothing moved instead of a task that sits "queued" forever.
+        const detail = await res.text().catch(() => '');
+        console.warn(`[mailer] chain kick ${action} ${taskId}/${seq} → HTTP ${res.status} ${detail.slice(0, 140)}`);
+        await noteKickFailure(env, taskId, `${action} #${seq}: HTTP ${res.status} ${detail.slice(0, 120)}`);
+      }
       return res.status;
     } catch (e) {
       console.warn(`[mailer] chain kick ${action} ${taskId}/${seq} failed: ${e?.message || e}`);
+      await noteKickFailure(env, taskId, `${action} #${seq}: ${String(e?.message || e).slice(0, 160)}`);
       return null;
     }
   })();
+}
+
+/** One-line audit event on the task when a self-invocation kick fails. */
+async function noteKickFailure(env, taskId, detail) {
+  try {
+    const store = stateBackendName(env) !== 'none' ? createStore(env) : null;
+    if (!store || !taskId) return;
+    const task = await getTask(store, taskId);
+    if (!task || ['done', 'failed', 'cancelled'].includes(task.status)) return;
+    const key = 'kickfail';
+    const last = (task.events || []).filter((e) => e.text?.startsWith('Chain kick failed:')).slice(-1)[0];
+    if (last && last.text === `Chain kick failed: ${detail}`) return; // dedupe identical repeats
+    if (last && Date.now() - Date.parse(last.at || 0) < 60e3) return; // throttle
+    addEvent(task, `Chain kick failed: ${detail}`, 'error');
+    await putTask(store, touch(task, {}));
+  } catch { /* audit is best-effort */ }
 }
 
 /** Resolve the audience for one planned email.
