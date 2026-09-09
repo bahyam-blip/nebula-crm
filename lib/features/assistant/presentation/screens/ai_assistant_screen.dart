@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/services/ai_agent_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -14,7 +16,11 @@ import '../../services/ai_action_executor.dart';
 
 class _Msg {
   _Msg(this.text,
-      {required this.mine, this.pending = false, this.actions, this.approvals});
+      {required this.mine,
+      this.pending = false,
+      this.actions,
+      this.approvals,
+      this.artifacts});
   final String text;
   final bool mine;
   final bool pending;
@@ -25,6 +31,10 @@ class _Msg {
   /// Consequential actions the agent PREPARED and is waiting on the human
   /// for (mass email sends). Rendered as Approve/Decline cards.
   final List<AgentApproval>? approvals;
+
+  /// Finished products the agent BUILT this turn (hosted sites, web apps,
+  /// notes) — rendered as rich cards with an Open button.
+  final List<AgentArtifact>? artifacts;
 
   /// approvalId → approved? (decided cards lose their buttons)
   final _decided = <String, bool>{};
@@ -165,6 +175,8 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
           actions: agent.actions,
           approvals:
               agent.approvals.isNotEmpty ? agent.approvals : null,
+          artifacts:
+              agent.artifacts.isNotEmpty ? agent.artifacts : null,
         ));
       });
     } catch (agentError) {
@@ -253,17 +265,29 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
 
   static const _suggestions = [
     'How many open leads do I have right now?',
-    "What's Priya's email address?",
+    'Build me a festive offer page for Diwali',
+    'Research the latest packaging trends for bakeries',
     'Send an announcement about our new offer to all leads',
+    'Make a mini web app to collect custom cake orders',
     'Distribute 10 unassigned leads across the team',
-    'Add contact Rahul Sharma rahul@acme.in 98765 43210',
     'Log a call with Priya — interested, follow up in 3 days',
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Assistant')),
+      appBar: AppBar(
+        title: const Text('Assistant'),
+        actions: [
+          // Connect an external AI to this CRM over MCP — grants are
+          // minted here, self-expire in 24h and are revocable instantly.
+          IconButton(
+            tooltip: 'Connect an AI (MCP)',
+            onPressed: _showMcpSheet,
+            icon: const Icon(Icons.hub_outlined, size: 20),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
@@ -313,8 +337,11 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
           Text(
             'I can see everything in your CRM — contacts, pipeline, team, '
             'campaigns, analytics — and I can act: search people, add '
-            'contacts, log calls, create tasks, assign leads, queue on-brand '
-            'email campaigns and more. Big sends wait for your approval.',
+            'contacts, log calls, assign leads, queue on-brand email '
+            'campaigns, research the live web, and even BUILD and host '
+            'websites, offer pages and mini web apps from a one-line '
+            'brief. Big sends wait for your approval. Tap the hub icon '
+            'above to connect an external AI over MCP.',
             textAlign: TextAlign.center,
             style: context.textTheme.bodySmall
                 ?.copyWith(color: AppColors.textSecondary),
@@ -431,6 +458,9 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
               if (!m.mine && m.approvals != null && m.approvals!.isNotEmpty) ...[
                 for (final ap in m.approvals!) _approvalCard(m, ap),
               ],
+              // Finished products the agent built — open & share.
+              if (!m.mine && m.artifacts != null && m.artifacts!.isNotEmpty)
+                ...[for (final ar in m.artifacts!) _artifactCard(ar)],
             ],
           ),
         ),
@@ -528,6 +558,286 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
               ]),
             ),
         ],
+      ),
+    );
+  }
+
+  /// Card for something the agent BUILT and hosted: a website, a web app
+  /// or a saved note. The URL is public — open it or copy it to share.
+  Widget _artifactCard(AgentArtifact ar) {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primary.withValues(alpha: 0.10),
+            AppColors.surface,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.45), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            blurRadius: 14,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(ar.icon, size: 15, color: AppColors.primary),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(ar.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.textTheme.labelLarge
+                      ?.copyWith(color: AppColors.textPrimary)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+            ar.kindLabel +
+                (ar.url.isNotEmpty
+                    ? '  ·  ${Uri.tryParse(ar.url)?.path ?? ''}'
+                    : '  ·  in the app'),
+            style: context.textTheme.labelSmall
+                ?.copyWith(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            if (ar.url.isNotEmpty) ...[
+              FilledButton.icon(
+                onPressed: () => _openArtifact(ar),
+                icon: const Icon(Icons.open_in_new, size: 14),
+                label: const Text('Open'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: context.textTheme.labelMedium,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            OutlinedButton.icon(
+              onPressed: ar.url.isNotEmpty
+                  ? () => _copyArtifact(ar)
+                  : null,
+              icon: const Icon(Icons.link, size: 14),
+              label: const Text('Copy link'),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                textStyle: context.textTheme.labelMedium,
+              ),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openArtifact(AgentArtifact ar) async {
+    final uri = Uri.tryParse(ar.url);
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open ${ar.url}')),
+      );
+    }
+  }
+
+  Future<void> _copyArtifact(AgentArtifact ar) async {
+    if (ar.url.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: ar.url));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Link copied — share it with anyone')),
+    );
+  }
+
+  /// Connect-an-AI sheet: mint a short-lived MCP grant so any external
+  /// MCP client (Claude Desktop, Cursor…) can use the CRM's tools. No
+  /// static API tokens — grants self-expire in 24h and are revocable.
+  void _showMcpSheet() {
+    McpPairing? pairing;
+    bool minting = false;
+    bool revoking = false;
+    String? error;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+              18, 18, 18, 18 + MediaQuery.of(sheetCtx).viewInsets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.hub_outlined, size: 18, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Connect an AI to this CRM',
+                      style: context.textTheme.titleMedium),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Your assistant\'s tools can be used by AI apps like Claude '
+                'or Cursor over MCP. Create a connection below — it lasts '
+                '24 hours, works with YOUR permissions only, and can be '
+                'revoked instantly. No permanent API keys are ever created.',
+                style: context.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 14),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(error!,
+                      style: context.textTheme.bodySmall
+                          ?.copyWith(color: AppColors.danger)),
+                ),
+              if (pairing == null)
+                FilledButton.icon(
+                  onPressed: minting
+                      ? null
+                      : () async {
+                          setSheet(() {
+                            minting = true;
+                            error = null;
+                          });
+                          try {
+                            final p = await ref
+                                .read(aiAgentServiceProvider)
+                                .pairMcp(label: 'App pairing');
+                            setSheet(() {
+                              pairing = p;
+                              minting = false;
+                            });
+                          } catch (e) {
+                            setSheet(() {
+                              minting = false;
+                              error = '$e';
+                            });
+                          }
+                        },
+                  icon: minting
+                      ? const SizedBox(
+                          height: 14,
+                          width: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.add_link, size: 16),
+                  label: const Text('Create 24h connection'),
+                )
+              else ...[
+                _copyRow(sheetCtx, 'MCP server URL', pairing!.url),
+                const SizedBox(height: 8),
+                _copyRow(sheetCtx, 'Authorization token', pairing!.token,
+                    obscure: true),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Icon(Icons.schedule,
+                      size: 13, color: AppColors.textSecondary),
+                  const SizedBox(width: 5),
+                  Text(pairing!.expiresLabel,
+                      style: context.textTheme.labelSmall?.copyWith(
+                          color: AppColors.textSecondary)),
+                ]),
+                const SizedBox(height: 14),
+                TextButton.icon(
+                  onPressed: revoking
+                      ? null
+                      : () async {
+                          setSheet(() => revoking = true);
+                          try {
+                            await ref
+                                .read(aiAgentServiceProvider)
+                                .revokeMcp();
+                            if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                          } catch (e) {
+                            setSheet(() {
+                              revoking = false;
+                              error = '$e';
+                            });
+                          }
+                        },
+                  style: TextButton.styleFrom(
+                      foregroundColor: AppColors.danger),
+                  icon: const Icon(Icons.link_off, size: 15),
+                  label: const Text('Revoke all connections'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _copyRow(BuildContext ctx, String label, String value,
+      {bool obscure = false}) {
+    final shown =
+        obscure ? '${value.substring(0, 10)}••••••••••••' : value;
+    return InkWell(
+      onTap: () async {
+        await Clipboard.setData(ClipboardData(text: value));
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+              SnackBar(content: Text('$label copied')));
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border, width: 0.5),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(label,
+                      style: ctx.textTheme.labelSmall?.copyWith(
+                          color: AppColors.textSecondary)),
+                  const SizedBox(height: 2),
+                  Text(shown,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ctx.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace')),
+                ]),
+          ),
+          const Icon(Icons.copy, size: 14, color: AppColors.textSecondary),
+        ]),
       ),
     );
   }

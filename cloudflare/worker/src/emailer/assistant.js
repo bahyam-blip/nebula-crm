@@ -18,9 +18,9 @@
  *      the action is stored, the chat shows an Approve/Decline card, and
  *      POST /v1/assistant/approve executes or cancels it.
  *
- * Tool registry (19 tools, three risk tiers):
- *   read           — direct D1 reads, always safe
- *   write          — create/update CRM records, role-checked server-side
+ * Tool registry (24 tools, three risk tiers):
+ *   read           — direct D1 reads + public-web research, always safe
+ *   write          — create/update CRM records, build/host sites, role-checked server-side
  *   consequential  — affects the outside world (email to humans); needs
  *                    the owner's explicit approval when AGENT_APPROVAL_MODE
  *                    is 'always' (production default, set in wrangler.toml)
@@ -40,8 +40,10 @@ import { crmOverview, searchContacts, findMailerCampaigns } from './firestore.js
 import { getLatestAnalytics } from './analytics.js';
 import { listTasks, newTask, putTask, progressOf, addEvent } from './tasks.js';
 import { getDoc, putDoc, canWrite, isManagerUp, loadUser } from '../data.js';
+import { buildWebsite, saveNote, listArtifacts } from './builder.js';
+import { webSearch, webFetch } from './research.js';
 
-const MAX_STEPS = 5;
+const MAX_STEPS = 8; // research chains: search → fetch → synthesize → build
 const APPROVAL_TTL = 60 * 60 * 24; // approvals expire after 24h
 
 /** Roles allowed to make the agent WRITE to the CRM. Viewers are read-only. */
@@ -55,8 +57,9 @@ const CALL_OUTCOMES = ['connected', 'callback', 'interested', 'notInterested', '
 /* ══ TOOL REGISTRY ══════════════════════════════════════════════════
  * name → { tier, roles, spec (model-facing one-liner) }
  * roles: undefined = any signed-in user; else array of allowed roles.
+ * Exported for the MCP server (mcp.js): one registry, every surface.
  */
-const TOOLS = {
+export const TOOLS = {
   // ── read ──
   crm_overview: { tier: 'read', spec: 'fresh counts: contacts, open deals, pipeline value, tasks' },
   search_contacts: { tier: 'read', spec: 'find people by name/email/company ("what is Priya\'s email?")' },
@@ -67,6 +70,9 @@ const TOOLS = {
   list_crm_tasks: { tier: 'read', spec: 'the team\'s CRM tasks/reminders (title, assignee, due, priority)' },
   list_team: { tier: 'read', spec: 'team roster: who is on the team, their role and uid (needed before assigning anything)' },
   get_business_profile: { tier: 'read', spec: 'the brand the emails go out with' },
+  list_artifacts: { tier: 'read', spec: 'websites, notes and reports you have built for this user (with their public URLs)' },
+  web_search: { tier: 'read', spec: 'search the LIVE WEB for current information {query} — market research, competitors, industry facts; returns titles, urls, snippets' },
+  web_fetch: { tier: 'read', spec: 'read ONE public web page {url} and return its text — use after web_search to go deeper' },
   // ── write (role-checked) ──
   create_contact: { tier: 'write', roles: WRITE_ROLES, spec: 'add a new contact {name, email?, phone?, company?, jobTitle?, notes?}' },
   create_task: { tier: 'write', roles: WRITE_ROLES, spec: 'create a task/reminder {title, description?, assigneeName?, due?: "YYYY-MM-DD", priority?, contactName?}' },
@@ -76,6 +82,8 @@ const TOOLS = {
   distribute_leads: { tier: 'write', roles: MANAGER_ROLES, spec: 'share leads evenly (round robin) across named teammates {to: [names], count?: int, query?: filter}' },
   save_business_profile: { tier: 'write', roles: MANAGER_ROLES, spec: 'update brand fields {patch:{...}} (business_name, tagline, about, industry, products, audience, tone, offers, website, cta_url, address, phone, contact_email, sender_name, signature_name, brand_color, default_style)' },
   teach_memory: { tier: 'write', roles: WRITE_ROLES, spec: 'remember a lasting fact or preference about the business {note}' },
+  build_website: { tier: 'write', roles: WRITE_ROLES, spec: 'BUILD AND HOST a complete website or mini web app {title, brief, kind?: landing|promo|event|portfolio|webapp|report, style?, cta_text?, cta_url?} — returns a PUBLIC URL anyone can open. Use for landing pages, offer pages, event invites, portfolios, product showcases, market-research one-pagers, or small interactive web apps the owner describes' },
+  save_note: { tier: 'write', roles: WRITE_ROLES, spec: 'save a research summary, plan or report as a shareable artifact {title, content} — the owner sees it in the app' },
   // ── consequential ──
   create_email_task: { tier: 'consequential', spec: 'QUEUE A REAL EMAIL CAMPAIGN {instruction} — write it like the owner would instruct a marketer, e.g. "send an announcement about <X> to all leads". The engine plans, writes on-brand copy and delivers. May require the owner\'s approval first.' },
 };
@@ -84,9 +92,11 @@ function approvalMode(env) {
   return String(env.AGENT_APPROVAL_MODE || 'off').toLowerCase() === 'always' ? 'always' : 'off';
 }
 
-const SYSTEM_PROMPT = `You are the CRM's built-in AI assistant — an autonomous operator with LIVE access to this business's CRM data, its team and its AI email engine.
+const SYSTEM_PROMPT = `You are the CRM's built-in AI assistant — an autonomous operator with LIVE access to this business's CRM data, its team, its AI email engine, the PUBLIC WEB, and the ability to BUILD AND HOST finished products.
 
 You SEE the current CRM snapshot below (contacts, pipeline, team, campaigns, analytics). You never say "I don't have access" — the data is in front of you, and for anything deeper you have TOOLS.
+
+You can also BUILD: with build_website you produce a complete, branded, hosted website or mini web app (landing page, promo, event invite, portfolio, webapp, report) and return its public URL. With save_note you file research summaries and plans the owner keeps. With web_search + web_fetch you research the live web before advising or building.
 
 Reply with ONE JSON object and nothing else. Two shapes:
 
@@ -101,7 +111,10 @@ $TOOLS
 
 RULES:
 - Prefer answering from the snapshot; use tools when the user asks for specifics, changes, or actions.
-- One tool per step. After a tool runs you will see TOOL_RESULT #n — then reply, or chain one more tool if truly needed (max 5 steps). When you quote a number a tool returned, keep it EXACT and mention which source it came from (e.g. "per the last analytics pull").
+- One tool per step. After a tool runs you will see TOOL_RESULT #n — then reply, or chain one more tool if truly needed (max 8 steps). When you quote a number a tool returned, keep it EXACT and mention which source it came from (e.g. "per the last analytics pull").
+- RESEARCH CHAINS are encouraged: web_search → web_fetch (a promising result) → then answer or build. When you present web facts, cite the source (name + url).
+- build_website: when the user asks for a site/page/app, write a RICH brief (audience, message, sections, CTA) into args.brief — you are briefing a designer. ALWAYS quote the returned public URL exactly and tell the user the page is live. If a build fails, say what you would need and offer to retry.
+- save_note: after a meaningful research or planning session, offer to save (or save) a short summary artifact.
 - The snapshot's "me" block is the CALLER. Respect their role: if a tool is outside their role, do not attempt it — explain in one line what they should ask a manager for. If a tool result says not-permitted, say it plainly.
 - create_task / assign / distribute: match people against the snapshot team roster (or list_team). Never invent a teammate. If the user's request names no assignee and it is ambiguous, ask ONE short clarifying question.
 - create_email_task: quote the user's intent faithfully, add the recipient target (segment or explicit emails). If the request is vague about WHAT to send, ask ONE short clarifying question instead of guessing. If the result is a pending approval, tell the user to confirm it with the Approve button.
@@ -299,8 +312,10 @@ async function scanRawContacts(env, { query = '', max = 800 } = {}) {
 
 /* ══ Tool execution ═════════════════════════════════════════════════ */
 
-/** Execute one tool call. Returns a JSON-serialisable result for the model. */
-async function runTool(action, env, store, user, ctx = { waitUntil: () => {} }) {
+/** Execute one tool call. Returns a JSON-serialisable result for the model.
+ * Exported for the MCP server (mcp.js), which executes the SAME registry
+ * under the MCP caller's identity — one registry, one enforcement layer. */
+export async function runTool(action, env, store, user, ctx = { waitUntil: () => {} }) {
   const tool = String(action?.tool || '').trim();
   const args = action?.args && typeof action.args === 'object' ? action.args : {};
   const spec = TOOLS[tool];
@@ -406,6 +421,24 @@ async function runTool(action, env, store, user, ctx = { waitUntil: () => {} }) 
       const brand = brandFor(env, profile);
       return { ok: true, profile, brand: { name: brand.name, fromName: brand.fromName, website: brand.website, ctaUrl: brand.ctaUrl, branded: brand.branded } };
     }
+
+    /* ── build & research ── */
+    case 'list_artifacts': {
+      const rows = await listArtifacts(store, user?.uid || '', args.limit);
+      return { ok: true, count: rows.length, artifacts: rows };
+    }
+
+    case 'web_search':
+      return webSearch(args);
+
+    case 'web_fetch':
+      return webFetch(args);
+
+    case 'build_website':
+      return buildWebsite(env, store, user, args, ctx?.origin || '');
+
+    case 'save_note':
+      return saveNote(store, user, args);
 
     /* ── write ── */
     case 'create_contact': {
@@ -635,6 +668,11 @@ async function startEmailTask(instruction, env, store, user, ctx) {
 function summarize(result) {
   if (!result || typeof result !== 'object') return '';
   if (result.error) return String(result.error).slice(0, 140);
+  if (result.artifact_id && result.url) return `built & hosted: ${result.title} → ${result.url}`;
+  if (result.note_id) return 'note saved';
+  if (result.artifact_id) return `saved: ${result.title || 'artifact'}`;
+  if (Array.isArray(result.results)) return `${result.results.length} web result(s) for "${String(result.query || '').slice(0, 60)}"`;
+  if (result.text && result.url) return `read: ${result.title || result.url}`;
   if (result.status === 'pending_approval') return 'awaiting your approval';
   if (result.taskId) return `email task ${result.taskId} queued`;
   if (result.contactId) return `contact created: ${result.name}`;
@@ -664,14 +702,16 @@ async function runAgentLoop(env, store, user, messages, ctx) {
   const memoryBlock = memoryContext(mem);
   const episodes = await loadEpisodes(store, user?.uid);
   const episodeBlock = episodesContext(episodes);
+  const recentArtifacts = store ? await listArtifacts(store, user?.uid || '', 3).catch(() => []) : [];
 
   const convo = [
-    { role: 'system', content: `${SYSTEM_PROMPT.replace('$TOOLS', toolsBlock(user?.role))}\n\nCURRENT CRM SNAPSHOT:\n${JSON.stringify(snapshot).slice(0, 6000)}${memoryBlock ? `\n\nBUSINESS MEMORY (owner-taught):\n${memoryBlock.slice(0, 1200)}` : ''}${episodeBlock ? `\n\nRECENT CONVERSATIONS WITH THIS USER (oldest first):\n${episodeBlock.slice(0, 1200)}` : ''}` },
+    { role: 'system', content: `${SYSTEM_PROMPT.replace('$TOOLS', toolsBlock(user?.role))}\n\nCURRENT CRM SNAPSHOT:\n${JSON.stringify(snapshot).slice(0, 6000)}${memoryBlock ? `\n\nBUSINESS MEMORY (owner-taught):\n${memoryBlock.slice(0, 1200)}` : ''}${episodeBlock ? `\n\nRECENT CONVERSATIONS WITH THIS USER (oldest first):\n${episodeBlock.slice(0, 1200)}` : ''}${recentArtifacts.length ? `\n\nRECENT ARTIFACTS YOU BUILT (newest first):\n${recentArtifacts.map((a) => `- ${a.kind}: ${a.title} → ${a.url || 'in-app'}`).join('\n')}` : ''}` },
     ...messages,
   ];
 
   const actions = [];
   const approvals = [];
+  const artifacts = [];
   let reply = '';
   for (let step = 0; step < MAX_STEPS; step++) {
     const out = await sarvamChat(env, convo, { json: true, temperature: 0.35, maxTokens: 2200 });
@@ -691,6 +731,15 @@ async function runAgentLoop(env, store, user, messages, ctx) {
       if (result.approvalId) {
         approvals.push({ id: result.approvalId, tool, summary: summarize(result) });
       }
+      if (result.artifact_id) {
+        artifacts.push({
+          id: result.artifact_id,
+          kind: result.kind || 'artifact',
+          title: result.title || 'Untitled',
+          url: result.url || '',
+          builder: result.builder || '',
+        });
+      }
       convo.push({ role: 'user', content: `TOOL_RESULT (${tool}) #${step + 1}: ${JSON.stringify(result).slice(0, 3000)}\n\nContinue: reply to the user now, or chain ONE more tool if strictly necessary.` });
       continue;
     }
@@ -703,7 +752,7 @@ async function runAgentLoop(env, store, user, messages, ctx) {
       ? `Done — ${actions.map((a) => a.tool).join(', ')} completed. You can see the results in the app.`
       : 'I could not produce an answer this time — please try rephrasing.';
   }
-  return { reply, actions, approvals };
+  return { reply, actions, approvals, artifacts };
 }
 
 /* ══ Route handlers ═════════════════════════════════════════════════ */
@@ -744,10 +793,12 @@ export async function handleAssistant(request, env, { uid, ctx = { waitUntil: ()
       } catch { store._suppressionCount = 0; }
     }
     const user = env.DB ? await loadUser(env.DB, uid).catch(() => null) : null;
-    const { reply, actions, approvals } = await runAgentLoop(env, store, user, messages, ctx);
+    const origin = new URL(request.url).origin;
+    const loopCtx = { waitUntil: ctx.waitUntil, origin };
+    const { reply, actions, approvals, artifacts } = await runAgentLoop(env, store, user, messages, loopCtx);
     await saveEpisode(store, uid, { q: messages[messages.length - 1].content, reply, tools: actions.map((a) => a.tool) });
 
-    return jsonResponse({ ok: true, reply, actions, ...(approvals.length ? { approvals } : {}) });
+    return jsonResponse({ ok: true, reply, actions, ...(approvals.length ? { approvals } : {}), ...(artifacts.length ? { artifacts } : {}) });
   } catch (e) {
     console.error('[assistant] failed:', e?.stack || e);
     return jsonResponse({ error: `assistant error: ${e?.message || e}` }, 500);

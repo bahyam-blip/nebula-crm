@@ -297,3 +297,56 @@ curl -X POST "$WORKER/v1/mail/config" -H "Authorization: Bearer $TOKEN" \
   writes copy but sends nothing — the **test send always sends for real** since it is
   the explicit go-live check; role-gated endpoints (superAdmin/admin/manager); run-lock
   prevents double sends; template/analytics failures are non-fatal.
+
+## 🔌 Connect an AI to your CRM (MCP)
+
+Your assistant's tools are exposed over **MCP (Model Context Protocol)** so
+external AI apps — Claude Desktop, Cursor, or any MCP client — can use them
+directly, exactly like the built-in assistant does:
+
+- **24 tools**: live CRM reads/writes (role-enforced), the AI email campaign
+  engine, the website & web-app builder, live-web research, business memory.
+- **No static API tokens.** Auth is a short-lived *pairing grant* you mint
+  from the app: Assistant screen → **hub icon (top-right)** → *Create 24h
+  connection*. Paste the server URL + token into your MCP client. The grant
+  self-expires after 24 hours and can be revoked any time from the same
+  sheet — nothing long-lived exists to leak.
+- **Same guardrails as in-app**: every tool call runs under YOUR role
+  (a viewer's client stays read-only), and mass email sends still wait for
+  your in-app Approve tap.
+
+### Client configuration (generic)
+
+```json
+{
+  "mcpServers": {
+    "nebula-crm": {
+      "type": "http",
+      "url": "https://nebula-crm-storage.nebula-crm.workers.dev/mcp",
+      "headers": { "Authorization": "Bearer <paste the 24h token from the app>" }
+    }
+  }
+}
+```
+
+### What you can ask the connected AI
+
+- CRM: "Search contacts at Initech", "Move the Acme deal to negotiation",
+  "Distribute 20 unassigned leads across Neha and Sam"
+- Email: "Queue an announcement about our new offer to all leads"
+  (executes only after you approve it in the app)
+- **Build**: "Build a festive Diwali offer page for my bakery and give me
+  the link" → the agent generates, hosts and returns a public URL
+  (`https://…/sites/<id>`) you can share with customers
+- **Research**: "Research Mumbai bakery market trends and save me a summary"
+
+### Developer endpoints
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `POST /mcp` | pairing grant or Firebase token | MCP JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`, `ping`) |
+| `GET /mcp` | none | capability advert (server info) |
+| `POST /v1/assistant/mcp/pair` | Firebase | mint a grant (`{label}`) |
+| `GET /v1/assistant/mcp/pair` | Firebase | list active grants |
+| `DELETE /v1/assistant/mcp/pair` | Firebase | revoke one (`{grant_id}`) or all (`{"all":true}`) |
+| `GET /sites/<id>` | none | serves agent-built sites & saved notes |

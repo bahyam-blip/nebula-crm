@@ -23,6 +23,8 @@ import { handleMail, runMailCron, mailConfigState, deliverInternal, verifyRunSig
 import { handleAssistant, handleAssistantApproval } from './emailer/assistant.js';
 import { handleDataRequest } from './data_http.js';
 import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
+import { verifyIdToken } from './auth.js';
+import { handleMcp, handleMcpPair, serveAgentSite, mcpServerInfo } from './emailer/mcp.js';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -37,7 +39,9 @@ const ALLOWED_CONTENT = [
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization,Content-Type',
+  // Mcp-Session-Id / MCP-Protocol-Version: browser-based MCP clients
+  // preflight with these headers before calling /mcp.
+  'Access-Control-Allow-Headers': 'Authorization,Content-Type,Mcp-Session-Id,MCP-Protocol-Version',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -48,88 +52,8 @@ function json(body, status = 200) {
   });
 }
 
-// ── Firebase ID token verification ───────────────────────────────
-
-let jwkCache = { keys: null, expires: 0 };
-
-async function googleKeys() {
-  const now = Date.now();
-  if (jwkCache.keys && now < jwkCache.expires) return jwkCache.keys;
-
-  const res = await fetch(
-    'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'
-  );
-  if (!res.ok) throw new Error('could not fetch Google signing keys');
-  const body = await res.json();
-
-  // Respect Google's cache header rather than refetching on every request.
-  const cc = res.headers.get('cache-control') || '';
-  const maxAge = /max-age=(\d+)/.exec(cc);
-  jwkCache = {
-    keys: body.keys,
-    expires: now + (maxAge ? parseInt(maxAge[1], 10) : 3600) * 1000,
-  };
-  return jwkCache.keys;
-}
-
-function b64urlToBytes(input) {
-  const pad = input.length % 4 ? 4 - (input.length % 4) : 0;
-  const b64 = (input + '='.repeat(pad)).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(b64);
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-  return out;
-}
-
-/**
- * Verify an RS256 Firebase ID token. Returns its claims, or null.
- *
- * Checks the signature against Google's rotating public keys, then the
- * issuer, audience and expiry. A token that fails any of these is treated
- * as anonymous rather than trusted.
- */
-async function verifyIdToken(token, projectId) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    const header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0])));
-    const claims = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1])));
-
-    if (header.alg !== 'RS256' || !header.kid) return null;
-
-    const keys = await googleKeys();
-    const jwk = keys.find((k) => k.kid === header.kid);
-    if (!jwk) return null;
-
-    const key = await crypto.subtle.importKey(
-      'jwk',
-      { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['verify']
-    );
-
-    const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
-    const valid = await crypto.subtle.verify(
-      'RSASSA-PKCS1-v1_5',
-      key,
-      b64urlToBytes(parts[2]),
-      signed
-    );
-    if (!valid) return null;
-
-    const now = Math.floor(Date.now() / 1000);
-    if (claims.exp <= now) return null;
-    if (claims.aud !== projectId) return null;
-    if (claims.iss !== `https://securetoken.google.com/${projectId}`) return null;
-    if (!claims.sub) return null;
-
-    return claims;
-  } catch (_) {
-    return null;
-  }
-}
+// Firebase ID-token verification moved to src/auth.js (shared with the
+// MCP endpoint, which accepts either a Firebase token or a pairing grant).
 
 // ── Path rules ───────────────────────────────────────────────────
 
@@ -298,6 +222,27 @@ export default {
       return deliverInternal(env, body, ctx);
     }
 
+    // ── Agent-built sites (public, unauthenticated by design) ──
+    // The agent's build_website tool hosts finished pages here; the link is
+    // meant to be shared with customers, so this route stays open. It can
+    // only serve an HTML artifact that the pipeline already stored — no
+    // data route, no listing, no user content beyond the artifact itself.
+    if (request.method === 'GET' && path.startsWith('/sites/')) {
+      return serveAgentSite(request, env, path);
+    }
+
+    // ── MCP endpoint (Model Context Protocol over Streamable HTTP) ──
+    // External AI clients (Claude Desktop, Cursor, any MCP host) talk to
+    // the CRM's tool registry here — WITHOUT static API tokens. Auth is a
+    // short-lived pairing grant the owner mints inside the app (24h TTL,
+    // revocable), or a plain Firebase ID token for the in-app agent.
+    // Deliberately BEFORE the Firebase bearer gate: grants are not
+    // Firebase tokens, and GET /mcp is a public capability advert.
+    if (path === '/mcp') {
+      if (request.method === 'GET') return mcpServerInfo(request, env);
+      if (request.method === 'POST') return handleMcp(request, env, ctx);
+    }
+
     // ── Read ──
     if (request.method === 'GET' && path.startsWith('/v1/file/')) {
       const key = decodeURIComponent(path.slice('/v1/file/'.length));
@@ -337,6 +282,15 @@ export default {
     // gates as the app's own AI Email screen).
     if (request.method === 'POST' && path === '/v1/assistant') {
       return handleAssistant(request, env, { uid, ctx });
+    }
+
+    // ── MCP pairing (mint/revoke external-client grants) ──
+    // The in-app half of the MCP story: the owner taps "Connect an AI" in
+    // the assistant screen, the app asks for a grant here (Firebase-authed),
+    // and the returned short-lived token is what an MCP client pastes. No
+    // static API token is ever created — grants expire and are revocable.
+    if (path === '/v1/assistant/mcp/pair') {
+      return handleMcpPair(request, env, { uid });
     }
 
     // ── Assistant approval gate (HITL) ──

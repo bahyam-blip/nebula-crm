@@ -15,13 +15,24 @@ import 'storage_service.dart' show kStorageBaseUrl;
 /// consequential actions parked for the owner's confirmation — the UI
 /// renders an Approve/Decline card for each.
 class AgentAnswer {
-  const AgentAnswer({required this.reply, this.actions = const [], this.approvals = const []});
+  const AgentAnswer({
+    required this.reply,
+    this.actions = const [],
+    this.approvals = const [],
+    this.artifacts = const [],
+  });
 
   final String reply;
   final List<AgentAction> actions;
   final List<AgentApproval> approvals;
 
-  bool get didSomething => actions.isNotEmpty || approvals.isNotEmpty;
+  /// Finished products the agent BUILT during this turn — hosted websites,
+  /// web apps, saved notes/reports. Rendered as rich cards with an
+  /// "Open" button; the URL is public and shareable.
+  final List<AgentArtifact> artifacts;
+
+  bool get didSomething =>
+      actions.isNotEmpty || approvals.isNotEmpty || artifacts.isNotEmpty;
 
   factory AgentAnswer.fromMap(Map<String, dynamic> m) => AgentAnswer(
         reply: (m['reply'] as String?) ?? '',
@@ -33,6 +44,76 @@ class AgentAnswer {
             .whereType<Map>()
             .map((a) => AgentApproval.fromMap(a.cast<String, dynamic>()))
             .toList(),
+        artifacts: ((m['artifacts'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((a) => AgentArtifact.fromMap(a.cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+/// A site / web app / note the agent built and hosted on the Worker.
+class AgentArtifact {
+  const AgentArtifact({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.url,
+    this.builder = '',
+  });
+
+  final String id;
+
+  /// site kind (landing|promo|event|portfolio|webapp|report) or 'note'.
+  final String kind;
+  final String title;
+  final String url;
+  final String builder;
+
+  IconData get icon {
+    switch (kind) {
+      case 'webapp':
+        return Icons.apps;
+      case 'promo':
+        return Icons.local_offer;
+      case 'event':
+        return Icons.event;
+      case 'portfolio':
+        return Icons.work_outline;
+      case 'report':
+      case 'note':
+        return Icons.description_outlined;
+      default:
+        return Icons.language;
+    }
+  }
+
+  String get kindLabel {
+    switch (kind) {
+      case 'webapp':
+        return 'Web app';
+      case 'note':
+        return 'Note';
+      case 'report':
+        return 'Report';
+      case 'landing':
+        return 'Landing page';
+      case 'promo':
+        return 'Offer page';
+      case 'event':
+        return 'Event page';
+      case 'portfolio':
+        return 'Portfolio';
+      default:
+        return 'Website';
+    }
+  }
+
+  factory AgentArtifact.fromMap(Map<String, dynamic> m) => AgentArtifact(
+        id: (m['id'] as String?) ?? '',
+        kind: (m['kind'] as String?) ?? 'site',
+        title: (m['title'] as String?) ?? 'Untitled',
+        url: (m['url'] as String?) ?? '',
+        builder: (m['builder'] as String?) ?? '',
       );
 }
 
@@ -80,6 +161,11 @@ class AgentAction {
       'update_deal_stage': 'Moved deal',
       'assign_leads': 'Assigned leads',
       'distribute_leads': 'Distributed leads',
+      'web_search': 'Searched the web',
+      'web_fetch': 'Read a web page',
+      'build_website': 'Built & hosted a site',
+      'save_note': 'Saved a note',
+      'list_artifacts': 'Listed its builds',
     };
     final base = names[tool] ?? tool;
     return summary.isNotEmpty ? '$base — $summary' : base;
@@ -113,6 +199,43 @@ class AiException implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+/// A short-lived MCP pairing grant minted in the app.
+///
+/// This is how external AI clients (Claude Desktop, Cursor, any MCP host)
+/// reach the CRM's tools WITHOUT static API tokens: the owner creates the
+/// grant here, pastes the URL + token into the client, and the grant dies
+/// by itself after 24h (and can be revoked at any moment).
+class McpPairing {
+  const McpPairing({
+    required this.url,
+    required this.token,
+    required this.label,
+    required this.expiresAt,
+  });
+
+  final String url;
+  final String token;
+  final String label;
+  final DateTime expiresAt;
+
+  Duration get lifetime => expiresAt.difference(DateTime.now());
+
+  String get expiresLabel {
+    final l = lifetime;
+    if (l.isNegative) return 'expired';
+    if (l.inHours >= 1) return 'expires in ${l.inHours}h ${l.inMinutes % 60}m';
+    return 'expires in ${l.inMinutes}m';
+  }
+
+  factory McpPairing.fromMap(Map<String, dynamic> m) => McpPairing(
+        url: (m['url'] as String?) ?? '',
+        token: (m['token'] as String?) ?? '',
+        label: (m['label'] as String?) ?? 'AI connection',
+        expiresAt: DateTime.tryParse((m['expires_at'] as String?) ?? '') ??
+            DateTime.now().add(const Duration(hours: 24)),
+      );
 }
 
 /// Talks to Sarvam through the storage Worker.
@@ -217,6 +340,61 @@ ${jsonEncode(context)}
       return AgentAnswer.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
     } catch (_) {
       throw AiException('The assistant sent a malformed reply.');
+    }
+  }
+
+  /// Mint a short-lived MCP pairing grant (Assistant → Connect an AI).
+  ///
+  /// The returned [McpPairing] is what the owner pastes into their MCP
+  /// client. No static API token is ever created — the grant self-expires
+  /// in 24h and can be revoked with [revokeMcp].
+  Future<McpPairing> pairMcp({String label = 'AI connection'}) async {
+    final token = await _idToken();
+    late http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_baseUrl/v1/assistant/mcp/pair'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'label': label}),
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (e) {
+      throw AiException('Could not reach the server. $e');
+    }
+    if (res.statusCode != 200) {
+      throw AiException(_detail(res.statusCode, res.body));
+    }
+    try {
+      return McpPairing.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw AiException('Malformed pairing response.');
+    }
+  }
+
+  /// Revoke every pairing grant created by the signed-in user.
+  Future<void> revokeMcp() async {
+    final token = await _idToken();
+    late http.Response res;
+    try {
+      res = await _client
+          .delete(
+            Uri.parse('$_baseUrl/v1/assistant/mcp/pair'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'all': true}),
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (e) {
+      throw AiException('Could not reach the server. $e');
+    }
+    if (res.statusCode != 200) {
+      throw AiException(_detail(res.statusCode, res.body));
     }
   }
 
