@@ -33,7 +33,7 @@ const THEME_NAMES = Object.keys(THEMES);
 /* ══ Stage 1 — THINK ═════════════════════════════════════════════════ */
 
 function briefSystemPrompt(kind, brand, style) {
-  return `You are the design director of a premium web studio. Respond with ONLY a JSON object.
+  return `You are the design director of a world-class web studio (Awwwards-tier). Respond with ONLY a JSON object.
 
 A client described a ${kind} page. Decide the design direction.
 
@@ -48,7 +48,15 @@ Schema:
  "must_have": ["3-5 section/content ideas specific to THIS brief"],
  "research_queries": ["0-2 short web searches that would surface real facts to enrich the copy"]
 }
-Rules: hex colors only. Keep palette accessible (readable ink on bg, accent readable as text on bg).${style ? ` The client asked for this style: "${style}" — honor it in theme/palette.` : ''} Business context: brand "${brand.name}", color ${brand.color}${brand.profile?.industry ? `, industry ${brand.profile.industry}` : ''}${brand.profile?.audience ? `, audience ${brand.profile.audience}` : ''}.`;
+
+Design principles you apply (this is what separates premium from template):
+- ONE dominant accent; the second color only supports. Never rainbow.
+- Ink-on-bg contrast >= 7:1 for headlines, >= 4.5:1 for body.
+- Choose theme by AUDIENCE EMOTION, not habit: luxury/nightlife/tech -> aurora or luxe; craft/editorial/consulting -> editorial; SaaS/corporate -> swiss; sale/festival -> festive; kids/food/community -> playful.
+- headline_angle must be a concrete promise or number when possible ("Custom thalis in 20 minutes" beats "Great food").
+- must_have: think like the visitor — what proof do they need to act? (menu/pricing/proof/booking/FAQ).
+- Palettes are ACCESSIBLE: muted text still readable on bg; accent readable as button text.
+Rules: hex colors only.${style ? ` The client asked for this style: "${style}" — honor it in theme/palette.` : ''} Business context: brand "${brand.name}", color ${brand.color}${brand.profile?.industry ? `, industry ${brand.profile.industry}` : ''}${brand.profile?.audience ? `, audience ${brand.profile.audience}` : ''}.`;
 }
 
 export async function designBrief(env, { kind, brief, style, brand }) {
@@ -155,12 +163,17 @@ function copyPromptContext({ kind, title, brief, brand, thought }) {
 }
 
 export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock }) {
-  const sys = `You are a senior conversion copywriter. Write the words for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders):
+  const sys = `You are a senior conversion copywriter (top 1%) writing for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders):
 
 ${COPY_SCHEMA}
 
-Rules:
-- Specific to THIS business and brief. Concrete nouns, numbers, names. No clichés ("unleash", "revolutionize").
+Craft rules — this is what makes copy convert:
+- Specific to THIS business and brief. Concrete nouns, numbers, names. No clichés ("unleash", "revolutionize", "elevate").
+- Headline: lead with the payoff. Plain words, strong verbs. 4-9 words is ideal.
+- Sub: answer "what exactly do I get and why you?" in one breath.
+- Features: each title = an outcome ("Fitted in 30 minutes"), text = proof/how.
+- FAQ: pre-empt the real objections (price, time, trust, availability).
+- Never invent facts you were not given — keep numbers generic ("50+", "since 2019") unless the brief or MARKET FACTS state them.
 - "primary_cta.href": use the business's main link if given, else mailto:${brand.contactEmail || 'hello@example.com'}.
 - If MARKET FACTS are provided, weave real specifics from them into copy and, for report kind, into report.findings/table/sources.
 - Respect the design voice: "${thought.design.voice || 'clear, confident'}" for audience "${thought.design.audience || 'general'}".`;

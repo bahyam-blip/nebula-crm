@@ -319,6 +319,35 @@ footer a:hover{color:var(--accent)}
 .rev{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.3,1),transform .7s cubic-bezier(.2,.7,.3,1)}
 .rev.in{opacity:1;transform:none}
 .rev.d1{transition-delay:.08s}.rev.d2{transition-delay:.16s}.rev.d3{transition-delay:.24s}
+/* ── premium polish layer ── */
+::selection{background:color-mix(in srgb,var(--accent) 32%,transparent);color:var(--ink)}
+html{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--accent) 45%,transparent) transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--accent) 38%,transparent);border-radius:99px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+/* hero entrance choreography — pure CSS, plays once on load */
+@keyframes rise{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+.hero .kicker{animation:rise .7s cubic-bezier(.2,.7,.3,1) both}
+.hero h1{animation:rise .75s .08s cubic-bezier(.2,.7,.3,1) both}
+.hero .sub{animation:rise .75s .16s cubic-bezier(.2,.7,.3,1) both}
+.hero .ctas{animation:rise .75s .24s cubic-bezier(.2,.7,.3,1) both}
+.hero-badges{animation:rise .75s .32s cubic-bezier(.2,.7,.3,1) both}
+/* drifting glow orbs */
+@keyframes drift{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(3.5%,4%) scale(1.06)}}
+.orb{animation:drift 16s ease-in-out infinite}
+.orb.b{animation-delay:-8s}
+/* animated shine on primary buttons */
+.btn.primary{position:relative;overflow:hidden}
+.btn.primary::before{content:"";position:absolute;top:0;left:-80%;width:55%;height:100%;background:linear-gradient(105deg,transparent,rgba(255,255,255,.32),transparent);transform:skewX(-20deg);animation:shine 5.5s ease-in-out infinite}
+@keyframes shine{0%,55%{left:-80%}75%,100%{left:130%}}
+/* top highlight on cards (glass edge catch) */
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:1px;border-radius:99px;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--accent) 55%,transparent),transparent);opacity:.5;pointer-events:none}
+.card{position:relative}
+/* scroll progress bar */
+#nb-progress{position:fixed;top:0;left:0;height:2.5px;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));z-index:99;box-shadow:0 0 10px color-mix(in srgb,var(--accent) 55%,transparent);transition:width .08s linear}
+/* section eyebrow numbering (swiss/editorial flavor) */
+.sec-head .idx{display:block;font-size:11.5px;font-weight:800;letter-spacing:.22em;color:var(--accent);margin-bottom:10px;opacity:.85}
 @media (max-width:860px){
   .split{grid-template-columns:1fr;gap:26px}
   .offer-wrap{grid-template-columns:1fr}
@@ -331,6 +360,9 @@ footer a:hover{color:var(--accent)}
   html{scroll-behavior:auto}
   .rev{opacity:1;transform:none;transition:none}
   .btn,.card,.work{transition:none}
+  .hero .kicker,.hero h1,.hero .sub,.hero .ctas,.hero-badges,.orb{animation:none}
+  .btn.primary::before{animation:none;display:none}
+  #nb-progress{display:none}
 }
 `;
 }
@@ -349,6 +381,28 @@ function baseJs() {
     document.querySelectorAll('.rev').forEach(function(el){io.observe(el);});
   }else{document.querySelectorAll('.rev').forEach(function(el){el.classList.add('in');});}
   document.querySelectorAll('a[href^="#"]').forEach(function(a){a.addEventListener('click',function(e){var t=document.querySelector(a.getAttribute('href'));if(t){e.preventDefault();t.scrollIntoView({behavior:'smooth',block:'start'});}});});
+  var rm=(typeof matchMedia!=='undefined')&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /* scroll progress bar */
+  var prog=document.getElementById('nb-progress');
+  if(prog){addEventListener('scroll',function(){var h=document.documentElement;var max=h.scrollHeight-h.clientHeight;if(max>0)prog.style.width=(scrollY/max*100)+'%';},{passive:true});}
+  /* orb parallax — subtle depth on scroll */
+  var orbs=document.querySelectorAll('.orb');
+  if(orbs.length&&!rm){addEventListener('scroll',function(){var y=scrollY*.06;orbs.forEach(function(o,i){o.style.translate='0 '+(i%2?-y:y)+'px';});},{passive:true});}
+  /* animated stat counters — counts up when revealed */
+  var stats=document.querySelectorAll('.stat b');
+  if(stats.length&&'IntersectionObserver' in window&&!rm){
+    var cio=new IntersectionObserver(function(es){es.forEach(function(e){
+      if(!e.isIntersecting)return;cio.unobserve(e.target);
+      var el=e.target,m=/^\s*([0-9][0-9,]*(?:\.[0-9]+)?)/.exec(el.textContent||'');
+      if(!m)return;var target=parseFloat(m[1].replace(/,/g,''));if(!isFinite(target)||target===0)return;
+      var dec=(m[1].split('.')[1]||'').length,prefix=el.textContent.slice(0,m.index),suffix=el.textContent.slice(m.index+m[1].length),t0=null;
+      var step=function(ts){if(!t0)t0=ts;var p=Math.min(1,(ts-t0)/1100);p=1-Math.pow(1-p,3);
+        var v=target*p,txt=dec?v.toFixed(dec):Math.round(v).toLocaleString('en-IN');
+        el.textContent=prefix+txt+suffix;if(p<1)requestAnimationFrame(step);else el.textContent=prefix+target.toLocaleString('en-IN',{minimumFractionDigits:dec,maximumFractionDigits:dec})+suffix;};
+      el.textContent=prefix+'0'+suffix;requestAnimationFrame(step);
+    });},{threshold:.5});
+    stats.forEach(function(el){cio.observe(el);});
+  }
   var cd=document.querySelector('[data-countdown]');
   if(cd){
     var end=new Date(cd.getAttribute('data-countdown')).getTime();
@@ -663,6 +717,7 @@ export function renderSite({ kind, design, content, brand }) {
 <title>${title}</title>
 <style>${baseCss(v, dNorm)}</style>
 </head><body>
+<div id="nb-progress"></div>
 ${body}
 <footer><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(brand.name)} · ${esc(content.footer_note || 'Made with Nebula Studio')}</span><span><a href="#top">Back to top ↑</a></span></div></footer>
 ${baseJs()}

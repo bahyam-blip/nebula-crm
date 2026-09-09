@@ -12,6 +12,7 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/common_widgets.dart';
 import '../../../../core/widgets/gradient_card.dart';
 import '../../../../core/widgets/kpi_card.dart';
+import '../../../../core/widgets/nebula_ui.dart';
 import '../../../assistant/models/insight.dart';
 import '../../../assistant/providers/assistant_provider.dart';
 import '../../../auth/providers/auth_provider.dart' show currentAppUserValueProvider;
@@ -35,25 +36,27 @@ class DashboardScreen extends ConsumerWidget {
     final insights = ref.watch(insightsProvider).valueOrNull ?? [];
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          _buildHeader(context, ref),
-          SliverToBoxAdapter(
-            child: dashboard.when(
-              data: (data) => _DashboardBody(
-                data: data,
-                dealsByStage: dealsByStage,
-                sla: sla,
-                insights: insights,
-              ),
-              loading: () => const LoadingGrid(itemCount: 4),
-              error: (e, _) => ErrorState(
-                message: 'Failed to load dashboard: $e',
-                onRetry: () => ref.invalidate(dashboardDataProvider),
+      body: AuroraBackground(
+        child: CustomScrollView(
+          slivers: [
+            _buildHeader(context, ref),
+            SliverToBoxAdapter(
+              child: dashboard.when(
+                data: (data) => _DashboardBody(
+                  data: data,
+                  dealsByStage: dealsByStage,
+                  sla: sla,
+                  insights: insights,
+                ),
+                loading: () => const LoadingGrid(itemCount: 4),
+                error: (e, _) => ErrorState(
+                  message: 'Failed to load dashboard: $e',
+                  onRetry: () => ref.invalidate(dashboardDataProvider),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -62,7 +65,7 @@ class DashboardScreen extends ConsumerWidget {
     final user = ref.watch(currentAppUserValueProvider);
     final name = (user?.displayName ?? '').trim();
     return SliverAppBar(
-      expandedHeight: 128,
+      expandedHeight: 138,
       pinned: true,
       flexibleSpace: FlexibleSpaceBar(
         titlePadding: const EdgeInsets.only(left: 20, right: 76, bottom: 14),
@@ -72,16 +75,13 @@ class DashboardScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Good ${_greeting()},',
-              style: context.textTheme.labelSmall?.copyWith(
-                color: AppColors.textSecondary,
-                letterSpacing: 0.3,
-              ),
+              'GOOD ${_greeting()}',
+              style: AppTypography.overline(AppColors.textTertiary),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(
               name.isEmpty ? 'Welcome' : name.split(' ').first,
-              style: context.textTheme.titleLarge?.copyWith(
+              style: context.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
               maxLines: 1,
@@ -90,45 +90,12 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         background: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [AppColors.surface, AppColors.background],
-            ),
-          ),
-          child: Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 20, bottom: 64),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: AppColors.border, width: 0.5),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.calendar_today,
-                        size: 11, color: AppColors.textTertiary),
-                    const SizedBox(width: 5),
-                    Text(
-                      Formatters.shortDate(DateTime.now()),
-                      style: context.textTheme.labelSmall,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          decoration: const BoxDecoration(gradient: AppColors.heroWash),
         ),
       ),
       actions: [
         Padding(
-          padding: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.only(right: 16),
           child: GestureDetector(
             onTap: () => context.push('/profile'),
             child: GlowAvatar(
@@ -145,9 +112,9 @@ class DashboardScreen extends ConsumerWidget {
 
   String _greeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) return 'morning';
-    if (hour < 17) return 'afternoon';
-    return 'evening';
+    if (hour < 12) return 'MORNING';
+    if (hour < 17) return 'AFTERNOON';
+    return 'EVENING';
   }
 }
 
@@ -185,33 +152,33 @@ class _DashboardBody extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 12,
             crossAxisSpacing: 12,
-            childAspectRatio: 1.1,
+            childAspectRatio: 1.02,
             children: [
               KpiCard(
                 label: 'Open Pipeline',
                 value: Formatters.currencyCompact(data.openPipelineValue),
-                icon: Icons.view_kanban,
+                icon: Icons.view_kanban_outlined,
                 sublabel: '${data.openDeals} open deal${data.openDeals == 1 ? '' : 's'}',
                 accentColor: AppColors.primary,
               ),
               KpiCard(
                 label: 'Weighted Forecast',
                 value: Formatters.currencyCompact(data.weightedForecast),
-                icon: Icons.trending_up,
+                icon: Icons.trending_up_rounded,
                 sublabel: 'probability-weighted',
                 accentColor: AppColors.accent,
               ),
               KpiCard(
                 label: 'Won This Month',
                 value: Formatters.currencyCompact(data.wonThisMonth),
-                icon: Icons.emoji_events,
+                icon: Icons.emoji_events_outlined,
                 sublabel: '${data.wonDeals} deal${data.wonDeals == 1 ? '' : 's'} closed',
                 accentColor: AppColors.success,
               ),
               KpiCard(
                 label: 'Win Rate',
                 value: Formatters.percent(data.winRate, decimals: 1),
-                icon: Icons.gps_fixed,
+                icon: Icons.gps_fixed_rounded,
                 sublabel: '${data.contactsCount} contacts · ${data.newContactsThisWeek} new this week',
                 accentColor: AppColors.tertiary,
               ),
@@ -219,7 +186,7 @@ class _DashboardBody extends StatelessWidget {
           ),
         ),
 
-        // Studio banner — build & host sites from the app
+        // Studio hero — build & host sites from the app
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
           child: _StudioBanner().animate().fadeIn(duration: 450.ms),
@@ -230,7 +197,6 @@ class _DashboardBody extends StatelessWidget {
         const SectionHeader(
           title: 'Revenue Trend',
           subtitle: 'Last 6 months',
-          actionLabel: 'Details',
         ),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 20),
@@ -255,7 +221,7 @@ class _DashboardBody extends StatelessWidget {
         const SizedBox(height: 24),
 
         // Recent activity
-        const SectionHeader(title: 'Recent Activity', actionLabel: 'See all'),
+        const SectionHeader(title: 'Recent Activity'),
         const RecentActivity(),
         const SizedBox(height: 40),
       ],
@@ -263,81 +229,83 @@ class _DashboardBody extends StatelessWidget {
   }
 }
 
+/// Studio hero card — the flagship "what else can Nebula do" moment.
 class _StudioBanner extends StatelessWidget {
   const _StudioBanner();
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => context.push('/studio'),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF1B2450), Color(0xFF141B38)],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+    return NebulaHeroCard(
+      onTap: () => context.push('/studio'),
+      child: Row(
+        children: [
+          NebulaIconTile(
+            icon: Icons.rocket_launch_rounded,
+            color: Colors.white,
+            size: 46,
+            rounded: 14,
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  gradient: AppColors.primaryGradient,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.rocket_launch_outlined, color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        const Text(
-                          'Studio',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Text(
-                            'NEW',
-                            style: TextStyle(
-                              color: AppColors.accent,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ],
+                    const Text(
+                      'Nebula Studio',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Build a site by describing it — live on a URL in seconds, publishable to GitHub, Vercel & more.',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.35),
+                    const SizedBox(width: 7),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2.5),
+                      decoration: BoxDecoration(
+                        gradient: AppColors.auroraGradient,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'AI',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-              const Icon(Icons.chevron_right, color: AppColors.textTertiary, size: 20),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  'Describe a website — the agent designs, builds and hosts it on a live URL in seconds.',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+          const SizedBox(width: 6),
+          Container(
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.08),
+              border: Border.all(color: AppColors.glassEdge),
+            ),
+            child: const Icon(Icons.arrow_forward_rounded,
+                color: AppColors.textPrimary, size: 15),
+          ),
+        ],
       ),
     );
   }
@@ -351,9 +319,9 @@ class _SlaCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GradientCard(
       gradient: const LinearGradient(
-        colors: [Color(0xFF1E2746), Color(0xFF161E36)],
+        colors: [Color(0xFF12141C), Color(0xFF0F1118)],
       ),
-      border: Border.all(color: AppColors.border, width: 0.5),
+      border: Border.all(color: AppColors.glassEdge, width: 1),
       child: Row(
         children: [
           _SlaStat(

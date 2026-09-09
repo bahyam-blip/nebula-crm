@@ -359,15 +359,15 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                 child: Container(
                   width: double.infinity,
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                   decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border, width: 0.5),
+                    color: AppColors.glassFill,
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: AppColors.glassEdge, width: 1),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.auto_awesome,
+                      const Icon(Icons.auto_awesome,
                           size: 13, color: AppColors.primary),
                       const SizedBox(width: 8),
                       Expanded(child: Text(s, style: context.textTheme.bodySmall)),
@@ -389,7 +389,8 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
           decoration: BoxDecoration(
-            color: m.mine ? AppColors.primary : AppColors.surfaceElevated,
+            gradient: m.mine ? AppColors.premiumGradient : null,
+            color: m.mine ? null : AppColors.surfaceElevated,
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(16),
               topRight: const Radius.circular(16),
@@ -398,15 +399,15 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             ),
             border: m.mine
                 ? null
-                : Border.all(color: AppColors.border, width: 0.5),
+                : Border.all(color: AppColors.glassEdge, width: 1),
             boxShadow: m.pending
                 ? []
                 : [
                     BoxShadow(
                       color: (m.mine ? AppColors.primary : Colors.black)
-                          .withValues(alpha: m.mine ? 0.25 : 0.3),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
+                          .withValues(alpha: m.mine ? 0.30 : 0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
                   ],
           ),
@@ -866,15 +867,28 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: _busy ? null : _send,
-              icon: _busy
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.arrow_upward, size: 18),
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: _busy
+                    ? null
+                    : AppColors.primaryGradient,
+                color: _busy ? AppColors.surfaceHigh : null,
+                boxShadow: _busy
+                    ? null
+                    : AppColors.glow(AppColors.primary, alpha: 0.35),
+              ),
+              child: IconButton(
+                onPressed: _busy ? null : _send,
+                icon: _busy
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded,
+                        size: 19, color: Colors.white),
+              ),
             ),
           ],
         ),

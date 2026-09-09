@@ -1,45 +1,78 @@
 import 'package:flutter/material.dart';
 
-/// Nebula CRM color palette — clean, calm dark theme.
+/// Nebula Design Language 2.0 — color system.
 ///
-/// Neutral near-black surfaces (no heavy navy cast) so cards, borders and
-/// accents stay quiet and content leads. OLED-friendly true-dark base;
-/// one indigo accent carries every primary action.
+/// Built on three principles borrowed from the best dark UIs (Linear,
+/// Raycast, Arc):
+///
+/// 1. DEPTH OVER FLATNESS — the canvas is not one black rectangle; it is
+///    layered near-black surfaces with ambient aurora glows that give the
+///    screen atmosphere and a sense of space.
+/// 2. ONE ACCENT FAMILY — indigo/violet/cyan carry brand, action and
+///    energy; semantic colors are reserved for meaning only.
+/// 3. QUIET CHROME, LOUD CONTENT — hairlines and glass fills separate
+///    content instead of heavy borders, so data and words lead.
 abstract class AppColors {
   // ── Backgrounds ──────────────────────────────────────────────
-  /// Pure-black canvas (OLED-friendly).
-  static const Color background = Color(0xFF0B0C10);
+  /// Deepest canvas — true OLED black with a hint of indigo.
+  static const Color background = Color(0xFF07080D);
 
-  /// Slightly raised surface — used by Scaffold body behind cards.
-  static const Color surface = Color(0xFF121318);
+  /// Raised surface behind cards and lists.
+  static const Color surface = Color(0xFF0D0F16);
 
   /// Card / list-item background.
-  static const Color surfaceElevated = Color(0xFF171922);
+  static const Color surfaceElevated = Color(0xFF12141C);
 
-  /// Higher-elevation card (modals, FAB backgrounds).
-  static const Color surfaceHigh = Color(0xFF1E2029);
+  /// Higher-elevation surface (modals, FAB, menus).
+  static const Color surfaceHigh = Color(0xFF181B26);
+
+  /// Highest elevation (dialogs above sheets).
+  static const Color surfaceHighest = Color(0xFF1F2330);
 
   /// Hairline borders, dividers.
-  static const Color border = Color(0xFF262A33);
+  static const Color border = Color(0xFF232734);
+
+  // ── Glass system (frosted fills over the aurora) ─────────────
+  /// Fill for glass cards — a whisper of white.
+  static const Color glassFill = Color(0x0AFFFFFF);
+
+  /// Stronger glass fill for emphasized surfaces.
+  static const Color glassFillStrong = Color(0x12FFFFFF);
+
+  /// Hairline on glass — light catches the edge.
+  static const Color glassEdge = Color(0x1AFFFFFF);
+
+  // ── Aurora ambient (atmosphere, used at low alpha) ───────────
+  /// Ambient glow color 1 — indigo.
+  static const Color auroraIndigo = Color(0xFF6C8CFF);
+
+  /// Ambient glow color 2 — violet.
+  static const Color auroraViolet = Color(0xFFA78BFA);
+
+  /// Ambient glow color 3 — cyan/mint.
+  static const Color auroraCyan = Color(0xFF5EEAD4);
+
+  /// Ambient glow color 4 — rose (sparingly, for warmth).
+  static const Color auroraRose = Color(0xFFFB7FA8);
 
   // ── Text ─────────────────────────────────────────────────────
   /// Primary text — high-contrast white.
-  static const Color textPrimary = Color(0xFFF4F5F7);
+  static const Color textPrimary = Color(0xFFF5F6F8);
 
   /// Secondary text — labels, captions.
-  static const Color textSecondary = Color(0xFF9BA1AE);
+  static const Color textSecondary = Color(0xFF9AA1B2);
 
   /// Tertiary / disabled text.
-  static const Color textTertiary = Color(0xFF5D6472);
+  static const Color textTertiary = Color(0xFF5C6373);
 
   // ── Brand ────────────────────────────────────────────────────
-  /// Primary accent — electric indigo. Used for CTAs, active nav.
+  /// Primary accent — electric indigo. CTAs, active nav, focus.
   static const Color primary = Color(0xFF6C8CFF);
 
-  /// Primary accent — slightly darker for pressed states.
+  /// Pressed / deep variant.
   static const Color primaryPressed = Color(0xFF5577E6);
 
-  /// Secondary accent — cyan/teal. Used for highlights, links.
+  /// Secondary accent — cyan/teal. Highlights, links.
   static const Color accent = Color(0xFF3DD8D8);
 
   /// Tertiary accent — magenta/pink for alerts, hot streaks.
@@ -72,6 +105,13 @@ abstract class AppColors {
     colors: [Color(0xFF6C8CFF), Color(0xFFB07CFF)],
   );
 
+  static const LinearGradient auroraGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [auroraIndigo, auroraViolet, auroraCyan],
+    stops: [0.0, 0.55, 1.0],
+  );
+
   static const LinearGradient revenueGradient = LinearGradient(
     begin: Alignment.bottomCenter,
     end: Alignment.topCenter,
@@ -83,6 +123,41 @@ abstract class AppColors {
     end: Alignment.bottomRight,
     colors: [Color(0xFFFF5C8A), Color(0xFFFF5C5C)],
   );
+
+  /// Soft wash used behind hero sections (dashboard header, studio hero).
+  static const LinearGradient heroWash = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFF141B33), Color(0x0007080D)],
+    stops: [0.0, 1.0],
+  );
+
+  // ── Elevation glow (light emitted by interactive elements) ──
+  /// Glow shadow for primary buttons / hero cards.
+  static List<BoxShadow> glow(Color color, {double alpha = 0.30}) => [
+        BoxShadow(
+          color: color.withValues(alpha: alpha),
+          blurRadius: 24,
+          offset: const Offset(0, 6),
+          spreadRadius: -6,
+        ),
+        BoxShadow(
+          color: color.withValues(alpha: alpha * 0.5),
+          blurRadius: 48,
+          offset: const Offset(0, 12),
+          spreadRadius: -12,
+        ),
+      ];
+
+  /// Ambient card shadow — grounds cards without heaviness.
+  static List<BoxShadow> get cardShadow => [
+        BoxShadow(
+          color: const Color(0xFF000000).withValues(alpha: 0.35),
+          blurRadius: 20,
+          offset: const Offset(0, 8),
+          spreadRadius: -10,
+        ),
+      ];
 
   /// Helper: stage color by string key.
   static Color stageColor(String stageKey) {

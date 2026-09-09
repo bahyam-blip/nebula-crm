@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/nebula_ui.dart';
 import '../../models/studio_models.dart';
 import '../../providers/studio_provider.dart';
 import '../widgets/publish_sheet.dart';
@@ -13,13 +14,8 @@ import 'site_preview_screen.dart';
 
 /// Nebula STUDIO — describe it, the agent builds it, it is LIVE instantly.
 ///
-/// Clean, single-flow surface:
-///   1. DESCRIBE — one field, plain language. Kind + look are one tap each.
-///   2. WATCH    — the agent walks visible stages (brief → research →
-///                 design → copy → build → host) while the Worker works.
-///   3. PREVIEW  — the real site renders in-app with a shareable URL.
-///   4. HOST     — GitHub / Vercel / Firebase / GoDaddy / Hostinger /
-///                 Supabase, credentials vaulted server-side.
+/// 2.0 presentation: aurora atmosphere, glass composer, gradient CTA,
+/// choreographed stage panel. All build/publish logic unchanged.
 class StudioScreen extends ConsumerStatefulWidget {
   const StudioScreen({super.key});
 
@@ -31,6 +27,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   final _briefCtrl = TextEditingController();
   final _titleCtrl = TextEditingController();
   final _ctaCtrl = TextEditingController();
+  final _briefFocus = FocusNode();
 
   String _kind = 'landing';
   String? _style;
@@ -67,10 +64,17 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _briefFocus.addListener(() => setState(() {}));
+  }
+
+  @override
   void dispose() {
     _briefCtrl.dispose();
     _titleCtrl.dispose();
     _ctaCtrl.dispose();
+    _briefFocus.dispose();
     super.dispose();
   }
 
@@ -88,8 +92,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      backgroundColor: AppColors.surfaceHigh,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
       builder: (_) => PublishSheet(
         site: null,
         onPublish: null,
@@ -110,8 +114,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      backgroundColor: AppColors.surfaceHigh,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
       builder: (_) => PublishSheet(
         site: site,
         onPublish: (platform, repo, domain) => notifier.publishSite(
@@ -135,9 +139,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   Future<void> _build() async {
     final brief = _briefCtrl.text.trim();
     if (brief.length < 12) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Describe it a little more — what is it, who is it for?')),
-      );
+      showNebulaToast(context,
+        'Describe it a little more — what is it, who is it for?',
+        icon: Icons.info_outline_rounded, color: AppColors.warning);
       return;
     }
     final title = _titleCtrl.text.trim().isEmpty ? brief.split(RegExp(r'[.!?\n]')).first.trim() : _titleCtrl.text.trim();
@@ -158,47 +162,94 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     final sites = state.sites.where((s) => !s.isNote).toList();
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: const Text('Studio', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19)),
-        actions: [
-          IconButton(
-            tooltip: 'Hosting & platforms',
-            icon: const Icon(Icons.dns_outlined, size: 21),
-            onPressed: _openPlatforms,
+      body: AuroraBackground(
+        intensity: 1.3,
+        child: RefreshIndicator(
+          color: AppColors.primary,
+          backgroundColor: AppColors.surfaceHigh,
+          onRefresh: () => ref.read(studioProvider.notifier).refresh(),
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(0, MediaQuery.paddingOf(context).top + 4, 0, 40),
+            children: [
+              _header(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                child: Column(
+                  children: [
+                    if (state.error != null) _errorBanner(state.error!),
+                    _composer(state),
+                    const SizedBox(height: 30),
+                    if (sites.isNotEmpty) ...[
+                      _sitesHeader(sites.length, state.loading),
+                      const SizedBox(height: 14),
+                      ...sites.asMap().entries.map((e) => StaggerIn(
+                            index: e.key,
+                            child: _siteCard(e.value),
+                          )),
+                    ] else if (!state.building) ..._emptyState(),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
+        ),
+      ),
+    );
+  }
+
+  // ── Header ──────────────────────────────────────────────────────────
+
+  Widget _header() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                OverlineLabel('Nebula Studio', color: AppColors.primary),
+                const SizedBox(height: 5),
+                const Text(
+                  'Build & host',
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.8,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _platformButton(),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: () => ref.read(studioProvider.notifier).refresh(),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
+    ).animate().fadeIn(duration: 260.ms);
+  }
+
+  Widget _platformButton() {
+    return PressableScale(
+      onTap: _openPlatforms,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.glassFillStrong,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.glassEdge),
+        ),
+        child: const Row(
           children: [
-            if (state.error != null) _errorBanner(state.error!),
-            _composer(state),
-            const SizedBox(height: 28),
-            if (sites.isNotEmpty) ...[
-              Row(
-                children: [
-                  const Text('Your sites', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  const SizedBox(width: 8),
-                  Text('${sites.length}', style: TextStyle(color: AppColors.textTertiary, fontSize: 13, fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  if (state.loading)
-                    const SizedBox(
-                      width: 14, height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textTertiary),
-                    ),
-                ],
+            Icon(Icons.dns_outlined, size: 17, color: AppColors.primary),
+            SizedBox(width: 7),
+            Text(
+              'Hosting',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
               ),
-              const SizedBox(height: 12),
-              ...sites.map(_siteCard),
-            ] else if (!state.building) ..._emptyState(),
+            ),
           ],
         ),
       ),
@@ -212,88 +263,40 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          state.building ? 'Building…' : 'What are we building today?',
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, height: 1.2),
+          state.building ? 'The agent is on it…' : 'What are we building today?',
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 21,
+            height: 1.25,
+            letterSpacing: -0.4,
+            color: AppColors.textPrimary,
+          ),
         ),
         const SizedBox(height: 6),
         Text(
           state.building
-              ? 'The agent is on it — watch the steps below.'
+              ? 'Watch each step below — you will get a real, public website.'
               : 'Describe it in plain words. You get a real website on a public link.',
           style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5, height: 1.45),
         ),
         const SizedBox(height: 18),
         if (!state.building) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
-            ),
-            child: TextField(
-              controller: _briefCtrl,
-              maxLines: 4,
-              minLines: 3,
-              maxLength: 1200,
-              textInputAction: TextInputAction.newline,
-              style: const TextStyle(fontSize: 15, height: 1.5),
-              decoration: InputDecoration(
-                hintText: 'e.g. ${_examples.first}',
-                hintStyle: TextStyle(color: AppColors.textTertiary.withValues(alpha: 0.75), fontSize: 13.5, height: 1.5),
-                hintMaxLines: 2,
-                border: InputBorder.none,
-                counterText: '',
-              ),
-            ),
-          ),
+          _briefField(),
           const SizedBox(height: 14),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _kinds.map((k) => _kindChip(k.$1, k.$2, k.$3)).toList(),
+            children: _kinds
+                .map((k) => NebulaChip(
+                      label: k.$3,
+                      selected: _kind == k.$1,
+                      onSelected: () => setState(() => _kind = k.$1),
+                    ))
+                .toList(),
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _styles.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final s = _styles[i];
-                final selected = _style == s.$1;
-                return GestureDetector(
-                  onTap: () => setState(() => _style = selected ? null : s.$1),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: selected ? s.$2.withValues(alpha: 0.18) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: selected ? s.$2 : AppColors.border.withValues(alpha: 0.9)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(width: 10, height: 10, decoration: BoxDecoration(color: s.$2, shape: BoxShape.circle)),
-                        const SizedBox(width: 7),
-                        Text(
-                          s.$1,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                            color: selected ? s.$2 : AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 6),
+          _styleRow(),
+          const SizedBox(height: 4),
           Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
@@ -301,7 +304,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
               childrenPadding: EdgeInsets.zero,
               initiallyExpanded: _moreOptions,
               onExpansionChanged: (v) => setState(() => _moreOptions = v),
-              title: Text('More options', style: TextStyle(color: AppColors.textTertiary, fontSize: 13, fontWeight: FontWeight.w600)),
+              iconColor: AppColors.textTertiary,
+              collapsedIconColor: AppColors.textTertiary,
+              title: const Text('More options', style: TextStyle(color: AppColors.textTertiary, fontSize: 13, fontWeight: FontWeight.w600)),
               children: [
                 TextField(
                   controller: _titleCtrl,
@@ -319,18 +324,11 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              onPressed: _build,
-              child: const Text('Create it', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
-            ),
+          NebulaButton(
+            label: 'Create it',
+            onPressed: _build,
+            icon: Icons.auto_awesome_rounded,
+            height: 54,
           ),
           const SizedBox(height: 12),
           Center(
@@ -345,13 +343,117 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     ).animate().fadeIn(duration: 220.ms);
   }
 
+  Widget _briefField() {
+    final focused = _briefFocus.hasFocus;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: focused
+              ? AppColors.primary.withValues(alpha: 0.7)
+              : AppColors.glassEdge,
+          width: focused ? 1.4 : 1,
+        ),
+        boxShadow: focused
+            ? AppColors.glow(AppColors.primary, alpha: 0.14)
+            : null,
+      ),
+      child: TextField(
+        controller: _briefCtrl,
+        focusNode: _briefFocus,
+        maxLines: 4,
+        minLines: 3,
+        maxLength: 1200,
+        textInputAction: TextInputAction.newline,
+        style: const TextStyle(fontSize: 15, height: 1.5, color: AppColors.textPrimary),
+        cursorColor: AppColors.primary,
+        decoration: InputDecoration(
+          hintText: 'e.g. ${_examples.first}',
+          hintStyle: TextStyle(color: AppColors.textTertiary.withValues(alpha: 0.75), fontSize: 13.5, height: 1.5),
+          hintMaxLines: 2,
+          border: InputBorder.none,
+          counterText: '',
+        ),
+      ),
+    );
+  }
+
+  Widget _styleRow() {
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _styles.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final s = _styles[i];
+          final selected = _style == s.$1;
+          return PressableScale(
+            onTap: () => setState(() => _style = selected ? null : s.$1),
+            pressedScale: 0.94,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 13),
+              decoration: BoxDecoration(
+                color: selected ? s.$2.withValues(alpha: 0.16) : AppColors.glassFill,
+                borderRadius: BorderRadius.circular(19),
+                border: Border.all(
+                  color: selected ? s.$2.withValues(alpha: 0.8) : AppColors.glassEdge,
+                ),
+                boxShadow: selected ? AppColors.glow(s.$2, alpha: 0.2) : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [s.$2, s.$2.withValues(alpha: 0.5)],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: s.$2.withValues(alpha: 0.55),
+                          blurRadius: 5,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    s.$1,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? s.$2 : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Stage panel ─────────────────────────────────────────────────────
+
   Widget _stagePanel(StudioState state) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+        border: Border.all(color: AppColors.glassEdge),
+        boxShadow: AppColors.cardShadow,
       ),
       child: Column(
         children: [
@@ -380,9 +482,17 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
           width: 27,
           height: 27,
           child: done
-              ? Icon(Icons.check_circle, color: color, size: 24)
+              ? Icon(Icons.check_circle_rounded, color: color, size: 24)
               : current
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: AppColors.primary))
+                  ? SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: AppColors.primary,
+                        backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                      ),
+                    )
                   : Container(
                       width: 20, height: 20,
                       decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.border, width: 1.6)),
@@ -404,38 +514,23 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     );
   }
 
-  Widget _kindChip(String value, String emoji, String label) {
-    final selected = _kind == value;
-    return GestureDetector(
-      onTap: () => setState(() => _kind = value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withValues(alpha: 0.16) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? AppColors.primary : AppColors.border.withValues(alpha: 0.9)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(emoji, style: const TextStyle(fontSize: 13.5)),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? AppColors.primary : AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+  // ── Sites list ──────────────────────────────────────────────────────
+
+  Widget _sitesHeader(int count, bool loading) {
+    return Row(
+      children: [
+        const Text('Your sites', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.textPrimary)),
+        const SizedBox(width: 8),
+        Text('$count', style: const TextStyle(color: AppColors.textTertiary, fontSize: 13, fontWeight: FontWeight.w600)),
+        const Spacer(),
+        if (loading)
+          const SizedBox(
+            width: 14, height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textTertiary),
+          ),
+      ],
     );
   }
-
-  // ── Sites list ──────────────────────────────────────────────────────
 
   Widget _siteCard(StudioSite site) {
     final dep = site.latestDeployment;
@@ -443,9 +538,10 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+        border: Border.all(color: AppColors.glassEdge),
+        boxShadow: AppColors.cardShadow,
       ),
       child: Material(
         color: Colors.transparent,
@@ -461,8 +557,16 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                   height: 44,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: AppColors.surfaceHigh.withValues(alpha: 0.55),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppColors.primary.withValues(alpha: 0.16),
+                        AppColors.auroraViolet.withValues(alpha: 0.07),
+                      ],
+                    ),
                     borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: AppColors.glassEdge),
                   ),
                   child: Text(site.kindIcon, style: const TextStyle(fontSize: 21)),
                 ),
@@ -478,7 +582,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                               site.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppColors.textPrimary),
                             ),
                           ),
                           if (site.version > 1)
@@ -499,13 +603,13 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                       const SizedBox(height: 3),
                       Text(
                         '${site.kindLabel} · $dateStr',
-                        style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+                        style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
                       ),
                       const SizedBox(height: 7),
                       Row(
                         children: [
                           Icon(
-                            dep != null && dep.url != null ? Icons.cloud_done_outlined : Icons.public,
+                            dep != null && dep.url != null ? Icons.cloud_done_rounded : Icons.public_rounded,
                             size: 12,
                             color: dep != null && dep.url != null ? AppColors.success : AppColors.info,
                           ),
@@ -515,7 +619,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                               dep?.url ?? site.url ?? '',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: AppColors.textTertiary, fontSize: 10.5),
+                              style: const TextStyle(color: AppColors.textTertiary, fontSize: 10.5),
                             ),
                           ),
                         ],
@@ -527,7 +631,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                 PopupMenuButton<String>(
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   color: AppColors.surfaceHigh,
-                  icon: Icon(Icons.more_vert, size: 18, color: AppColors.textTertiary),
+                  icon: const Icon(Icons.more_vert_rounded, size: 18, color: AppColors.textTertiary),
                   onSelected: (action) {
                     switch (action) {
                       case 'open':
@@ -544,11 +648,11 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                         break;
                     }
                   },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'open', height: 40, child: Text('Preview', style: TextStyle(fontSize: 13.5))),
-                    const PopupMenuItem(value: 'copy', height: 40, child: Text('Copy link', style: TextStyle(fontSize: 13.5))),
-                    const PopupMenuItem(value: 'browser', height: 40, child: Text('Open in browser', style: TextStyle(fontSize: 13.5))),
-                    const PopupMenuItem(value: 'host', height: 40, child: Text('Publish & domains', style: TextStyle(fontSize: 13.5))),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'open', height: 40, child: Text('Preview', style: TextStyle(fontSize: 13.5))),
+                    PopupMenuItem(value: 'copy', height: 40, child: Text('Copy link', style: TextStyle(fontSize: 13.5))),
+                    PopupMenuItem(value: 'browser', height: 40, child: Text('Open in browser', style: TextStyle(fontSize: 13.5))),
+                    PopupMenuItem(value: 'host', height: 40, child: Text('Publish & domains', style: TextStyle(fontSize: 13.5))),
                   ],
                 ),
               ],
@@ -566,11 +670,34 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
       const SizedBox(height: 10),
       Column(
         children: [
-          const Text('✨', style: TextStyle(fontSize: 36)),
-          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppColors.primary.withValues(alpha: 0.5),
+                  AppColors.auroraViolet.withValues(alpha: 0.08),
+                ],
+              ),
+              boxShadow: AppColors.glow(AppColors.primary, alpha: 0.2),
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceHigh,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.auto_awesome_rounded,
+                  color: AppColors.primary, size: 26),
+            ),
+          ),
+          const SizedBox(height: 14),
           const Text(
             'Your sites will live here',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary),
           ),
           const SizedBox(height: 6),
           Text(
@@ -585,17 +712,24 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             alignment: WrapAlignment.center,
             children: [
               for (final e in _examples.take(3))
-                ActionChip(
-                  label: Text(
-                    e.length > 44 ? '${e.substring(0, 44)}…' : e,
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                  backgroundColor: AppColors.surface,
-                  side: BorderSide(color: AppColors.border.withValues(alpha: 0.8)),
-                  onPressed: () {
+                PressableScale(
+                  onTap: () {
                     _briefCtrl.text = e;
                     setState(() {});
                   },
+                  pressedScale: 0.96,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.glassFill,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: AppColors.glassEdge),
+                    ),
+                    child: Text(
+                      e.length > 44 ? '${e.substring(0, 44)}…' : e,
+                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -614,7 +748,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
+            const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 18),
             const SizedBox(width: 10),
             Expanded(
               child: Text(message, style: const TextStyle(color: AppColors.danger, fontSize: 12.5, height: 1.4)),
@@ -627,7 +761,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
 
   InputDecoration _smallField(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(color: AppColors.textTertiary, fontSize: 12.5),
+        hintStyle: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5),
         filled: true,
         fillColor: AppColors.surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -639,9 +773,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
           borderRadius: BorderRadius.circular(13),
           borderSide: BorderSide(color: AppColors.border.withValues(alpha: 0.8)),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(13),
-          borderSide: const BorderSide(color: AppColors.primary),
+        focusedBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(13)),
+          borderSide: BorderSide(color: AppColors.primary),
         ),
       );
 
@@ -661,9 +795,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     if (text.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Link copied'), backgroundColor: AppColors.success),
-      );
+      showNebulaToast(context, 'Link copied', icon: Icons.link_rounded);
     }
   }
 
@@ -672,9 +804,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     final uri = Uri.parse(url);
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No browser found on this device.')),
-      );
+      showNebulaToast(context, 'No browser found on this device.',
+          icon: Icons.info_outline_rounded, color: AppColors.warning);
     }
   }
 }

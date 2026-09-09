@@ -19,6 +19,9 @@ class AppTheme {
     onError: Colors.white,
     surface: AppColors.surface,
     onSurface: AppColors.textPrimary,
+    surfaceContainerHighest: AppColors.surfaceHigh,
+    surfaceContainerHigh: AppColors.surfaceElevated,
+    outlineVariant: AppColors.border,
   );
 
   static ThemeData get theme {
@@ -30,7 +33,8 @@ class AppTheme {
       canvasColor: AppColors.background,
       textTheme: AppTypography.textTheme,
       fontFamily: 'Inter',
-      splashFactory: InkRipple.splashFactory,
+      // Sparkle splash on modern Android, ripple fallback elsewhere.
+      splashFactory: InkSparkle.splashFactory,
       visualDensity: VisualDensity.adaptivePlatformDensity,
     );
 
@@ -107,6 +111,20 @@ class AppTheme {
       ),
 
       // ── Buttons ──────────────────────────────────────────────
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(52),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          textStyle: AppTypography.textTheme.labelLarge
+              ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        ),
+      ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primary,
@@ -263,7 +281,8 @@ class AppTheme {
 
       // ── Dialog ───────────────────────────────────────────────
       dialogTheme: DialogThemeData(
-        backgroundColor: AppColors.surfaceElevated,
+        backgroundColor: AppColors.surfaceHigh,
+        barrierColor: Colors.black.withValues(alpha: 0.6),
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
@@ -273,10 +292,10 @@ class AppTheme {
       ),
 
       // ── Bottom sheet ─────────────────────────────────────────
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: AppColors.surfaceElevated,
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: AppColors.surfaceHigh,
         surfaceTintColor: Colors.transparent,
-        modalBarrierColor: Colors.black54,
+        modalBarrierColor: Colors.black.withValues(alpha: 0.6),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
@@ -284,7 +303,8 @@ class AppTheme {
 
       // ── Snack bar ────────────────────────────────────────────
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: AppColors.surfaceHigh,
+        backgroundColor: AppColors.surfaceHighest,
+        elevation: 8,
         contentTextStyle:
             AppTypography.textTheme.bodyMedium?.copyWith(color: Colors.white),
         actionTextColor: AppColors.accent,
