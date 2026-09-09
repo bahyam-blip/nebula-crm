@@ -35,6 +35,7 @@ import '../../features/service/presentation/screens/tickets_screen.dart';
 import '../../features/service/presentation/screens/ticket_detail_screen.dart';
 import '../../features/service/presentation/screens/knowledge_base_screen.dart';
 import '../../features/assistant/presentation/screens/ai_assistant_screen.dart';
+import '../../features/studio/presentation/screens/studio_screen.dart';
 import '../constants/app_constants.dart';
 import '../theme/app_colors.dart';
 import '../../shared/widgets/main_scaffold.dart';
@@ -236,6 +237,11 @@ final routerConfigProvider = Provider<GoRouter>((ref) {
         name: 'knowledgeBase',
         builder: (_, __) => const KnowledgeBaseScreen(),
       ),
+      GoRoute(
+        path: '/studio',
+        name: 'studio',
+        builder: (_, __) => const StudioScreen(),
+      ),
     ],
   );
 });
@@ -331,6 +337,12 @@ class _MoreScreen extends StatelessWidget {
         label: 'Super Admin',
         route: '/super-admin',
         color: AppColors.tertiary,
+      ),
+      _MenuItem(
+        icon: Icons.rocket_launch_outlined,
+        label: 'Studio — build & host sites',
+        route: '/studio',
+        color: AppColors.primary,
       ),
       _MenuItem(
         icon: Icons.trending_up,

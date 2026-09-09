@@ -219,6 +219,13 @@ class _DashboardBody extends StatelessWidget {
           ),
         ),
 
+        // Studio banner — build & host sites from the app
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+          child: _StudioBanner().animate().fadeIn(duration: 450.ms),
+        ),
+        const SizedBox(height: 24),
+
         // Revenue trend chart
         const SectionHeader(
           title: 'Revenue Trend',
@@ -252,6 +259,86 @@ class _DashboardBody extends StatelessWidget {
         const RecentActivity(),
         const SizedBox(height: 40),
       ],
+    );
+  }
+}
+
+class _StudioBanner extends StatelessWidget {
+  const _StudioBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => context.push('/studio'),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF1B2450), Color(0xFF141B38)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: AppColors.primaryGradient,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.rocket_launch_outlined, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Studio',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'NEW',
+                            style: TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Build a site by describing it — live on a URL in seconds, publishable to GitHub, Vercel & more.',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: AppColors.textTertiary, size: 20),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

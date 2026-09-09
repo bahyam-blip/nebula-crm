@@ -84,6 +84,14 @@ MAIL_MAX_SYNC = "20000"             # cap on contacts pulled from D1 per run (hu
 MAIL_ANALYTICS_INTERVAL_HOURS = "4" # harvest provider opens/clicks 6x a day so engagement shows up same-day
 MC_CREATE_TEMPLATES = "true"        # save every AI template into MailerCloud's template library
 
+# ── Hosting fabric vault (Studio → Hosting) ──────────────────────────
+# Platform credentials (GitHub PAT, Vercel token, Firebase service account,
+# GoDaddy key:secret, Hostinger token) are AES-GCM encrypted with a key
+# derived from VAULT_KEY. OPTIONAL: if unset the fabric falls back to
+# MAILERCLOUD_API_KEY, but a dedicated secret is the right production
+# posture — rotate it and every connection requires a one-tap reconnect.
+#   npx wrangler secret put VAULT_KEY
+
 # ── Sending identity & delivery engine ────────────────────────────────
 MAIL_SENDER_EMAIL = "das@aidraft.bond"  # verified domain sender (secret MAILERCLOUD_SENDER_EMAIL overrides this)
 MAIL_FROM_NAME = "Nebula CRM"           # inbox display name
