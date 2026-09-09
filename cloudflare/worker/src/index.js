@@ -22,6 +22,7 @@ import {
 import { handleMail, runMailCron, mailConfigState, deliverInternal, verifyRunSig } from './emailer/pipeline.js';
 import { handleAssistant, handleAssistantApproval } from './emailer/assistant.js';
 import { handleDataRequest } from './data_http.js';
+import { handleStudioRequest } from './studio_http.js';
 import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
 import { verifyIdToken } from './auth.js';
 import { handleMcp, handleMcpPair, serveAgentSite, mcpServerInfo } from './emailer/mcp.js';
@@ -266,6 +267,14 @@ export default {
     const claims = await verifyIdToken(bearer, env.FIREBASE_PROJECT_ID);
     if (!claims) return json({ error: 'invalid or expired token' }, 401);
     const uid = claims.sub;
+
+    // ── Nebula STUDIO (build → preview → publish) ──
+    // The app's build/host UI: generate a site, see it live at /sites/<id>,
+    // then publish it to GitHub Pages, Vercel or Firebase Hosting with
+    // credentials pulled from the encrypted vault (never from the client).
+    if (path.startsWith('/v1/studio/')) {
+      return handleStudioRequest(request, env, { url, path, uid, ctx });
+    }
 
     // ── CRM database (D1) — the Firestore replacement ──
     // Google Sign-In stays on Firebase; every byte of CRM data now lives in

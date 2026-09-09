@@ -96,6 +96,11 @@ export const TOOL_SCHEMAS = {
   teach_memory: { type: 'object', properties: { note: { ...STR, description: 'a lasting fact or preference about the business' } }, required: ['note'] },
   build_website: { type: 'object', properties: { title: STR, kind: { ...STR, description: 'landing|promo|event|portfolio|webapp|report' }, brief: { ...STR, description: 'what the site is for, audience, key message, sections' }, style: STR, cta_text: STR, cta_url: STR }, required: ['title', 'brief'] },
   save_note: { type: 'object', properties: { title: STR, content: { ...STR, description: 'the note / research summary / report (markdown-ish text)' } }, required: ['title', 'content'] },
+  connector_status: { type: 'object', properties: {} },
+  connect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger' }, label: STR, token: STR, key: STR, secret: STR, service_account_json: STR }, required: ['connector'] },
+  disconnect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger' } }, required: ['connector'] },
+  list_platform_domains: { type: 'object', properties: { connector: { ...STR, description: 'godaddy|hostinger' } }, required: ['connector'] },
+  publish_site: { type: 'object', properties: { artifact_id: { ...STR, description: 'id from list_artifacts (a built site, not a note)' }, connector: { ...STR, description: 'github|vercel|firebase' }, repo: { ...STR, description: 'repo/project name (optional)' }, domain: { ...STR, description: 'custom domain to attach (optional, github)' } }, required: ['artifact_id', 'connector'] },
   create_email_task: { type: 'object', properties: { instruction: { ...STR, description: 'campaign instruction written like the owner would brief a marketer, incl. recipients' } }, required: ['instruction'] },
 };
 
@@ -123,6 +128,11 @@ const MCP_DESCRIPTIONS = {
   teach_memory: 'Remember a lasting fact or preference about the business',
   build_website: 'BUILD AND HOST a complete website or mini web app from a brief — returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
   save_note: 'Save a note / research summary / report as a shareable artifact',
+  connector_status: 'Which hosting platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger) are connected',
+  connect_platform: 'Connect a hosting platform once — credentials are encrypted server-side; publishing afterwards needs no tokens. Prefer pointing the owner at the Studio → Hosting screen',
+  disconnect_platform: 'Remove a platform connection and destroy its stored credentials',
+  list_platform_domains: 'Domains the business owns on a connected registrar (GoDaddy/Hostinger)',
+  publish_site: 'DEPLOY a built site to GitHub Pages, Vercel or Firebase Hosting — returns the real public URL',
   create_email_task: 'QUEUE A REAL EMAIL CAMPAIGN (planning, on-brand copy, delivery, tracking). May wait for the owner in-app approval',
 };
 
@@ -265,6 +275,7 @@ export function mcpServerInfo(request, _env) {
       'live CRM reads/writes (role-enforced)',
       'AI email campaign engine with HITL approval',
       'website & mini web-app builder with public hosting (/sites/<id>)',
+      'publish to GitHub Pages / Vercel / Firebase Hosting + domain pointing',
       'live-web research (search + fetch)',
       'business memory',
     ],

@@ -18,9 +18,10 @@
  *      the action is stored, the chat shows an Approve/Decline card, and
  *      POST /v1/assistant/approve executes or cancels it.
  *
- * Tool registry (23 tools, three risk tiers):
+ * Tool registry (28 tools, three risk tiers):
  *   read           — direct D1 reads + public-web research, always safe
- *   write          — create/update CRM records, build/host sites, role-checked server-side
+ *   write          — create/update CRM records, build/host sites, publish to
+ *                    GitHub/Vercel/Firebase, point domains, role-checked server-side
  *   consequential  — affects the outside world (email to humans); needs
  *                    the owner's explicit approval when AGENT_APPROVAL_MODE
  *                    is 'always' (production default, set in wrangler.toml)
@@ -42,6 +43,14 @@ import { listTasks, newTask, putTask, progressOf, addEvent } from './tasks.js';
 import { getDoc, putDoc, canWrite, isManagerUp, loadUser } from '../data.js';
 import { buildWebsite, saveNote, listArtifacts } from './builder.js';
 import { webSearch, webFetch } from './research.js';
+import {
+  connectPlatform,
+  connectorStatus,
+  disconnectPlatform,
+  listPlatformDomains,
+  publishSite,
+  CONNECTORS,
+} from './publish.js';
 
 const MAX_STEPS = 8; // research chains: search → fetch → synthesize → build
 const APPROVAL_TTL = 60 * 60 * 24; // approvals expire after 24h
@@ -84,6 +93,11 @@ export const TOOLS = {
   teach_memory: { tier: 'write', roles: WRITE_ROLES, spec: 'remember a lasting fact or preference about the business {note}' },
   build_website: { tier: 'write', roles: WRITE_ROLES, spec: 'BUILD AND HOST a complete website or mini web app {title, brief, kind?: landing|promo|event|portfolio|webapp|report, style?, cta_text?, cta_url?} — returns a PUBLIC URL anyone can open. Use for landing pages, offer pages, event invites, portfolios, product showcases, market-research one-pagers, or small interactive web apps the owner describes' },
   save_note: { tier: 'write', roles: WRITE_ROLES, spec: 'save a research summary, plan or report as a shareable artifact {title, content} — the owner sees it in the app' },
+  connector_status: { tier: 'read', spec: 'which hosting platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger) are connected and what they do' },
+  connect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'connect a hosting platform once {connector: github|vercel|firebase|godaddy|hostinger, ...credentials} — credentials are encrypted server-side; afterwards publishing needs NO tokens. Only report that connecting is possible; the app Studio screen collects the credentials' },
+  disconnect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'remove a stored platform connection and destroy its stored credentials {connector}' },
+  list_platform_domains: { tier: 'read', roles: MANAGER_ROLES, spec: 'list the domains the business owns on a connected registrar {connector: godaddy|hostinger}' },
+  publish_site: { tier: 'write', roles: MANAGER_ROLES, spec: 'DEPLOY a built site artifact to a connected hosting platform {artifact_id, connector: github|vercel|firebase, repo?, domain?} — returns the real public URL (github.io / vercel.app / web.app). Use after build_website when the owner wants their site on their own hosting' },
   // ── consequential ──
   create_email_task: { tier: 'consequential', spec: 'QUEUE A REAL EMAIL CAMPAIGN {instruction} — write it like the owner would instruct a marketer, e.g. "send an announcement about <X> to all leads". The engine plans, writes on-brand copy and delivers. May require the owner\'s approval first.' },
 };
@@ -440,6 +454,29 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
     case 'save_note':
       return saveNote(store, user, args);
 
+    /* ── hosting fabric ── */
+    case 'connector_status':
+      return connectorStatus(env, store, user);
+
+    case 'connect_platform': {
+      // The chat model never invents credentials: only field PRESENCE is
+      // its business. Empty args → teach the user where to connect.
+      if (!args || !Object.keys(args).some((k) => !['connector', 'label'].includes(k) && String(args[k] || '').trim() !== '')) {
+        const list = Object.keys(CONNECTORS).join(', ');
+        return { ok: false, error: `connect from the app's Studio → Hosting screen (platforms: ${list}) — paste the platform credential there once; afterwards publishing here needs no tokens` };
+      }
+      return connectPlatform(env, store, user, args);
+    }
+
+    case 'disconnect_platform':
+      return disconnectPlatform(env, store, user, args);
+
+    case 'list_platform_domains':
+      return listPlatformDomains(env, store, user, args);
+
+    case 'publish_site':
+      return publishSite(env, store, user, args);
+
     /* ── write ── */
     case 'create_contact': {
       const name = String(args.name || '').trim().slice(0, 120);
@@ -614,6 +651,10 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
   }
   return { ok: false, error: 'unhandled tool' };
 }
+
+/** Domain pointing rides the same vault but is exposed via pointDomain —
+ * wired through the Studio REST surface (POST /v1/studio/point-domain).
+ * Kept out of the chat registry: DNS edits are surgical, UI-driven acts. */
 
 /** The ONLY consequential tool: queue a real email campaign.
  * With AGENT_APPROVAL_MODE=always it parks as a pending approval the owner
