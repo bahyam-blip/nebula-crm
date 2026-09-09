@@ -5,7 +5,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../models/studio_models.dart';
-import '../../widgets/publish_sheet.dart';
+import '../widgets/publish_sheet.dart';
 
 /// LIVE preview of a built site, inside the app.
 ///

@@ -8,7 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../models/studio_models.dart';
 import '../../providers/studio_provider.dart';
-import '../../widgets/publish_sheet.dart';
+import '../widgets/publish_sheet.dart';
 import 'site_preview_screen.dart';
 
 /// Nebula STUDIO — describe it, the agent builds it, it is LIVE instantly.
