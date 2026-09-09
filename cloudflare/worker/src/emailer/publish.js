@@ -62,6 +62,15 @@ export const CONNECTORS = {
     what: 'Your domains: DNS control to point hosts at deployed sites.',
     fields: [{ key: 'token', label: 'Hostinger API token (domains scope)', secret: true }],
   },
+  supabase: {
+    name: 'Supabase',
+    kind: 'backend',
+    what: 'Your app database: the agent runs SQL, provisions tables and seeds data for the web apps it builds.',
+    fields: [
+      { key: 'access_token', label: 'Personal access token (api.supabase.com/account/tokens)', secret: true },
+      { key: 'project_ref', label: 'Project ref (abcdefg.supabase.co → the abcdefg part)' },
+    ],
+  },
 };
 
 function normalizeCreds(connector, args = {}) {
@@ -71,6 +80,9 @@ function normalizeCreds(connector, args = {}) {
   } else if (connector === 'godaddy') {
     c.key = String(args.key || '').trim();
     c.secret = String(args.secret || '').trim();
+  } else if (connector === 'supabase') {
+    c.access_token = String(args.access_token || '').trim();
+    c.project_ref = String(args.project_ref || '').trim().replace(/\.supabase\.co.*$/i, '');
   } else if (connector === 'firebase') {
     const raw = String(args.service_account_json || '').trim();
     try { Object.assign(c, JSON.parse(raw)); } catch { throw new Error('service_account_json must be valid JSON'); }
@@ -417,6 +429,37 @@ async function hostingerUpsertCname(creds, domain, name, target) {
   return { ok: true, note: `CNAME ${name || 'www'}.${domain} → ${target} set. DNS propagates within minutes to an hour.` };
 }
 
+/* ══ Supabase (backend for the apps the agent builds) ═══════════════ */
+
+async function supabaseVerify(creds) {
+  const r = await apiFetch(`https://api.supabase.com/v1/projects/${encodeURIComponent(creds.project_ref)}`, {
+    headers: { Authorization: `Bearer ${creds.access_token}` },
+  });
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: r.status === 401 || r.status === 403
+        ? `Supabase rejected the access token (HTTP ${r.status})`
+        : `Supabase project "${creds.project_ref}" not reachable (HTTP ${r.status})`,
+    };
+  }
+  return { ok: true, name: r.body?.name || creds.project_ref };
+}
+
+/** Run SQL through the Supabase Management API (DDL + DML both allowed). */
+async function supabaseRunSql(creds, query) {
+  const r = await apiFetch(`https://api.supabase.com/v1/projects/${encodeURIComponent(creds.project_ref)}/database/query`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${creds.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: String(query || '').slice(0, 20000) }),
+  });
+  if (!r.ok) {
+    const msg = typeof r.body === 'string' ? r.body.slice(0, 300) : JSON.stringify(r.body)?.slice(0, 300);
+    return { ok: false, error: `Supabase SQL failed (HTTP ${r.status}): ${msg}` };
+  }
+  return { ok: true, rows: r.body, note: 'SQL executed.' };
+}
+
 /* ══ Tool surfaces (called from runTool + /v1/studio) ════════════════ */
 
 export async function connectPlatform(env, store, user, args) {
@@ -440,14 +483,16 @@ export async function connectPlatform(env, store, user, args) {
       : connector === 'vercel' ? await vercelVerify(creds)
       : connector === 'firebase' ? await firebaseVerify(creds)
       : connector === 'godaddy' ? await godaddyListDomains(creds)
+      : connector === 'supabase' ? await supabaseVerify(creds)
       : await hostingerListDomains(creds);
   } catch (e) {
     verify = { ok: false, error: `could not reach ${spec.name}: ${String(e).slice(0, 140)}` };
   }
   if (!verify.ok) return { ok: false, error: verify.error || `could not verify ${spec.name}` };
 
-  await storeConnection(env, store, user?.uid || '', connector, creds, args.label || verify.login || spec.name);
+  await storeConnection(env, store, user?.uid || '', connector, creds, args.label || verify.login || verify.name || spec.name);
   const verifiedAs = verify.login
+    || verify.name
     || (Array.isArray(verify.domains) && verify.domains.length ? `${verify.domains.length} domain(s)` : '')
     || spec.name;
   return {
@@ -482,6 +527,26 @@ export async function disconnectPlatform(env, store, user, args) {
   if (!existing) return { ok: false, error: `${CONNECTORS[connector].name} was not connected` };
   await deleteConnection(store, user?.uid || '', connector);
   return { ok: true, note: `${CONNECTORS[connector].name} disconnected. Stored credentials destroyed.` };
+}
+
+/**
+ * supabase_sql — run SQL against the connected Supabase project.
+ * This is how a built web app gets a REAL backend: "create the orders
+ * table my new app uses" → CREATE TABLE lands in the owner's database.
+ * Manager-gated at the registry; credentials come from the vault.
+ */
+export async function supabaseQuery(env, store, user, args) {
+  const query = String(args.query || args.sql || '').trim();
+  if (!query) return { ok: false, error: 'query (SQL) is required' };
+  const conn = await readConnection(env, store, user?.uid || '', 'supabase');
+  if (!conn) {
+    return { ok: false, error: 'Supabase is not connected — connect it once from Studio → Hosting (access token + project ref); after that SQL needs no tokens' };
+  }
+  try {
+    return await supabaseRunSql(conn.credentials, query);
+  } catch (e) {
+    return { ok: false, error: `could not reach Supabase: ${String(e).slice(0, 140)}` };
+  }
 }
 
 export async function listPlatformDomains(env, store, user, args) {

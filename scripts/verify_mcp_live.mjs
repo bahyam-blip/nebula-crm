@@ -91,7 +91,7 @@ async function main() {
 
   const list = await mcpRpc({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, grant);
   const tools = (list.body?.result?.tools || []).map((t) => t.name);
-  ok(tools.length === 19, `tools/list → 19 tools for a salesRep (23 minus 4 manager-only; got ${tools.length})`);
+  ok(tools.length === 20, `tools/list → 20 tools for a salesRep (+refine_site; got ${tools.length})`);
   ok(['build_website', 'web_search', 'web_fetch', 'save_note', 'list_artifacts', 'create_email_task', 'search_contacts'].every((n) => tools.includes(n)),
     'builder + research + CRM + email tools all exposed');
 

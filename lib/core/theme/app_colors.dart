@@ -1,36 +1,36 @@
 import 'package:flutter/material.dart';
 
-/// Nebula CRM color palette — dark premium (Bloomberg / Linear inspired).
+/// Nebula CRM color palette — clean, calm dark theme.
 ///
-/// All colors are 8-digit hex (RRGGBBAA) or 6-digit. Designed for OLED
-/// efficiency (true black backgrounds) while keeping enough elevation
-/// to read cards and surfaces.
+/// Neutral near-black surfaces (no heavy navy cast) so cards, borders and
+/// accents stay quiet and content leads. OLED-friendly true-dark base;
+/// one indigo accent carries every primary action.
 abstract class AppColors {
   // ── Backgrounds ──────────────────────────────────────────────
   /// Pure-black canvas (OLED-friendly).
-  static const Color background = Color(0xFF0A0E1A);
+  static const Color background = Color(0xFF0B0C10);
 
   /// Slightly raised surface — used by Scaffold body behind cards.
-  static const Color surface = Color(0xFF10162A);
+  static const Color surface = Color(0xFF121318);
 
   /// Card / list-item background.
-  static const Color surfaceElevated = Color(0xFF161E36);
+  static const Color surfaceElevated = Color(0xFF171922);
 
   /// Higher-elevation card (modals, FAB backgrounds).
-  static const Color surfaceHigh = Color(0xFF1E2746);
+  static const Color surfaceHigh = Color(0xFF1E2029);
 
   /// Hairline borders, dividers.
-  static const Color border = Color(0xFF233055);
+  static const Color border = Color(0xFF262A33);
 
   // ── Text ─────────────────────────────────────────────────────
   /// Primary text — high-contrast white.
-  static const Color textPrimary = Color(0xFFF4F6FB);
+  static const Color textPrimary = Color(0xFFF4F5F7);
 
   /// Secondary text — labels, captions.
-  static const Color textSecondary = Color(0xFF9AA3BC);
+  static const Color textSecondary = Color(0xFF9BA1AE);
 
   /// Tertiary / disabled text.
-  static const Color textTertiary = Color(0xFF5B6680);
+  static const Color textTertiary = Color(0xFF5D6472);
 
   // ── Brand ────────────────────────────────────────────────────
   /// Primary accent — electric indigo. Used for CTAs, active nav.

@@ -60,6 +60,8 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
   final _keyCtrl = TextEditingController();
   final _secretCtrl = TextEditingController();
   final _saCtrl = TextEditingController();
+  final _sbTokenCtrl = TextEditingController();
+  final _sbRefCtrl = TextEditingController();
 
   @override
   void dispose() {
@@ -69,6 +71,8 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
     _keyCtrl.dispose();
     _secretCtrl.dispose();
     _saCtrl.dispose();
+    _sbTokenCtrl.dispose();
+    _sbRefCtrl.dispose();
     super.dispose();
   }
 
@@ -82,6 +86,8 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         return {'key': _keyCtrl.text.trim(), 'secret': _secretCtrl.text.trim()};
       case 'firebase':
         return {'service_account_json': _saCtrl.text.trim()};
+      case 'supabase':
+        return {'access_token': _sbTokenCtrl.text.trim(), 'project_ref': _sbRefCtrl.text.trim()};
       default:
         return {};
     }
@@ -105,6 +111,8 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         return 'https://developer.godaddy.com/keys';
       case 'hostinger':
         return 'https://hpanel.hostinger.com/websites/api';
+      case 'supabase':
+        return 'https://supabase.com/dashboard/account/tokens';
       default:
         return '';
     }
@@ -285,6 +293,10 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         TextField(controller: _keyCtrl, obscureText: true, decoration: _input('API key')),
         const SizedBox(height: 10),
         TextField(controller: _secretCtrl, obscureText: true, decoration: _input('API secret')),
+      ] else if (p.connector == 'supabase') ...[
+        TextField(controller: _sbTokenCtrl, obscureText: true, decoration: _input('Personal access token')),
+        const SizedBox(height: 10),
+        TextField(controller: _sbRefCtrl, decoration: _input('Project ref (abcdefg.supabase.co → abcdefg)')),
       ] else
         TextField(
           controller: _tokenCtrl,
@@ -458,7 +470,7 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
                 Expanded(
                   child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(38)),
-                    onPressed: _busy ? null : () => setState(() { _connecting = p; _tokenCtrl.clear(); _keyCtrl.clear(); _secretCtrl.clear(); _saCtrl.clear(); }),
+                    onPressed: _busy ? null : () => setState(() { _connecting = p; _tokenCtrl.clear(); _keyCtrl.clear(); _secretCtrl.clear(); _saCtrl.clear(); _sbTokenCtrl.clear(); _sbRefCtrl.clear(); }),
                     icon: const Icon(Icons.add_link, size: 15),
                     label: const Text('Connect', style: TextStyle(fontSize: 13)),
                   ),
@@ -585,6 +597,8 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         return '🌐';
       case 'hostinger':
         return '🟣';
+      case 'supabase':
+        return '⚡';
       default:
         return '☁️';
     }

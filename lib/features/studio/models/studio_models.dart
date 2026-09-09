@@ -53,6 +53,9 @@ class StudioSite {
     required this.builder,
     this.url,
     this.bytes = 0,
+    this.version = 1,
+    this.updatedAt,
+    this.lastRefine,
     this.deployments = const [],
   });
 
@@ -63,6 +66,11 @@ class StudioSite {
   final String builder;
   final String? url;
   final int bytes;
+
+  /// Bumped every refine — the same public URL serves the latest version.
+  final int version;
+  final String? updatedAt;
+  final String? lastRefine;
   final List<SiteDeployment> deployments;
 
   bool get isNote => kind == 'note';
@@ -126,6 +134,9 @@ class StudioSite {
         builder: (m['builder'] as String?) ?? 'agent',
         url: m['url'] as String?,
         bytes: (m['bytes'] as num?)?.toInt() ?? 0,
+        version: (m['version'] as num?)?.toInt() ?? 1,
+        updatedAt: m['updated_at'] as String?,
+        lastRefine: m['last_refine'] as String?,
         deployments: ((m['deployments'] as List?) ?? const [])
             .whereType<Map>()
             .map((d) => SiteDeployment.fromMap(d.cast<String, dynamic>()))
@@ -156,6 +167,7 @@ class HostingConnector {
   final String? connectedAt;
 
   bool get isRegistrar => kind == 'domains';
+  bool get isBackend => kind == 'backend';
   bool get canPublish => connector == 'github' || connector == 'vercel' || connector == 'firebase';
 
   factory HostingConnector.fromMap(Map<String, dynamic> m) => HostingConnector(

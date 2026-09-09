@@ -21,7 +21,7 @@
 
 import { createStore, stateBackendName } from './emailer/state.js';
 import { loadUser } from './data.js';
-import { buildWebsite, listArtifacts } from './emailer/builder.js';
+import { buildWebsite, refineSite, listArtifacts } from './emailer/builder.js';
 import {
   connectPlatform,
   connectorStatus,
@@ -68,6 +68,14 @@ async function handleStudioInner(request, env, { url, path, uid, ctx }) {
     if (!WRITE_ROLES.includes(role)) return json({ error: `your role (${role}) cannot build sites` }, 403);
     const args = await body(request);
     const result = await buildWebsite(env, store, user, args, origin);
+    return json(result, result.ok ? 200 : 400);
+  }
+
+  /* ── refine an existing build (any teammate who may write) ── */
+  if (request.method === 'POST' && path === '/v1/studio/refine') {
+    if (!WRITE_ROLES.includes(role)) return json({ error: `your role (${role}) cannot refine sites` }, 403);
+    const args = await body(request);
+    const result = await refineSite(env, store, user, args, origin);
     return json(result, result.ok ? 200 : 400);
   }
 

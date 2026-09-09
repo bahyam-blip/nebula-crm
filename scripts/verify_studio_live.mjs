@@ -44,7 +44,7 @@ async function main() {
   const health = await jfetch('/v1/health');
   ok(health.status === 200 && health.json?.ok === true, 'worker healthy');
   const advert = await jfetch('/mcp');
-  ok(advert.status === 200 && advert.json?.tools === 28, '/mcp advert shows 28 tools', String(advert.json?.tools));
+  ok(advert.status === 200 && advert.json?.tools === 30, '/mcp advert shows 30 tools', String(advert.json?.tools));
 
   console.log('— auth-first studio routes —');
   const anon = await jfetch('/v1/studio/connectors');

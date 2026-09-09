@@ -41,7 +41,7 @@ import { crmOverview, searchContacts, findMailerCampaigns } from './firestore.js
 import { getLatestAnalytics } from './analytics.js';
 import { listTasks, newTask, putTask, progressOf, addEvent } from './tasks.js';
 import { getDoc, putDoc, canWrite, isManagerUp, loadUser } from '../data.js';
-import { buildWebsite, saveNote, listArtifacts } from './builder.js';
+import { buildWebsite, refineSite, saveNote, listArtifacts } from './builder.js';
 import { webSearch, webFetch } from './research.js';
 import {
   connectPlatform,
@@ -49,6 +49,7 @@ import {
   disconnectPlatform,
   listPlatformDomains,
   publishSite,
+  supabaseQuery,
   CONNECTORS,
 } from './publish.js';
 
@@ -91,13 +92,15 @@ export const TOOLS = {
   distribute_leads: { tier: 'write', roles: MANAGER_ROLES, spec: 'share leads evenly (round robin) across named teammates {to: [names], count?: int, query?: filter}' },
   save_business_profile: { tier: 'write', roles: MANAGER_ROLES, spec: 'update brand fields {patch:{...}} (business_name, tagline, about, industry, products, audience, tone, offers, website, cta_url, address, phone, contact_email, sender_name, signature_name, brand_color, default_style)' },
   teach_memory: { tier: 'write', roles: WRITE_ROLES, spec: 'remember a lasting fact or preference about the business {note}' },
-  build_website: { tier: 'write', roles: WRITE_ROLES, spec: 'BUILD AND HOST a complete website or mini web app {title, brief, kind?: landing|promo|event|portfolio|webapp|report, style?, cta_text?, cta_url?} — returns a PUBLIC URL anyone can open. Use for landing pages, offer pages, event invites, portfolios, product showcases, market-research one-pagers, or small interactive web apps the owner describes' },
+  build_website: { tier: 'write', roles: WRITE_ROLES, spec: 'BUILD AND HOST a complete website or mini web app {title, brief, kind?: landing|promo|event|portfolio|webapp|report, style?, cta_text?, cta_url?} — a design director plans the art direction, live web research grounds the copy, then a premium template engine renders and hosts it. Returns a PUBLIC URL + build stages. Use for landing pages, offer pages, event invites, portfolios, product showcases, market-research one-pagers, or small interactive web apps' },
+  refine_site: { tier: 'write', roles: WRITE_ROLES, spec: 'UPDATE an already-built site with a change request {artifact_id, instruction} — e.g. "make the headline punchier", "change accent to green", "add a pricing FAQ". Re-renders the SAME public URL as a new version (previous versions stay accessible with ?v=N)' },
   save_note: { tier: 'write', roles: WRITE_ROLES, spec: 'save a research summary, plan or report as a shareable artifact {title, content} — the owner sees it in the app' },
-  connector_status: { tier: 'read', spec: 'which hosting platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger) are connected and what they do' },
-  connect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'connect a hosting platform once {connector: github|vercel|firebase|godaddy|hostinger, ...credentials} — credentials are encrypted server-side; afterwards publishing needs NO tokens. Only report that connecting is possible; the app Studio screen collects the credentials' },
+  connector_status: { tier: 'read', spec: 'which platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger, Supabase) are connected and what they do' },
+  connect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'connect a platform once {connector: github|vercel|firebase|godaddy|hostinger|supabase, ...credentials} — credentials are encrypted server-side; afterwards publishing and SQL need NO tokens. Only report that connecting is possible; the app Studio screen collects the credentials' },
   disconnect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'remove a stored platform connection and destroy its stored credentials {connector}' },
   list_platform_domains: { tier: 'read', roles: MANAGER_ROLES, spec: 'list the domains the business owns on a connected registrar {connector: godaddy|hostinger}' },
   publish_site: { tier: 'write', roles: MANAGER_ROLES, spec: 'DEPLOY a built site artifact to a connected hosting platform {artifact_id, connector: github|vercel|firebase, repo?, domain?} — returns the real public URL (github.io / vercel.app / web.app). Use after build_website when the owner wants their site on their own hosting' },
+  supabase_sql: { tier: 'write', roles: MANAGER_ROLES, spec: 'run SQL on the connected Supabase project {query} — CREATE TABLE / INSERT / SELECT. Use after build_website when the owner\'s web app needs a real database backend; write safe, minimal schema and say what you created' },
   // ── consequential ──
   create_email_task: { tier: 'consequential', spec: 'QUEUE A REAL EMAIL CAMPAIGN {instruction} — write it like the owner would instruct a marketer, e.g. "send an announcement about <X> to all leads". The engine plans, writes on-brand copy and delivers. May require the owner\'s approval first.' },
 };
@@ -110,7 +113,7 @@ const SYSTEM_PROMPT = `You are the CRM's built-in AI assistant — an autonomous
 
 You SEE the current CRM snapshot below (contacts, pipeline, team, campaigns, analytics). You never say "I don't have access" — the data is in front of you, and for anything deeper you have TOOLS.
 
-You can also BUILD: with build_website you produce a complete, branded, hosted website or mini web app (landing page, promo, event invite, portfolio, webapp, report) and return its public URL. With save_note you file research summaries and plans the owner keeps. With web_search + web_fetch you research the live web before advising or building.
+You can also BUILD: with build_website you produce a complete, branded, hosted website or mini web app (landing page, promo, event invite, portfolio, webapp, report) and return its public URL — the design director + research + copy pipeline does the quality work, so write rich briefs. With refine_site you apply change requests to an existing build ("make the headline bolder") without rebuilding from scratch. With save_note you file research summaries and plans the owner keeps. With web_search + web_fetch you research the live web before advising or building.
 
 Reply with ONE JSON object and nothing else. Two shapes:
 
@@ -451,6 +454,9 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
     case 'build_website':
       return buildWebsite(env, store, user, args, ctx?.origin || '');
 
+    case 'refine_site':
+      return refineSite(env, store, user, args, ctx?.origin || '');
+
     case 'save_note':
       return saveNote(store, user, args);
 
@@ -476,6 +482,9 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
 
     case 'publish_site':
       return publishSite(env, store, user, args);
+
+    case 'supabase_sql':
+      return supabaseQuery(env, store, user, args);
 
     /* ── write ── */
     case 'create_contact': {

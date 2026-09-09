@@ -113,6 +113,26 @@ class StudioApiService {
     });
   }
 
+  /// Refine an existing build with a change request. Returns the updated
+  /// site (same id/URL, version bumped). Long timeout — re-render takes a
+  /// few LLM steps.
+  Future<StudioSite> refineSite({
+    required String artifactId,
+    required String instruction,
+  }) async {
+    final json = await _send('POST', '/v1/studio/refine', body: {
+      'artifact_id': artifactId,
+      'instruction': instruction,
+    }, timeoutSeconds: 150);
+    if (json['ok'] != true) {
+      throw StudioApiException((json['error'] as String?) ?? 'The update did not finish.');
+    }
+    return StudioSite.fromMap(<String, dynamic>{
+      ...json,
+      'id': json['artifact_id'],
+    });
+  }
+
   /// Everything the agent has built for this user (sites + notes), with
   /// deployment history attached to each site.
   Future<List<StudioSite>> listSites() async {

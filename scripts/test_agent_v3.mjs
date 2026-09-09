@@ -303,33 +303,43 @@ let aiSiteId = '';
 {
   const html = '<!DOCTYPE html><html><head><title>Sunrise Bakehouse</title><style>h1{color:#d47}</style></head><body><h1>Sunrise Bakehouse</h1><p>Fresh Mumbai sourdough daily' + 'x'.repeat(600) + '</p></body></html>';
   sarvamScript.length = 0;
-  sarvamScript.push({ match: (t) => t.includes('KIND:'), reply: { __raw: html } });
+  // v2 pipeline: THINK (design JSON) → WRITE (copy JSON) → engine renders.
+  sarvamScript.push(
+    { match: (t) => t.includes('design director'), reply: { theme: 'editorial', palette: { accent: '#b3402a' }, font: 'serif', voice: 'warm artisan', audience: 'Mumbai foodies', headline_angle: 'Fresh sourdough daily', must_have: ['menu highlights'], research_queries: [] } },
+    { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Sunrise Bakehouse', kicker: 'Bakery', headline: 'Sunrise Bakehouse', sub: 'Fresh Mumbai sourdough daily.', primary_cta: { label: 'Order now', href: 'mailto:hello@sunrise.test' }, features: [{ icon: '🥐', title: 'Baked at dawn', text: 'Croissants out of the oven by 7am.' }], contact: { email: 'hello@sunrise.test' } } },
+  );
 
   const res = await buildWebsite(env, store, { uid: 'u_mgr', displayName: 'Asha', role: 'manager' },
     { title: 'Sunrise Bakehouse', kind: 'landing', brief: 'Artisan bakery in Mumbai. Fresh sourdough, croissants and filter coffee. CTA: order for pickup.' }, 'https://worker.test');
-  ok(res.ok === true && res.builder === 'ai', 'build_website AI path succeeds', JSON.stringify(res).slice(0, 120));
+  ok(res.ok === true && res.builder === 'ai', 'build_website AI pipeline succeeds (design + copy AI, engine render)', JSON.stringify(res).slice(0, 160));
+  ok(Array.isArray(res.stages) && res.stages.length >= 3 && res.stages.some((s) => s.stage === 'think') && res.stages.some((s) => s.stage === 'write'),
+    'build returns the stage trace (think → research → write → render)', JSON.stringify(res.stages));
   ok(/^https:\/\/worker\.test\/sites\/s_[a-z0-9]+$/.test(res.url || ''), 'returns public URL', res.url);
   aiSiteId = res.artifact_id;
 
   const served = await serveAgentSite(new Request(res.url), env, `/sites/${aiSiteId}`);
   const servedText = await served.text();
-  ok(served.status === 200 && servedText.includes('Sunrise Bakehouse'), 'GET /sites/<id> serves the AI site');
+  ok(served.status === 200 && servedText.includes('Sunrise Bakehouse') && servedText.includes('<!DOCTYPE html>'), 'GET /sites/<id> serves the AI-designed site');
   ok(served.headers.get('Content-Type').includes('text/html'), 'served as text/html');
+  ok(servedText.includes('Baked at dawn') && servedText.includes('viewport'), 'engine page carries AI copy + mobile viewport');
 
-  // Fallback: AI returns garbage → signature builder still ships
+  // Fallback: AI garbage at every stage → deterministic design + copy, still shipped
   sarvamScript.length = 0;
-  sarvamScript.push({ match: (t) => t.includes('KIND:'), reply: 'I cannot do that today.' });
+  sarvamScript.push(
+    { match: (t) => t.includes('design director'), reply: 'I cannot do that today.' },
+    { match: (t) => t.includes('conversion copywriter'), reply: 'no JSON here' },
+  );
   const fb = await buildWebsite(env, store, { uid: 'u_mgr', displayName: 'Asha', role: 'manager' },
     { title: 'Diwali Offer', kind: 'promo', brief: 'Twenty percent off every gift hamper this Diwali. Family packs available. Order by Friday for delivery before the festival weekend.' }, 'https://worker.test');
-  ok(fb.ok === true && fb.builder === 'signature', 'AI failure falls back to signature builder — build NEVER fails silently');
+  ok(fb.ok === true && fb.builder === 'ai+engine', 'AI failure degrades to deterministic design+copy — build NEVER fails', JSON.stringify({ builder: fb.builder, ok: fb.ok }));
   const fbHtml = await (await serveAgentSite(new Request(fb.url), env, `/sites/${fb.artifact_id}`)).text();
-  ok(fbHtml.includes('Diwali Offer') && fbHtml.includes('<!DOCTYPE html>'), 'signature site is real branded HTML');
+  ok(fbHtml.includes('Diwali Offer') && fbHtml.includes('<!DOCTYPE html>') && fbHtml.includes('</html>'), 'fallback site is complete branded HTML');
+  ok(!fbHtml.includes('```') && !fbHtml.toLowerCase().includes('doctype]'), 'fallback page never leaks fences or model chatter');
 
-  // Sanitizer: remote script/iframes stripped from AI output (long enough
-  // to pass the builder's ≥500-char AI-output validation)
+  // Sanitizer: remote script/iframes stripped from AI webapp output
   const pad = 'p'.repeat(600);
   sarvamScript.length = 0;
-  sarvamScript.push({ match: (t) => t.includes('KIND:'), reply: { __raw: `<!DOCTYPE html><html><head><title>Batch Counter</title></head><body><h1>App</h1>${pad}<script src="https://evil.test/x.js"></script><iframe src="https://evil.test"></iframe><script>localStorage.setItem("ok","1")</script></body></html>` } });
+  sarvamScript.push({ match: (t) => t.includes('single-file web app'), reply: { __raw: `<!DOCTYPE html><html><head><title>Batch Counter</title></head><body><h1>App</h1>${pad}<script src="https://evil.test/x.js"></script><iframe src="https://evil.test"></iframe><script>localStorage.setItem("ok","1")</script></body></html>` } });
   const san = await buildWebsite(env, store, { uid: 'u_mgr', role: 'manager' }, { title: 'App', kind: 'webapp', brief: 'A simple counter app for tracking daily bake batches.' }, 'https://worker.test');
   const sanHtml = await (await serveAgentSite(new Request(san.url), env, `/sites/${san.artifact_id}`)).text();
   ok(!sanHtml.includes('evil.test'), 'sanitizer strips remote scripts/iframes');

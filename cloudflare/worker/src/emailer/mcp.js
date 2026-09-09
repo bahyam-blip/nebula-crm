@@ -95,12 +95,14 @@ export const TOOL_SCHEMAS = {
   save_business_profile: { type: 'object', properties: { patch: OBJ }, required: ['patch'] },
   teach_memory: { type: 'object', properties: { note: { ...STR, description: 'a lasting fact or preference about the business' } }, required: ['note'] },
   build_website: { type: 'object', properties: { title: STR, kind: { ...STR, description: 'landing|promo|event|portfolio|webapp|report' }, brief: { ...STR, description: 'what the site is for, audience, key message, sections' }, style: STR, cta_text: STR, cta_url: STR }, required: ['title', 'brief'] },
+  refine_site: { type: 'object', properties: { artifact_id: { ...STR, description: 'id of an existing built site' }, instruction: { ...STR, description: 'the change request, e.g. "darker theme, punchier headline, add pricing FAQ"' } }, required: ['artifact_id', 'instruction'] },
   save_note: { type: 'object', properties: { title: STR, content: { ...STR, description: 'the note / research summary / report (markdown-ish text)' } }, required: ['title', 'content'] },
   connector_status: { type: 'object', properties: {} },
-  connect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger' }, label: STR, token: STR, key: STR, secret: STR, service_account_json: STR }, required: ['connector'] },
+  connect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger|supabase' }, label: STR, token: STR, key: STR, secret: STR, service_account_json: STR, access_token: { ...STR, description: 'Supabase personal access token' }, project_ref: { ...STR, description: 'Supabase project ref (the abcdefg part of abcdefg.supabase.co)' } }, required: ['connector'] },
   disconnect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger' } }, required: ['connector'] },
   list_platform_domains: { type: 'object', properties: { connector: { ...STR, description: 'godaddy|hostinger' } }, required: ['connector'] },
   publish_site: { type: 'object', properties: { artifact_id: { ...STR, description: 'id from list_artifacts (a built site, not a note)' }, connector: { ...STR, description: 'github|vercel|firebase' }, repo: { ...STR, description: 'repo/project name (optional)' }, domain: { ...STR, description: 'custom domain to attach (optional, github)' } }, required: ['artifact_id', 'connector'] },
+  supabase_sql: { type: 'object', properties: { query: { ...STR, description: 'SQL to run on the connected Supabase project (CREATE TABLE / INSERT / SELECT)' } }, required: ['query'] },
   create_email_task: { type: 'object', properties: { instruction: { ...STR, description: 'campaign instruction written like the owner would brief a marketer, incl. recipients' } }, required: ['instruction'] },
 };
 
@@ -127,12 +129,14 @@ const MCP_DESCRIPTIONS = {
   save_business_profile: 'Update brand fields (name, tagline, industry, tone, colors…)',
   teach_memory: 'Remember a lasting fact or preference about the business',
   build_website: 'BUILD AND HOST a complete website or mini web app from a brief — returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
+  refine_site: 'Apply a change request to an already-built site and re-host it at the same URL as a new version',
   save_note: 'Save a note / research summary / report as a shareable artifact',
-  connector_status: 'Which hosting platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger) are connected',
-  connect_platform: 'Connect a hosting platform once — credentials are encrypted server-side; publishing afterwards needs no tokens. Prefer pointing the owner at the Studio → Hosting screen',
+  connector_status: 'Which platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger, Supabase) are connected',
+  connect_platform: 'Connect a platform once — credentials are encrypted server-side; publishing and SQL afterwards need no tokens. Prefer pointing the owner at the Studio → Hosting screen',
   disconnect_platform: 'Remove a platform connection and destroy its stored credentials',
   list_platform_domains: 'Domains the business owns on a connected registrar (GoDaddy/Hostinger)',
   publish_site: 'DEPLOY a built site to GitHub Pages, Vercel or Firebase Hosting — returns the real public URL',
+  supabase_sql: 'Run SQL on the connected Supabase project — provision tables / seed data for built web apps',
   create_email_task: 'QUEUE A REAL EMAIL CAMPAIGN (planning, on-brand copy, delivery, tracking). May wait for the owner in-app approval',
 };
 

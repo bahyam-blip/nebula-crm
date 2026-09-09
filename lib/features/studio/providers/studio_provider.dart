@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/studio_models.dart';
@@ -6,15 +8,35 @@ import '../services/studio_api_service.dart';
 /// Studio API service provider.
 final studioApiProvider = Provider<StudioApiService>((ref) => StudioApiService());
 
-/// Studio state: built sites + hosting platform connections.
+/// One visible step of the agent build pipeline. The UI walks the user
+/// through these while the Worker runs the real think → research →
+/// design → build → host pipeline.
+class BuildStage {
+  const BuildStage(this.label, this.icon);
+  final String label;
+  final String icon;
+}
+
+const kBuildStages = <BuildStage>[
+  BuildStage('Understanding your brief', '💡'),
+  BuildStage('Researching your market', '🔍'),
+  BuildStage('Designing the look & feel', '🎨'),
+  BuildStage('Writing your copy', '✍️'),
+  BuildStage('Building the pages', '🛠️'),
+  BuildStage('Hosting it live', '🚀'),
+];
+
+/// Studio state: built sites + hosting platform connections + build/refine
+/// progress.
 class StudioState {
   const StudioState({
     this.sites = const [],
     this.connectors = const [],
     this.loading = false,
     this.building = false,
+    this.refiningId,
+    this.stageIndex = 0,
     this.error,
-    this.buildStage,
   });
 
   final List<StudioSite> sites;
@@ -22,8 +44,11 @@ class StudioState {
   final bool loading;
   final bool building;
 
-  /// Human-readable progress line shown while the agent builds.
-  final String? buildStage;
+  /// Artifact currently being refined (null when none).
+  final String? refiningId;
+
+  /// Index into [kBuildStages] shown as agent progress while building.
+  final int stageIndex;
   final String? error;
 
   bool get anyHostingConnected =>
@@ -34,7 +59,9 @@ class StudioState {
     List<HostingConnector>? connectors,
     bool? loading,
     bool? building,
-    String? buildStage,
+    String? refiningId,
+    bool clearRefining = false,
+    int? stageIndex,
     String? error,
     bool clearError = false,
   }) =>
@@ -43,7 +70,8 @@ class StudioState {
         connectors: connectors ?? this.connectors,
         loading: loading ?? this.loading,
         building: building ?? this.building,
-        buildStage: buildStage ?? this.buildStage,
+        refiningId: clearRefining ? null : (refiningId ?? this.refiningId),
+        stageIndex: stageIndex ?? this.stageIndex,
         error: clearError ? null : (error ?? this.error),
       );
 }
@@ -53,6 +81,28 @@ class StudioController extends StateNotifier<StudioState> {
   StudioController(this._api) : super(const StudioState());
 
   final StudioApiService _api;
+  Timer? _stageTimer;
+
+  void _startStages() {
+    _stageTimer?.cancel();
+    state = state.copyWith(stageIndex: 0);
+    // The real pipeline runs server-side; the ticker walks the visible
+    // stages so progress is honest about ORDER even when timings vary.
+    _stageTimer = Timer.periodic(const Duration(milliseconds: 2600), (t) {
+      if (!state.building) {
+        t.cancel();
+        return;
+      }
+      if (state.stageIndex < kBuildStages.length - 1) {
+        state = state.copyWith(stageIndex: state.stageIndex + 1);
+      }
+    });
+  }
+
+  void _stopStages() {
+    _stageTimer?.cancel();
+    _stageTimer = null;
+  }
 
   Future<void> refresh() async {
     state = state.copyWith(loading: true, clearError: true);
@@ -83,7 +133,8 @@ class StudioController extends StateNotifier<StudioState> {
     String? ctaUrl,
     void Function(StudioSite site)? onDone,
   }) async {
-    state = state.copyWith(building: true, buildStage: 'Designing your site…', clearError: true);
+    state = state.copyWith(building: true, clearError: true);
+    _startStages();
     try {
       final site = await _api.buildSite(
         title: title,
@@ -93,13 +144,37 @@ class StudioController extends StateNotifier<StudioState> {
         ctaText: ctaText,
         ctaUrl: ctaUrl,
       );
-      state = state.copyWith(building: false, buildStage: null);
+      _stopStages();
+      state = state.copyWith(building: false);
       await refresh();
       onDone?.call(site);
     } on StudioApiException catch (e) {
-      state = state.copyWith(building: false, buildStage: null, error: e.message);
+      _stopStages();
+      state = state.copyWith(building: false, error: e.message);
     } catch (e) {
-      state = state.copyWith(building: false, buildStage: null, error: 'Build failed. $e');
+      _stopStages();
+      state = state.copyWith(building: false, error: 'Build failed. $e');
+    }
+  }
+
+  /// Refine an existing build ("make the headline bolder"). Returns the
+  /// updated site so the preview can reload it.
+  Future<StudioSite> refineSite({
+    required String artifactId,
+    required String instruction,
+  }) async {
+    state = state.copyWith(refiningId: artifactId, clearError: true);
+    try {
+      final site = await _api.refineSite(artifactId: artifactId, instruction: instruction);
+      await refresh();
+      state = state.copyWith(clearRefining: true);
+      return site;
+    } on StudioApiException catch (e) {
+      state = state.copyWith(clearRefining: true, error: e.message);
+      rethrow;
+    } catch (e) {
+      state = state.copyWith(clearRefining: true, error: 'Update failed. $e');
+      rethrow;
     }
   }
 
@@ -147,6 +222,12 @@ class StudioController extends StateNotifier<StudioState> {
     String name = 'www',
   }) =>
       _api.pointDomain(connector: connector, domain: domain, target: target, name: name);
+
+  @override
+  void dispose() {
+    _stageTimer?.cancel();
+    super.dispose();
+  }
 }
 
 final studioProvider =

@@ -132,8 +132,18 @@ globalThis.fetch = async (url, init = {}) => {
   }
 
   if (u.startsWith('https://api.sarvam.ai/')) {
-    captured.sarvam.push(JSON.parse(body).messages?.map((m) => m.content).join('\n'));
-    return jsonRes(200, { choices: [{ message: { content: STUB_SITE_HTML }, finish_reason: 'stop' }] });
+    const parsed = JSON.parse(body);
+    const text = parsed.messages?.map((m) => m.content).join('\n') || '';
+    captured.sarvam.push(text);
+    let content = STUB_SITE_HTML;
+    if (parsed.response_format?.type === 'json_object') {
+      if (text.includes('design director')) {
+        content = JSON.stringify({ theme: 'festive', palette: { accent: '#ffb03a', accent2: '#ff5c8a' }, font: 'modern', voice: 'warm festive', audience: 'Diwali shoppers', headline_angle: 'Flat 40% off for Diwali', must_have: ['offer card with countdown'], research_queries: [] });
+      } else {
+        content = JSON.stringify({ title: 'Diwali Mega Offer', kicker: 'Nebula CRM', headline: 'Diwali Mega Offer', sub: 'Flat 40% off across the store this week only.', primary_cta: { label: 'Shop now', href: 'https://nebula.test/shop' }, features: [{ icon: '🪔', title: 'Same-day delivery', text: 'Order by 2pm for evening delivery across the city.' }], offer: { badge: '40% OFF', price: '₹599', old_price: '₹999', note: 'Applied at checkout', terms: 'Ends Sunday midnight.', perks: ['Free gift wrap', 'Free delivery over ₹499'] }, faq: [{ q: 'Where do you deliver?', a: 'All of Mumbai, same day.' }] });
+      }
+    }
+    return jsonRes(200, { choices: [{ message: { content }, finish_reason: 'stop' }] });
   }
 
   // ── GitHub ──
@@ -335,7 +345,7 @@ const st = await store(env);
   ok(teach.ok === false && /Studio/.test(teach.error), 'chat connect without creds points at Studio');
 
   const status = await runTool({ tool: 'connector_status', args: {} }, env, st, MGR, CTX);
-  ok(status.ok === true && status.platforms.length === 5, 'status lists 5 platforms');
+  ok(status.ok === true && status.platforms.length === 6, 'status lists 6 platforms (5 hosting + Supabase backend)');
   ok(status.platforms.filter((p) => p.connected).length === 5,
     '5 platforms connected (github/vercel/firebase/godaddy/hostinger)',
     JSON.stringify(status.platforms.filter((p) => p.connected).map((p) => p.connector)));
@@ -363,7 +373,8 @@ let siteId = '';
   ok(built.res.status === 200 && built.json.ok === true, 'POST /v1/studio/build (AI path)', JSON.stringify(built.json).slice(0, 160));
   ok(/^https:\/\/worker\.test\/sites\//.test(built.json.url || ''), 'build returns public URL', built.json.url);
   siteId = built.json.artifact_id;
-  ok(captured.sarvam.length === 1, 'Sarvam called once for the build');
+  ok(captured.sarvam.length === 2, 'Sarvam called twice for the build (design brief + copy)', String(captured.sarvam.length));
+  ok(Array.isArray(built.json.stages) && built.json.stages.length >= 4, 'build response carries the stage trace', JSON.stringify(built.json.stages));
 
   const served = await studioFetch(env, 'GET', `/sites/${siteId}`, null);
   ok(served.res.status === 200 && served.text.includes('Diwali Mega Offer'), 'site publicly served at /sites/<id>');
@@ -485,7 +496,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   for (const t of ['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site']) {
     ok(names.includes(t) && !!TOOL_SCHEMAS[t], `MCP schema present: ${t}`);
   }
-  ok(names.length === 28, 'tool registry is 28 tools', String(names.length));
+  ok(names.length === 30, 'tool registry is 30 tools (28 + refine_site + supabase_sql)', String(names.length));
 
   // Pair a grant and call connector_status + publish over MCP.
   const pairReq = new Request('https://worker.test/v1/assistant/mcp/pair', {
@@ -509,11 +520,11 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   const listed = list.json.result.tools.map((t) => t.name);
   ok(['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site'].every((t) => listed.includes(t)),
     'tools/list shows all 5 hosting tools');
-  ok(listed.length === 28, 'tools/list count is 28', String(listed.length));
+  ok(listed.length === 30, 'tools/list count is 30', String(listed.length));
 
   const stCall = await rpc('tools/call', { name: 'connector_status', arguments: {} });
   const stPayload = JSON.parse(stCall.json.result.content[0].text);
-  ok(stPayload.ok === true && stPayload.platforms.length === 5, 'connector_status executes over MCP');
+  ok(stPayload.ok === true && stPayload.platforms.length === 6, 'connector_status executes over MCP');
 
   const pub = await rpc('tools/call', { name: 'publish_site', arguments: { artifact_id: siteId, connector: 'vercel', repo: 'mcp-deploy' } });
   const pubPayload = JSON.parse(pub.json.result.content[0].text);
