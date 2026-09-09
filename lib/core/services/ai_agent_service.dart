@@ -11,14 +11,17 @@ import 'storage_service.dart' show kStorageBaseUrl;
 /// [reply] is the text for the chat. [actions] lists what the agent did on
 /// the server (tools it ran — search, analytics, queued email tasks…) with
 /// a one-line human summary each; the UI renders them under the bubble so
-/// the user SEES the agent acted, not just talked.
+/// the user SEES the agent acted, not just talked. [approvals] lists
+/// consequential actions parked for the owner's confirmation — the UI
+/// renders an Approve/Decline card for each.
 class AgentAnswer {
-  const AgentAnswer({required this.reply, this.actions = const []});
+  const AgentAnswer({required this.reply, this.actions = const [], this.approvals = const []});
 
   final String reply;
   final List<AgentAction> actions;
+  final List<AgentApproval> approvals;
 
-  bool get didSomething => actions.isNotEmpty;
+  bool get didSomething => actions.isNotEmpty || approvals.isNotEmpty;
 
   factory AgentAnswer.fromMap(Map<String, dynamic> m) => AgentAnswer(
         reply: (m['reply'] as String?) ?? '',
@@ -26,6 +29,26 @@ class AgentAnswer {
             .whereType<Map>()
             .map((a) => AgentAction.fromMap(a.cast<String, dynamic>()))
             .toList(),
+        approvals: ((m['approvals'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((a) => AgentApproval.fromMap(a.cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+/// A consequential action the agent PREPARED but did not run — it waits for
+/// the owner's explicit yes (human-in-the-loop gate on mass sends).
+class AgentApproval {
+  const AgentApproval({required this.id, required this.tool, this.summary = ''});
+
+  final String id;
+  final String tool;
+  final String summary;
+
+  factory AgentApproval.fromMap(Map<String, dynamic> m) => AgentApproval(
+        id: (m['id'] as String?) ?? '',
+        tool: (m['tool'] as String?) ?? '',
+        summary: (m['summary'] as String?) ?? '',
       );
 }
 
@@ -41,13 +64,22 @@ class AgentAction {
     const names = {
       'search_contacts': 'Searched contacts',
       'crm_overview': 'Read CRM stats',
+      'search_deals': 'Checked deals',
       'recent_campaigns': 'Checked campaigns',
       'email_analytics': 'Pulled email analytics',
       'list_tasks': 'Listed email tasks',
-      'create_email_task': 'Queued email campaign',
+      'list_crm_tasks': 'Listed team tasks',
+      'list_team': 'Loaded team roster',
+      'create_email_task': 'Prepared email campaign',
       'get_business_profile': 'Read business profile',
       'save_business_profile': 'Updated business profile',
       'teach_memory': 'Learned a new fact',
+      'create_contact': 'Created contact',
+      'create_task': 'Created task',
+      'log_call': 'Logged call',
+      'update_deal_stage': 'Moved deal',
+      'assign_leads': 'Assigned leads',
+      'distribute_leads': 'Distributed leads',
     };
     final base = names[tool] ?? tool;
     return summary.isNotEmpty ? '$base — $summary' : base;
@@ -183,6 +215,60 @@ ${jsonEncode(context)}
     }
     try {
       return AgentAnswer.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw AiException('The assistant sent a malformed reply.');
+    }
+  }
+
+  /// Approve or decline a parked consequential action (HITL gate).
+  ///
+  /// Approving executes the stored action for real (e.g. the mass email
+  /// campaign actually starts); declining cancels it. The requester or a
+  /// manager may decide; the server enforces that.
+  Future<AgentAnswer> decideApproval({
+    required String approvalId,
+    required bool approve,
+  }) async {
+    final token = await _idToken();
+    late http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_baseUrl/v1/assistant/approve'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'id': approvalId,
+              'decision': approve ? 'approved' : 'rejected',
+            }),
+          )
+          .timeout(const Duration(seconds: 90));
+    } catch (e) {
+      throw AiException('Could not reach the assistant. $e');
+    }
+    if (res.statusCode == 403) {
+      throw AiException('Only the requester or a manager can decide this.');
+    }
+    if (res.statusCode == 404) {
+      throw AiException('This approval has expired — ask again in the chat.');
+    }
+    if (res.statusCode == 409) {
+      throw AiException('This one was already decided.');
+    }
+    if (res.statusCode != 200) {
+      throw AiException(_detail(res.statusCode, res.body));
+    }
+    try {
+      final map = jsonDecode(res.body) as Map<String, dynamic>;
+      return AgentAnswer(
+        reply: (map['reply'] as String?) ?? '',
+        actions: ((map['actions'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((a) => AgentAction.fromMap(a.cast<String, dynamic>()))
+            .toList(),
+      );
     } catch (_) {
       throw AiException('The assistant sent a malformed reply.');
     }

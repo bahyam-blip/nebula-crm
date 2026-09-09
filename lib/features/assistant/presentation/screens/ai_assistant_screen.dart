@@ -13,13 +13,22 @@ import '../../../insights/providers/monitor_provider.dart';
 import '../../services/ai_action_executor.dart';
 
 class _Msg {
-  _Msg(this.text, {required this.mine, this.pending = false, this.actions});
+  _Msg(this.text,
+      {required this.mine, this.pending = false, this.actions, this.approvals});
   final String text;
   final bool mine;
   final bool pending;
 
   /// What the agent DID on the server for this reply (tools it ran).
   final List<AgentAction>? actions;
+
+  /// Consequential actions the agent PREPARED and is waiting on the human
+  /// for (mass email sends). Rendered as Approve/Decline cards.
+  final List<AgentApproval>? approvals;
+
+  /// approvalId → approved? (decided cards lose their buttons)
+  final _decided = <String, bool>{};
+  bool deciding = false;
 }
 
 /// Conversational assistant that can also act on the CRM.
@@ -150,7 +159,13 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       if (!mounted) return;
       setState(() {
         _messages.removeWhere((m) => m.pending);
-        _messages.add(_Msg(shown, mine: false, actions: agent.actions));
+        _messages.add(_Msg(
+          shown,
+          mine: false,
+          actions: agent.actions,
+          approvals:
+              agent.approvals.isNotEmpty ? agent.approvals : null,
+        ));
       });
     } catch (agentError) {
       // ── Fallback: the legacy local flow (ask for a structured action →
@@ -206,11 +221,43 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
         }
       });
 
+  /// The human half of the approval gate: execute or cancel a parked
+  /// consequential action (e.g. a real mass email campaign).
+  Future<void> _decide(_Msg m, AgentApproval ap, bool approve) async {
+    if (m.deciding || m._decided.containsKey(ap.id)) return;
+    setState(() => m.deciding = true);
+    try {
+      final result = await ref
+          .read(aiAgentServiceProvider)
+          .decideApproval(approvalId: ap.id, approve: approve);
+      final reply = result.reply.isNotEmpty
+          ? result.reply
+          : (approve ? 'Approved and queued.' : 'Declined — nothing was sent.');
+      if (!mounted) return;
+      setState(() {
+        m.deciding = false;
+        m._decided[ap.id] = approve;
+        _messages.add(_Msg(reply,
+            mine: false,
+            actions: result.actions.isEmpty ? null : result.actions));
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        m.deciding = false;
+        _messages.add(_Msg('$e', mine: false));
+      });
+    }
+    _jump();
+  }
+
   static const _suggestions = [
     'How many open leads do I have right now?',
     "What's Priya's email address?",
     'Send an announcement about our new offer to all leads',
-    'How did my last email campaigns perform?',
+    'Distribute 10 unassigned leads across the team',
+    'Add contact Rahul Sharma rahul@acme.in 98765 43210',
+    'Log a call with Priya — interested, follow up in 3 days',
   ];
 
   @override
@@ -264,9 +311,10 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
               style: context.textTheme.titleMedium),
           const SizedBox(height: 6),
           Text(
-            'I can see everything in your CRM — contacts, pipeline, campaigns, '
-            'analytics — and I can act: search people, queue on-brand email '
-            'campaigns, update your business profile and more.',
+            'I can see everything in your CRM — contacts, pipeline, team, '
+            'campaigns, analytics — and I can act: search people, add '
+            'contacts, log calls, create tasks, assign leads, queue on-brand '
+            'email campaigns and more. Big sends wait for your approval.',
             textAlign: TextAlign.center,
             style: context.textTheme.bodySmall
                 ?.copyWith(color: AppColors.textSecondary),
@@ -379,10 +427,110 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                   ],
                 ),
               ],
+              // Consequential actions parked for the human — decide right here.
+              if (!m.mine && m.approvals != null && m.approvals!.isNotEmpty) ...[
+                for (final ap in m.approvals!) _approvalCard(m, ap),
+              ],
             ],
           ),
         ),
       );
+
+  /// Card for a consequential action waiting on the human: what it will do,
+  /// and Approve / Decline buttons (or the decision once made).
+  Widget _approvalCard(_Msg m, AgentApproval ap) {
+    final decided = m._decided[ap.id];
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.45), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            blurRadius: 14,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Icon(Icons.forward_to_inbox, size: 15, color: AppColors.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Ready to send — your approval required',
+                  style: context.textTheme.labelLarge
+                      ?.copyWith(color: AppColors.textPrimary)),
+            ),
+          ]),
+          if (ap.summary.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(ap.summary,
+                style: context.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondary)),
+          ],
+          const SizedBox(height: 10),
+          if (decided == null)
+            Row(children: [
+              FilledButton.icon(
+                onPressed: m.deciding ? null : () => _decide(m, ap, true),
+                icon: m.deciding
+                    ? const SizedBox(
+                        height: 13,
+                        width: 13,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.check, size: 15),
+                label: const Text('Approve & send'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: context.textTheme.labelMedium,
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: m.deciding ? null : () => _decide(m, ap, false),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: AppColors.textSecondary,
+                ),
+                child: const Text('Not now'),
+              ),
+            ])
+          else
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: (decided ? AppColors.success : AppColors.textSecondary)
+                    .withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                  decided ? Icons.check_circle : Icons.block,
+                  size: 13,
+                  color:
+                      decided ? AppColors.success : AppColors.textSecondary,
+                ),
+                const SizedBox(width: 5),
+                Text(decided ? 'Approved — sending' : 'Declined',
+                    style: context.textTheme.labelSmall?.copyWith(
+                        color: decided
+                            ? AppColors.success
+                            : AppColors.textSecondary)),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _composer() => Container(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),

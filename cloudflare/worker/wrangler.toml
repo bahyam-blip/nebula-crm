@@ -52,6 +52,12 @@ service = "nebula-crm-storage"
 FIREBASE_PROJECT_ID = "nebula-crm-70f58"
 DEFAULT_TEAM_ID = "default-team"
 
+# ── Agent assistant (HITL gate) ────────────────────────────────────────
+# 'always'  = mass email sends requested in chat are PARKED as pending
+#             approvals; the owner confirms with the Approve button.
+# 'off'     = agent email tasks start immediately (legacy behaviour).
+AGENT_APPROVAL_MODE = "always"
+
 # ── AI mailer settings (non-secret — edit freely) ─────────────────────
 # The mailer needs this SECRET to send (pushed automatically by the deploy
 # workflow from GitHub secrets — check that workflow's summary for readiness):

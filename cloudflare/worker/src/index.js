@@ -20,7 +20,7 @@ import {
   sendToTokens,
 } from './push.js';
 import { handleMail, runMailCron, mailConfigState, deliverInternal, verifyRunSig } from './emailer/pipeline.js';
-import { handleAssistant } from './emailer/assistant.js';
+import { handleAssistant, handleAssistantApproval } from './emailer/assistant.js';
 import { handleDataRequest } from './data_http.js';
 import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
 
@@ -337,6 +337,15 @@ export default {
     // gates as the app's own AI Email screen).
     if (request.method === 'POST' && path === '/v1/assistant') {
       return handleAssistant(request, env, { uid, ctx });
+    }
+
+    // ── Assistant approval gate (HITL) ──
+    // The human half of consequential actions: the agent parks a mass send
+    // as a pending approval, the owner presses Approve/Decline in chat, and
+    // this route executes (or cancels) the stored action. Requester or a
+    // manager decides; the action itself runs under the REQUESTER's identity.
+    if (request.method === 'POST' && path === '/v1/assistant/approve') {
+      return handleAssistantApproval(request, env, { uid, ctx });
     }
 
     // ── AI mailer (Sarvam + MailerCloud) ──
