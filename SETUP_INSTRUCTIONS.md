@@ -304,7 +304,7 @@ Your assistant's tools are exposed over **MCP (Model Context Protocol)** so
 external AI apps — Claude Desktop, Cursor, or any MCP client — can use them
 directly, exactly like the built-in assistant does:
 
-- **24 tools**: live CRM reads/writes (role-enforced), the AI email campaign
+- **23 tools**: live CRM reads/writes (role-enforced), the AI email campaign
   engine, the website & web-app builder, live-web research, business memory.
 - **No static API tokens.** Auth is a short-lived *pairing grant* you mint
   from the app: Assistant screen → **hub icon (top-right)** → *Create 24h

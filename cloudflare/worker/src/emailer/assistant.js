@@ -18,7 +18,7 @@
  *      the action is stored, the chat shows an Approve/Decline card, and
  *      POST /v1/assistant/approve executes or cancels it.
  *
- * Tool registry (24 tools, three risk tiers):
+ * Tool registry (23 tools, three risk tiers):
  *   read           — direct D1 reads + public-web research, always safe
  *   write          — create/update CRM records, build/host sites, role-checked server-side
  *   consequential  — affects the outside world (email to humans); needs

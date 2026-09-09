@@ -2,7 +2,7 @@
  * MCP server for Nebula CRM — Model Context Protocol over Streamable HTTP.
  *
  * This is the "host them directly from the app" story: the CRM's ENTIRE
- * agent tool registry (24 tools — CRM reads/writes, email engine, the
+ * agent tool registry (23 tools — CRM reads/writes, email engine, the
  * website builder, live-web research) is exposed as MCP tools at:
  *
  *     POST /mcp      (JSON-RPC 2.0: initialize, tools/list, tools/call…)
