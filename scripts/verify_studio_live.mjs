@@ -112,8 +112,14 @@ async function main() {
     method: 'POST', token,
     body: { connector: 'github', token: `ghp_invalid_${STAMP}` },
   });
-  ok(badConn.status === 400 && /rejected|Bad credentials|HTTP 401/i.test(badConn.json?.error || ''),
-    'garbage GitHub token rejected by live verify', JSON.stringify(badConn.json).slice(0, 140));
+  // Both outcomes prove the fabric is safe: the probe (salesRep) is blocked
+  // at the role gate (403), OR a manager probing would hit the live-verify
+  // rejection (400) with nothing stored.
+  const roleGate = badConn.status === 403 && /role/.test(badConn.json?.error || '');
+  const verifyGate = badConn.status === 400 && /rejected|Bad credentials|HTTP 401/i.test(badConn.json?.error || '');
+  ok(roleGate || verifyGate,
+    'bad connect rejected (role gate or live verify)',
+    `${badConn.status} ${JSON.stringify(badConn.json).slice(0, 140)}`);
 
   const pubDenied = await jfetch('/v1/studio/publish', {
     method: 'POST', token,

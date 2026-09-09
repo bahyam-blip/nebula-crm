@@ -4,8 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
-import '../models/studio_models.dart';
-import '../widgets/publish_sheet.dart';
+import '../../models/studio_models.dart';
+import '../../widgets/publish_sheet.dart';
 
 /// LIVE preview of a built site, inside the app.
 ///
@@ -52,7 +52,7 @@ class _SitePreviewScreenState extends State<SitePreviewScreen> {
           onPageFinished: (_) => setState(() { _ready = true; _progress = 1; }),
           onWebResourceError: (e) {
             // Only surface main-frame failures; asset hiccups are noise.
-            if (e.isForMainFrame) {
+            if (e.isForMainFrame == true) {
               setState(() { _failed = e.description; _ready = true; _progress = 1; });
             }
           },

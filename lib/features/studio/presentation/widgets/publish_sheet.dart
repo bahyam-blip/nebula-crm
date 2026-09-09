@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/theme/app_colors.dart';
-import '../models/studio_models.dart';
-import '../providers/studio_provider.dart';
+import '../../models/studio_models.dart';
+import '../../providers/studio_provider.dart';
 
 /// Bottom sheet: publish a built site to a connected hosting platform, or
 /// connect one first (credentials pasted once, encrypted server-side).
