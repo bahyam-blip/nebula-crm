@@ -125,12 +125,11 @@ class DealDetailScreen extends ConsumerWidget {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: GradientCard(
-                          gradient: AppColors.premiumGradient,
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(Icons.auto_awesome,
-                                  color: Colors.white, size: 20),
+                              const Icon(Icons.auto_awesome_outlined,
+                                  color: AppColors.textPrimary, size: 20),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
@@ -139,13 +138,13 @@ class DealDetailScreen extends ConsumerWidget {
                                     Text(
                                       'AI Insight',
                                       style: context.textTheme.labelMedium
-                                          ?.copyWith(color: Colors.white),
+                                          ?.copyWith(color: AppColors.textPrimary),
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
                                       d.aiInsight!,
                                       style: context.textTheme.bodyMedium
-                                          ?.copyWith(color: Colors.white),
+                                          ?.copyWith(color: AppColors.textSecondary),
                                     ),
                                     if (d.aiConfidence != null) ...[
                                       const SizedBox(height: 8),
@@ -153,7 +152,7 @@ class DealDetailScreen extends ConsumerWidget {
                                         'Confidence: ${(d.aiConfidence! * 100).toStringAsFixed(0)}%',
                                         style: context.textTheme.labelSmall
                                             ?.copyWith(
-                                                color: Colors.white70),
+                                                color: AppColors.textTertiary),
                                       ),
                                     ],
                                   ],

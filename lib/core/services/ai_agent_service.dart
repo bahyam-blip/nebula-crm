@@ -165,8 +165,13 @@ class AgentAction {
       'web_search': 'Searched the web',
       'web_fetch': 'Read a web page',
       'build_website': 'Built & hosted a site',
+      'refine_site': 'Updated a built site',
       'save_note': 'Saved a note',
       'list_artifacts': 'Listed its builds',
+      'plan_task': 'Planned the work',
+      'list_skills': 'Reviewed its skills',
+      'learn_skill': 'Learned a new skill',
+      'connector_status': 'Checked platform connections',
     };
     final base = names[tool] ?? tool;
     return summary.isNotEmpty ? '$base — $summary' : base;

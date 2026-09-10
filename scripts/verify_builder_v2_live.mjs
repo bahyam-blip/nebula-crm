@@ -44,7 +44,7 @@ async function main() {
   const health = await jfetch('/v1/health');
   ok(health.status === 200 && health.json?.ok === true, 'worker healthy');
   const advert = await jfetch('/mcp');
-  ok(advert.status === 200 && advert.json?.tools === 30, '/mcp advert shows 30 tools', String(advert.json?.tools));
+  ok(advert.status === 200 && advert.json?.tools === 33, '/mcp advert shows 33 tools', String(advert.json?.tools));
 
   console.log('— refine route is auth-first —');
   const anon = await jfetch('/v1/studio/refine', { method: 'POST', body: { artifact_id: 'x', instruction: 'y' } });

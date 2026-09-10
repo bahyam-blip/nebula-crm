@@ -164,9 +164,9 @@ class _DashboardBody extends StatelessWidget {
               KpiCard(
                 label: 'Weighted Forecast',
                 value: Formatters.currencyCompact(data.weightedForecast),
-                icon: Icons.trending_up_rounded,
+                icon: Icons.trending_up_outlined,
                 sublabel: 'probability-weighted',
-                accentColor: AppColors.accent,
+                accentColor: AppColors.textPrimary,
               ),
               KpiCard(
                 label: 'Won This Month',
@@ -178,9 +178,9 @@ class _DashboardBody extends StatelessWidget {
               KpiCard(
                 label: 'Win Rate',
                 value: Formatters.percent(data.winRate, decimals: 1),
-                icon: Icons.gps_fixed_rounded,
+                icon: Icons.gps_fixed_outlined,
                 sublabel: '${data.contactsCount} contacts · ${data.newContactsThisWeek} new this week',
-                accentColor: AppColors.tertiary,
+                accentColor: AppColors.textPrimary,
               ),
             ],
           ),
@@ -239,11 +239,11 @@ class _StudioBanner extends StatelessWidget {
       onTap: () => context.push('/studio'),
       child: Row(
         children: [
-          NebulaIconTile(
-            icon: Icons.rocket_launch_rounded,
-            color: Colors.white,
-            size: 46,
-            rounded: 14,
+          const NebulaIconTile(
+            icon: Icons.rocket_launch_outlined,
+            color: AppColors.textPrimary,
+            size: 44,
+            rounded: 12,
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -255,7 +255,7 @@ class _StudioBanner extends StatelessWidget {
                     const Text(
                       'Nebula Studio',
                       style: TextStyle(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         fontSize: 15,
                         color: AppColors.textPrimary,
                       ),
@@ -265,13 +265,13 @@ class _StudioBanner extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 7, vertical: 2.5),
                       decoration: BoxDecoration(
-                        gradient: AppColors.auroraGradient,
+                        color: AppColors.primary,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: const Text(
                         'AI',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF0A0A0A),
                           fontSize: 9,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.8,
@@ -299,10 +299,9 @@ class _StudioBanner extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.08),
               border: Border.all(color: AppColors.glassEdge),
             ),
-            child: const Icon(Icons.arrow_forward_rounded,
+            child: const Icon(Icons.arrow_forward_outlined,
                 color: AppColors.textPrimary, size: 15),
           ),
         ],
@@ -318,10 +317,6 @@ class _SlaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GradientCard(
-      gradient: const LinearGradient(
-        colors: [Color(0xFF12141C), Color(0xFF0F1118)],
-      ),
-      border: Border.all(color: AppColors.glassEdge, width: 1),
       child: Row(
         children: [
           _SlaStat(

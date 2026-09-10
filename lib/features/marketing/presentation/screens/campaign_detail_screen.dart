@@ -248,7 +248,7 @@ class _EngagementPanel extends StatelessWidget {
                   label: 'Click rate',
                   pct: clickRate,
                   caption: '${m.clicks} clicks',
-                  colors: const [AppColors.tertiary, Color(0xFFFFB547)],
+                  colors: const [AppColors.textSecondary, AppColors.textTertiary],
                   icon: Icons.touch_app_outlined,
                 ),
               ),

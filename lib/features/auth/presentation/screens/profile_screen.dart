@@ -52,13 +52,16 @@ class ProfileScreen extends ConsumerWidget {
                         child: Stack(
                           alignment: Alignment.bottomRight,
                           children: [
-                            // Gradient halo behind the avatar — the profile
+                            // Hairline halo behind the avatar — the profile
                             // identity moment.
                             Container(
                               padding: const EdgeInsets.all(3),
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                gradient: AppColors.premiumGradient,
+                                border: Border.all(
+                                  color: AppColors.glassEdge,
+                                  width: 1,
+                                ),
                               ),
                               child: CircleAvatar(
                                 radius: 54,

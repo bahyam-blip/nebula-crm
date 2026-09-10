@@ -5,49 +5,48 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
-import '../../../../core/utils/extensions.dart';
-import '../../../../core/widgets/gradient_card.dart';
+import '../../../../core/widgets/nebula_ui.dart';
 import '../../../assistant/models/insight.dart';
 import '../../../assistant/providers/assistant_provider.dart';
 
-/// Top-of-dashboard AI insight banner — premium gradient card with
-/// confidence, summary, and a CTA.
+/// Top-of-dashboard AI insight banner — MONO edition: a raised black
+/// slab with a white AI mark, hairline chrome, semantic tick only when
+/// the insight is a risk. Confidence line stays quiet gray.
 class AiInsightBanner extends ConsumerWidget {
   const AiInsightBanner({super.key, required this.insight});
   final Insight insight;
+
+  bool get _isRisk => switch (insight.type) {
+        InsightType.atRiskDeal ||
+        InsightType.churnRisk ||
+        InsightType.anomaly =>
+          true,
+        _ => false,
+      };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-      child: GradientCard(
-        gradient: _gradientFor(insight.type),
+      child: NebulaCard(
         onTap: () => _handleTap(context, ref),
+        accent: _isRisk ? AppColors.danger : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
+                const Icon(Icons.auto_awesome_outlined,
+                    color: AppColors.textPrimary, size: 16),
                 const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    insight.type.label,
-                    style: context.textTheme.labelSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                Text(
+                  insight.type.label.toUpperCase(),
+                  style: AppTypography.overline(AppColors.textSecondary),
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                  icon: const Icon(Icons.close_outlined,
+                      color: AppColors.textTertiary, size: 18),
                   onPressed: () => ref
                       .read(insightActionsProvider.notifier)
                       .dismiss(insight.id),
@@ -55,11 +54,10 @@ class AiInsightBanner extends ConsumerWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               insight.title,
-              style: AppTypography.textTheme.titleMedium
-                  ?.copyWith(color: Colors.white),
+              style: AppTypography.textTheme.titleSmall,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -67,7 +65,7 @@ class AiInsightBanner extends ConsumerWidget {
             Text(
               insight.summary,
               style: context.textTheme.bodySmall
-                  ?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
+                  ?.copyWith(color: AppColors.textSecondary, height: 1.5),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
@@ -75,15 +73,15 @@ class AiInsightBanner extends ConsumerWidget {
             Row(
               children: [
                 Icon(
-                  Icons.speed,
+                  Icons.speed_outlined,
                   size: 12,
-                  color: Colors.white.withValues(alpha: 0.7),
+                  color: AppColors.textTertiary,
                 ),
                 const SizedBox(width: 4),
                 Text(
                   insight.confidenceLabel,
                   style: context.textTheme.labelSmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.7),
+                    color: AppColors.textTertiary,
                   ),
                 ),
                 const Spacer(),
@@ -91,7 +89,7 @@ class AiInsightBanner extends ConsumerWidget {
                   TextButton(
                     onPressed: () => _handleTap(context, ref),
                     style: TextButton.styleFrom(
-                      foregroundColor: Colors.white,
+                      foregroundColor: AppColors.textPrimary,
                       visualDensity: VisualDensity.compact,
                     ),
                     child: Text(insight.recommendedAction!),
@@ -101,21 +99,7 @@ class AiInsightBanner extends ConsumerWidget {
           ],
         ),
       ),
-    ).animate().fadeIn(duration: 500.ms).slideY(begin: -0.05);
-  }
-
-  LinearGradient _gradientFor(InsightType t) {
-    return switch (t) {
-      InsightType.atRiskDeal ||
-      InsightType.churnRisk ||
-      InsightType.anomaly =>
-        AppColors.dangerGradient,
-      InsightType.upsellOpportunity ||
-      InsightType.forecastAdjustment ||
-      InsightType.followUpReminder =>
-        AppColors.primaryGradient,
-      _ => AppColors.premiumGradient,
-    };
+    ).animate().fadeIn(duration: 400.ms).slideY(begin: -0.05);
   }
 
   void _handleTap(BuildContext context, WidgetRef ref) {

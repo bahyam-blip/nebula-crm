@@ -39,9 +39,11 @@ A client described a ${kind} page. Decide the design direction.
 
 Schema:
 {
- "theme": "aurora|luxe|editorial|swiss|festive|playful",   // aurora=dark glass premium, luxe=dark+gold elegant, editorial=light magazine serif, swiss=minimal white grid, festive=vivid celebration, playful=bright friendly
+ "theme": "onyx|aurora|luxe|editorial|swiss|festive|playful|neo",
+ "hero": "centered|split|editorial",
+ "art": "mesh|rings|waves|grid|blocks",
  "palette": {"bg":"#hex","surface":"#hex","ink":"#hex","muted":"#hex","accent":"#hex","accent2":"#hex"},
- "font": "modern|serif|rounded|mono",
+ "font": "modern|grotesk|serif|luxe|syne|rounded|mono",
  "voice": "3-6 word tone of voice for all copy",
  "audience": "who this page must convince, 3-8 words",
  "headline_angle": "the single strongest promise to lead with, <=14 words",
@@ -50,6 +52,9 @@ Schema:
 }
 
 Design principles you apply (this is what separates premium from template):
+- Theme meanings: onyx=DEEP BLACK minimal, white type, hairlines, one restrained accent (premium/tech/architecture/studio); aurora=dark glass glowing accents; luxe=dark+gold elegance; editorial=light magazine serif; swiss=white minimal grid (SaaS/corporate); festive=vivid celebration; playful=bright friendly; neo=neo-brutalist poster, thick borders, hard shadows, loud accent.
+- hero: centered=statement hero; split=text left + art panel right (product/tech/onyx); editorial=huge left headline with rule lines (craft/food/portfolio/report).
+- art: mesh=soft blobs; rings=concentric circles (premium); waves=flowing lines (wellness/music/luxe); grid=iso grid (tech/swiss); blocks=mondrian (editorial/neo/playful).
 - ONE dominant accent; the second color only supports. Never rainbow.
 - Ink-on-bg contrast >= 7:1 for headlines, >= 4.5:1 for body.
 - Choose theme by AUDIENCE EMOTION, not habit: luxury/nightlife/tech -> aurora or luxe; craft/editorial/consulting -> editorial; SaaS/corporate -> swiss; sale/festival -> festive; kids/food/community -> playful.
@@ -59,7 +64,7 @@ Design principles you apply (this is what separates premium from template):
 Rules: hex colors only.${style ? ` The client asked for this style: "${style}" — honor it in theme/palette.` : ''} Business context: brand "${brand.name}", color ${brand.color}${brand.profile?.industry ? `, industry ${brand.profile.industry}` : ''}${brand.profile?.audience ? `, audience ${brand.profile.audience}` : ''}.`;
 }
 
-export async function designBrief(env, { kind, brief, style, brand }) {
+export async function designBrief(env, { kind, brief, style, brand, skillsBlock = '' }) {
   const fallback = () => ({
     design: normalizeDesign(
       { theme: themeForStyleHint(style, kind), palette: {}, font: '' },
@@ -74,14 +79,14 @@ export async function designBrief(env, { kind, brief, style, brand }) {
     const j = await sarvamChat(
       env,
       [
-        { role: 'system', content: briefSystemPrompt(kind, brand, style) },
+        { role: 'system', content: [briefSystemPrompt(kind, brand, style), skillsBlock].filter(Boolean).join('\n\n') },
         { role: 'user', content: String(brief).slice(0, 2200) },
       ],
       { json: true, maxTokens: 900, temperature: 0.7 }
     );
     const theme = THEME_NAMES.includes(String(j.theme)) ? String(j.theme) : themeForStyleHint(style, kind);
     const design = normalizeDesign(
-      { theme, palette: j.palette || {}, font: String(j.font || ''), voice: j.voice, audience: j.audience },
+      { theme, palette: j.palette || {}, font: String(j.font || ''), voice: j.voice, audience: j.audience, hero: j.hero, art: j.art },
       { kind, styleHint: style, brandColor: brand.color }
     );
     return {
@@ -125,6 +130,7 @@ const COPY_SCHEMA = `{
  "primary_cta": {"label": "<=24 chars", "href": "https://... or mailto:... or tel:..."},
  "secondary_cta": {"label": "", "href": ""},
  "hero_badges": ["0-4 short trust chips"],
+ "marquee": ["3-6 scrolling-band words — offer keywords, specialties, client names"],
  "stats": [{"value": "40%", "label": "what it measures"}],
  "features": [{"icon": "one emoji", "title": "<=5 words", "text": "1-2 sentences"}],
  "showcase": {"kicker": "", "title": "", "text": "", "art": "one emoji", "bullets": ["0-5 proof points"]},
@@ -162,7 +168,7 @@ function copyPromptContext({ kind, title, brief, brand, thought }) {
     .join('\n');
 }
 
-export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock }) {
+export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock, skillsBlock = '' }) {
   const sys = `You are a senior conversion copywriter (top 1%) writing for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders):
 
 ${COPY_SCHEMA}
@@ -176,12 +182,15 @@ Craft rules — this is what makes copy convert:
 - Never invent facts you were not given — keep numbers generic ("50+", "since 2019") unless the brief or MARKET FACTS state them.
 - "primary_cta.href": use the business's main link if given, else mailto:${brand.contactEmail || 'hello@example.com'}.
 - If MARKET FACTS are provided, weave real specifics from them into copy and, for report kind, into report.findings/table/sources.
+- marquee: 3-6 punchy keywords for a scrolling band (cafes, studios, offers) — omit for reports.
 - Respect the design voice: "${thought.design.voice || 'clear, confident'}" for audience "${thought.design.audience || 'general'}".`;
   try {
     const j = await sarvamChat(
       env,
       [
-        { role: 'system', content: sys },
+        { role: 'system', content: skillsBlock ? `${sys}
+
+${skillsBlock}` : sys },
         { role: 'user', content: [copyPromptContext({ kind, title, brief, brand, thought }), factsBlock].filter(Boolean).join('\n\n') },
       ],
       { json: true, maxTokens: 1500, temperature: 0.75 }
@@ -193,7 +202,7 @@ Craft rules — this is what makes copy convert:
 }
 
 /** Enforce shapes/limits on whatever the model produced. */
-function sanitizeCopy(j, { kind, brand }) {
+export function sanitizeCopy(j, { kind, brand }) {
   const arr = (v, n, shape) => {
     if (!Array.isArray(v)) return [];
     return v
@@ -210,6 +219,7 @@ function sanitizeCopy(j, { kind, brand }) {
     primary_cta: j.primary_cta && typeof j.primary_cta === 'object' ? { label: String(j.primary_cta.label || '').slice(0, 30), href: String(j.primary_cta.href || '') } : null,
     secondary_cta: j.secondary_cta && typeof j.secondary_cta === 'object' ? { label: String(j.secondary_cta.label || '').slice(0, 30), href: String(j.secondary_cta.href || '') } : null,
     hero_badges: Array.isArray(j.hero_badges) ? j.hero_badges.map((b) => String(b).slice(0, 40)).slice(0, 4) : [],
+    marquee: Array.isArray(j.marquee) ? j.marquee.map((m) => String(m).slice(0, 40)).filter(Boolean).slice(0, 6) : [],
     stats: arr(j.stats, 4, (s) => ({ value: String(s.value || '').slice(0, 12), label: String(s.label || '').slice(0, 60) })).filter((s) => s.value),
     features: arr(j.features, 6, (f) => ({ icon: String(f.icon || '✦').slice(0, 4), title: String(f.title || '').slice(0, 60), text: String(f.text || '').slice(0, 220) })).filter((f) => f.title),
     testimonials: arr(j.testimonials, 3, (t) => ({ quote: String(t.quote || '').slice(0, 260), name: String(t.name || '').slice(0, 60), role: String(t.role || '').slice(0, 70) })).filter((t) => t.quote),

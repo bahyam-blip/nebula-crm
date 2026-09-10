@@ -244,6 +244,16 @@ export default {
       if (request.method === 'POST') return handleMcp(request, env, ctx);
     }
 
+    // ── Public connectors page ──
+    // The single public URL that explains how to connect ANY AI client to
+    // this agent (MCP pairing), how platform connectors work, and the
+    // security model. Linked from GET /mcp and from the app.
+    if (request.method === 'GET' && (path === '/connect' || path === '/connect/')) {
+      return new Response(connectPage(request, env), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
+
     // ── Read ──
     if (request.method === 'GET' && path.startsWith('/v1/file/')) {
       const key = decodeURIComponent(path.slice('/v1/file/'.length));
@@ -540,3 +550,74 @@ export default {
     return json({ error: 'not found' }, 404);
   },
 };
+
+/* ══ Public /connect page — the connectors + security explainer ═══════ */
+
+function connectPage(request, env) {
+  const origin = new URL(request.url).origin;
+  return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect — Nebula Agent</title>
+<meta name="description" content="Connect any AI client to the Nebula agent over MCP, or publish to your own hosting. No API keys.">
+<style>
+:root{--bg:#050505;--ink:#f5f5f5;--muted:#8f8f8f;--line:rgba(255,255,255,.1);--maxw:880px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Space Grotesk',Inter,-apple-system,'Segoe UI',sans-serif;line-height:1.65;-webkit-font-smoothing:antialiased;padding:64px 20px 96px}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;opacity:.05;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+main{max-width:var(--maxw);margin:0 auto}
+.kicker{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+h1{font-size:clamp(30px,5.4vw,46px);letter-spacing:-.02em;line-height:1.1;margin-bottom:12px}
+.sub{color:var(--muted);max-width:60ch;margin-bottom:44px}
+h2{font-size:19px;margin:44px 0 14px;letter-spacing:-.01em}
+.card{border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:14px;background:#0c0c0c}
+.card b{display:block;margin-bottom:6px}
+.card p{color:var(--muted);font-size:14.5px}
+code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;background:#161616;border:1px solid var(--line);border-radius:8px;padding:3px 8px;word-break:break-all}
+.steps{counter-reset:s;list-style:none;margin:8px 0 0}
+.steps li{counter-increment:s;display:flex;gap:14px;padding:10px 0;color:var(--muted);font-size:14.5px}
+.steps li::before{content:counter(s,decimal-leading-zero);color:var(--ink);font-weight:700;font-size:12px;border:1px solid var(--line);border-radius:8px;min-width:30px;height:26px;display:grid;place-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+footer{margin-top:56px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding-top:20px}
+a{color:var(--ink)}
+</style></head><body><main>
+<div class="kicker">Nebula Agent · Public connectors</div>
+<h1>Connect anything.<br>Own everything.</h1>
+<p class="sub">This agent can be driven from any MCP-capable AI client — Claude Desktop, Cursor, Windsurf, or your own code — and its finished work can be published to your own hosting. No permanent API keys, ever.</p>
+
+<h2>1 · Connect an AI client (MCP)</h2>
+<div class="card">
+  <b>Endpoint</b>
+  <p style="margin-bottom:8px">MCP Streamable HTTP:</p>
+  <code>${origin}/mcp</code>
+  <ol class="steps">
+    <li>In the Nebula app, open the Assistant → hub icon → <b>Create connection</b>. You get a one-time URL + secret that expires in 24 hours.</li>
+    <li>Paste it into your MCP client's config (streamable HTTP transport).</li>
+    <li>The client now sees the full tool registry — filtered to YOUR role — and can research, build and host under your permissions.</li>
+    <li>Revoke anytime from the same sheet. Nothing long-lived exists to leak.</li>
+  </ol>
+</div>
+
+<h2>2 · Publish to your own platforms</h2>
+<div class="grid">
+  <div class="card"><b>GitHub</b><p>Repo + Pages: your site commits to your repo and goes live on github.io.</p></div>
+  <div class="card"><b>Vercel</b><p>Instant deploy to a *.vercel.app URL from within the chat.</p></div>
+  <div class="card"><b>Firebase Hosting</b><p>Service-account release to *.web.app with a live channel.</p></div>
+  <div class="card"><b>Supabase</b><p>Real SQL backends for the web apps the agent builds.</p></div>
+  <div class="card"><b>GoDaddy / Hostinger</b><p>List domains and point CNAMEs at your deployments.</p></div>
+  <div class="card"><b>Nebula Hosting</b><p>Every build is instantly live at ${origin}/sites/&lt;id&gt; — zero config.</p></div>
+</div>
+
+<h2>3 · Security model</h2>
+<div class="grid">
+  <div class="card"><b>Zero user-held keys</b><p>Platform credentials are connected once in the app, AES-GCM encrypted server-side, and never shown again — not in chat, not over MCP.</p></div>
+  <div class="card"><b>Role-filtered tools</b><p>Every tool call executes under the caller's identity with server-side role checks. MCP grants confer zero privilege escalation.</p></div>
+  <div class="card"><b>Self-expiring grants</b><p>Pairings are 192-bit secrets bound to your account, dead in 24h, revocable instantly.</p></div>
+  <div class="card"><b>Artifact integrity</b><p>Every built page carries a SHA-256 digest: <span class="mono">/sites/&lt;id&gt;/meta</span> returns it, and served pages expose it as the <span class="mono">X-Content-Sha256</span> header.</p></div>
+  <div class="card"><b>Rate limits</b><p>Builds, publishes, live-web research and SQL are hourly-rate-limited per account — no runaway loops.</p></div>
+  <div class="card"><b>Human gate on email</b><p>Mass email is a consequential action: the agent drafts, the owner approves, then it sends.</p></div>
+</div>
+
+<footer>Nebula CRM agent · <a href="${origin}/mcp">capability advert</a> · built pages live under ${origin}/sites/</footer>
+</main></body></html>`;
+}

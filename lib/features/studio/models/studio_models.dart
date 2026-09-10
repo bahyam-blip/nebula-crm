@@ -53,6 +53,7 @@ class StudioSite {
     required this.builder,
     this.url,
     this.bytes = 0,
+    this.sha256,
     this.version = 1,
     this.updatedAt,
     this.lastRefine,
@@ -66,6 +67,10 @@ class StudioSite {
   final String builder;
   final String? url;
   final int bytes;
+
+  /// SHA-256 of the served HTML — the artifact's integrity digest
+  /// (verifiable at /sites/<id>/meta and via X-Content-Sha256).
+  final String? sha256;
 
   /// Bumped every refine — the same public URL serves the latest version.
   final int version;
@@ -134,6 +139,7 @@ class StudioSite {
         builder: (m['builder'] as String?) ?? 'agent',
         url: m['url'] as String?,
         bytes: (m['bytes'] as num?)?.toInt() ?? 0,
+        sha256: m['sha256'] as String?,
         version: (m['version'] as num?)?.toInt() ?? 1,
         updatedAt: m['updated_at'] as String?,
         lastRefine: m['last_refine'] as String?,

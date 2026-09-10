@@ -168,10 +168,11 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
+                    color: AppColors.surfaceHigh,
                     borderRadius: BorderRadius.circular(11),
+                    border: Border.all(color: AppColors.border),
                   ),
-                  child: const Icon(Icons.rocket_launch_outlined, color: Colors.white, size: 20),
+                  child: const Icon(Icons.rocket_launch_outlined, color: AppColors.textPrimary, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(

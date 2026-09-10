@@ -373,8 +373,8 @@ let siteId = '';
   ok(built.res.status === 200 && built.json.ok === true, 'POST /v1/studio/build (AI path)', JSON.stringify(built.json).slice(0, 160));
   ok(/^https:\/\/worker\.test\/sites\//.test(built.json.url || ''), 'build returns public URL', built.json.url);
   siteId = built.json.artifact_id;
-  ok(captured.sarvam.length === 2, 'Sarvam called twice for the build (design brief + copy)', String(captured.sarvam.length));
-  ok(Array.isArray(built.json.stages) && built.json.stages.length >= 4, 'build response carries the stage trace', JSON.stringify(built.json.stages));
+  ok(captured.sarvam.length === 3, 'Sarvam called three times for the build (design brief + copy + polish review)', String(captured.sarvam.length));
+  ok(Array.isArray(built.json.stages) && built.json.stages.length >= 5, 'build response carries the stage trace (incl. polish)', JSON.stringify(built.json.stages));
 
   const served = await studioFetch(env, 'GET', `/sites/${siteId}`, null);
   ok(served.res.status === 200 && served.text.includes('Diwali Mega Offer'), 'site publicly served at /sites/<id>');
@@ -496,7 +496,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   for (const t of ['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site']) {
     ok(names.includes(t) && !!TOOL_SCHEMAS[t], `MCP schema present: ${t}`);
   }
-  ok(names.length === 30, 'tool registry is 30 tools (28 + refine_site + supabase_sql)', String(names.length));
+  ok(names.length === 33, 'tool registry is 33 tools (30 + plan_task + list_skills + learn_skill)', String(names.length));
 
   // Pair a grant and call connector_status + publish over MCP.
   const pairReq = new Request('https://worker.test/v1/assistant/mcp/pair', {
@@ -520,7 +520,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   const listed = list.json.result.tools.map((t) => t.name);
   ok(['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site'].every((t) => listed.includes(t)),
     'tools/list shows all 5 hosting tools');
-  ok(listed.length === 30, 'tools/list count is 30', String(listed.length));
+  ok(listed.length === 33, 'tools/list count is 33', String(listed.length));
 
   const stCall = await rpc('tools/call', { name: 'connector_status', arguments: {} });
   const stPayload = JSON.parse(stCall.json.result.content[0].text);

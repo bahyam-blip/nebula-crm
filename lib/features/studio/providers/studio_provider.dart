@@ -22,6 +22,7 @@ const kBuildStages = <BuildStage>[
   BuildStage('Researching your market', '🔍'),
   BuildStage('Designing the look & feel', '🎨'),
   BuildStage('Writing your copy', '✍️'),
+  BuildStage('Director review & polish', '🧐'),
   BuildStage('Building the pages', '🛠️'),
   BuildStage('Hosting it live', '🚀'),
 ];

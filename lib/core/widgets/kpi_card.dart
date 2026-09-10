@@ -46,18 +46,8 @@ class KpiCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: AppColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.glassEdge, width: 1),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomCenter,
-            colors: [
-              accentColor.withValues(alpha: 0.06),
-              Colors.transparent,
-            ],
-            stops: const [0.0, 0.5],
-          ),
-          boxShadow: AppColors.cardShadow,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

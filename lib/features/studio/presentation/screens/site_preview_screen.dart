@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_typography.dart';
 import '../../models/studio_models.dart';
 import '../../providers/studio_provider.dart';
 import '../widgets/publish_sheet.dart';
@@ -139,10 +140,11 @@ class _SitePreviewScreenState extends ConsumerState<SitePreviewScreen> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.16),
+                    color: AppColors.surfaceHigh,
                     borderRadius: BorderRadius.circular(11),
+                    border: Border.all(color: AppColors.border),
                   ),
-                  child: const Icon(Icons.auto_fix_high, color: AppColors.primary, size: 19),
+                  child: const Icon(Icons.edit_note_outlined, color: AppColors.textPrimary, size: 20),
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -287,17 +289,34 @@ class _SitePreviewScreenState extends ConsumerState<SitePreviewScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.15),
+                        border: Border.all(color: AppColors.border),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         'v$_version',
-                        style: const TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w800),
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                  if ((widget.site.sha256 ?? '').length >= 8) ...[
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: 'SHA-256 verified — full digest at /meta',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.verified_user_outlined, size: 12, color: AppColors.textTertiary),
+                          const SizedBox(width: 3),
+                          Text(
+                            widget.site.sha256!.substring(0, 8),
+                            style: AppTypography.mono(size: 9.5, color: AppColors.textTertiary),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                   const SizedBox(width: 6),
-                  const Icon(Icons.copy_rounded, size: 14, color: AppColors.textTertiary),
+                  const Icon(Icons.copy_outlined, size: 14, color: AppColors.textTertiary),
                 ],
               ),
             ),

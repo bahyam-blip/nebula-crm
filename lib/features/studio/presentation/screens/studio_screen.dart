@@ -42,14 +42,16 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     ('report', '📊', 'Report'),
   ];
 
-  static const _styles = <(String, Color, String)>[
-    ('Aurora', Color(0xFF7C8CFF), 'Dark, premium, glowing accents'),
-    ('Editorial', Color(0xFFC2492E), 'Light magazine look, serif headlines'),
-    ('Minimal', Color(0xFF2454FF), 'White space, clean grid, quiet'),
-    ('Festive', Color(0xFFFFB03A), 'Bold, celebratory, high energy'),
+  static const _styles = <(String, String)>[
+    ('Onyx', 'Deep black, white type, razor-sharp minimal'),
+    ('Aurora', 'Dark premium with glowing accents'),
+    ('Editorial', 'Light magazine look, serif headlines'),
+    ('Minimal', 'White space, clean grid, quiet'),
+    ('Festive', 'Bold, celebratory, high energy'),
   ];
 
   static const _styleHints = <String, String>{
+    'Onyx': 'Deep black minimal — white type, hairlines, one restrained accent, editorial spacing.',
     'Aurora': 'Dark premium aurora look — glassy, glowing, high-end.',
     'Editorial': 'Clean editorial magazine look with serif headlines.',
     'Minimal': 'Clean, minimal, lots of whitespace.',
@@ -208,7 +210,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                OverlineLabel('Nebula Studio', color: AppColors.primary),
+                OverlineLabel('Nebula Studio', color: AppColors.textTertiary),
                 const SizedBox(height: 5),
                 const Text(
                   'Build & host',
@@ -240,13 +242,13 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         ),
         child: const Row(
           children: [
-            Icon(Icons.dns_outlined, size: 17, color: AppColors.primary),
+            Icon(Icons.dns_outlined, size: 17, color: AppColors.textSecondary),
             SizedBox(width: 7),
             Text(
               'Hosting',
               style: TextStyle(
                 fontSize: 12.5,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary,
               ),
             ),
@@ -351,16 +353,13 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: focused
-              ? AppColors.primary.withValues(alpha: 0.7)
-              : AppColors.glassEdge,
-          width: focused ? 1.4 : 1,
+              ? AppColors.textPrimary.withValues(alpha: 0.55)
+              : AppColors.border,
+          width: 1,
         ),
-        boxShadow: focused
-            ? AppColors.glow(AppColors.primary, alpha: 0.14)
-            : null,
       ),
       child: TextField(
         controller: _briefCtrl,
@@ -391,53 +390,10 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
           final s = _styles[i];
-          final selected = _style == s.$1;
-          return PressableScale(
-            onTap: () => setState(() => _style = selected ? null : s.$1),
-            pressedScale: 0.94,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              decoration: BoxDecoration(
-                color: selected ? s.$2.withValues(alpha: 0.16) : AppColors.glassFill,
-                borderRadius: BorderRadius.circular(19),
-                border: Border.all(
-                  color: selected ? s.$2.withValues(alpha: 0.8) : AppColors.glassEdge,
-                ),
-                boxShadow: selected ? AppColors.glow(s.$2, alpha: 0.2) : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 11,
-                    height: 11,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [s.$2, s.$2.withValues(alpha: 0.5)],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: s.$2.withValues(alpha: 0.55),
-                          blurRadius: 5,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    s.$1,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected ? s.$2 : AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          return NebulaChip(
+            label: s.$1,
+            selected: _style == s.$1,
+            onSelected: () => setState(() => _style = _style == s.$1 ? null : s.$1),
           );
         },
       ),
@@ -557,18 +513,11 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                   height: 44,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        AppColors.primary.withValues(alpha: 0.16),
-                        AppColors.auroraViolet.withValues(alpha: 0.07),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(13),
-                    border: Border.all(color: AppColors.glassEdge),
+                    color: AppColors.surfaceHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
                   ),
-                  child: Text(site.kindIcon, style: const TextStyle(fontSize: 21)),
+                  child: Text(site.kindIcon, style: const TextStyle(fontSize: 20)),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -590,12 +539,12 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                               margin: const EdgeInsets.only(left: 6),
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(alpha: 0.14),
+                                border: Border.all(color: AppColors.border),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
                                 'v${site.version}',
-                                style: const TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w800),
+                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.w700),
                               ),
                             ),
                         ],
@@ -609,9 +558,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                       Row(
                         children: [
                           Icon(
-                            dep != null && dep.url != null ? Icons.cloud_done_rounded : Icons.public_rounded,
+                            dep != null && dep.url != null ? Icons.cloud_done_outlined : Icons.public_outlined,
                             size: 12,
-                            color: dep != null && dep.url != null ? AppColors.success : AppColors.info,
+                            color: dep != null && dep.url != null ? AppColors.success : AppColors.textTertiary,
                           ),
                           const SizedBox(width: 5),
                           Flexible(
@@ -674,15 +623,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppColors.primary.withValues(alpha: 0.5),
-                  AppColors.auroraViolet.withValues(alpha: 0.08),
-                ],
-              ),
-              boxShadow: AppColors.glow(AppColors.primary, alpha: 0.2),
+              border: Border.all(color: AppColors.glassEdge, width: 1),
             ),
             child: Container(
               padding: const EdgeInsets.all(14),
@@ -690,8 +631,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                 color: AppColors.surfaceHigh,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.auto_awesome_rounded,
-                  color: AppColors.primary, size: 26),
+              child: const Icon(Icons.auto_awesome_outlined,
+                  color: AppColors.textSecondary, size: 24),
             ),
           ),
           const SizedBox(height: 14),

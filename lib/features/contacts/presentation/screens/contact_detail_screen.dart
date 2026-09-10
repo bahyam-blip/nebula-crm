@@ -65,12 +65,15 @@ class ContactDetailScreen extends ConsumerWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const SizedBox(height: 16),
-                          // Gradient halo — matches the profile identity mark.
+                          // Hairline halo — matches the profile identity mark.
                           Container(
                             padding: const EdgeInsets.all(2.5),
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              gradient: AppColors.premiumGradient,
+                              border: Border.all(
+                                color: AppColors.glassEdge,
+                                width: 1,
+                              ),
                             ),
                             child: CircleAvatar(
                               radius: 42,

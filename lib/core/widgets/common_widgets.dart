@@ -35,20 +35,12 @@ class EmptyState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Glow ring — the icon floats inside ambient light.
+          // Hairline ring — the icon floats inside a quiet circle.
           Container(
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppColors.primary.withValues(alpha: 0.45),
-                  AppColors.auroraViolet.withValues(alpha: 0.06),
-                ],
-              ),
-              boxShadow: AppColors.glow(AppColors.primary, alpha: 0.16),
+              border: Border.all(color: AppColors.glassEdge, width: 1),
             ),
             child: Container(
               padding: const EdgeInsets.all(18),
@@ -130,15 +122,10 @@ class GlowAvatar extends StatelessWidget {
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accentColor.withValues(alpha: 0.65),
-            AppColors.auroraViolet.withValues(alpha: 0.15),
-          ],
+        border: Border.all(
+          color: accentColor.withValues(alpha: 0.35),
+          width: 1,
         ),
-        boxShadow: AppColors.glow(accentColor, alpha: 0.12),
       ),
       child: CircleAvatar(
         radius: radius,
@@ -305,26 +292,12 @@ class SectionHeader extends StatelessWidget {
         children: [
           // Accent bar — quietly marks the section without a heavy header.
           Container(
-            width: 3,
+            width: 2,
             height: subtitle != null ? 34.0 : 20.0,
-            margin: const EdgeInsets.only(right: 10),
+            margin: const EdgeInsets.only(right: 12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(2),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  accentColor,
-                  accentColor.withValues(alpha: 0.2),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.4),
-                  blurRadius: 6,
-                  offset: const Offset(0, 0),
-                ),
-              ],
+              color: accentColor.withValues(alpha: 0.8),
             ),
           ),
           Expanded(
@@ -402,12 +375,6 @@ class StatusBadge extends StatelessWidget {
             decoration: BoxDecoration(
               color: color,
               shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.6),
-                  blurRadius: 4,
-                ),
-              ],
             ),
           ),
           const SizedBox(width: 6),

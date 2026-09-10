@@ -160,7 +160,7 @@ class AppTheme {
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
           foregroundColor: AppColors.textSecondary,
-          highlightColor: AppColors.primary.withValues(alpha: 0.1),
+          highlightColor: Colors.white.withValues(alpha: 0.06),
         ),
       ),
 
@@ -231,7 +231,7 @@ class AppTheme {
       // ── Text selection ───────────────────────────────────────
       textSelectionTheme: const TextSelectionThemeData(
         cursorColor: AppColors.primary,
-        selectionColor: Color(0x3D6C8CFF),
+        selectionColor: Color(0x3DFFFFFF),
         selectionHandleColor: AppColors.primary,
       ),
 
@@ -390,13 +390,13 @@ class AppTheme {
       scrollbarTheme: const ScrollbarThemeData(
         thickness: WidgetStatePropertyAll(3),
         radius: Radius.circular(3),
-        thumbColor: WidgetStatePropertyAll(Color(0x805B6680)),
+        thumbColor: WidgetStatePropertyAll(Color(0x528F8F8F)),
       ),
 
       // ── Badges ───────────────────────────────────────────────
       badgeTheme: BadgeThemeData(
-        backgroundColor: AppColors.tertiary,
-        textColor: Colors.white,
+        backgroundColor: AppColors.primary,
+        textColor: const Color(0xFF0A0A0A),
         textStyle: AppTypography.textTheme.labelSmall
             ?.copyWith(fontSize: 10, fontWeight: FontWeight.w700),
       ),

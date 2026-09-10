@@ -120,8 +120,9 @@ class _QueueSummary extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        gradient: AppColors.primaryGradient,
+        color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, width: 1),
       ),
       child: Row(
         children: [
@@ -131,18 +132,19 @@ class _QueueSummary extends StatelessWidget {
               children: [
                 Text('${leads.length} in queue',
                     style: context.textTheme.titleLarge
-                        ?.copyWith(color: Colors.white)),
+                        ?.copyWith(color: AppColors.textPrimary)),
                 const SizedBox(height: 4),
                 Text(
                   '$due callback${due == 1 ? '' : 's'} overdue · '
                   '$fresh never called',
                   style: context.textTheme.bodySmall
-                      ?.copyWith(color: Colors.white70),
+                      ?.copyWith(color: AppColors.textSecondary),
                 ),
               ],
             ),
           ),
-          const Icon(Icons.headset_mic, color: Colors.white, size: 32),
+          const Icon(Icons.headset_mic_outlined,
+              color: AppColors.textPrimary, size: 30),
         ],
       ),
     );

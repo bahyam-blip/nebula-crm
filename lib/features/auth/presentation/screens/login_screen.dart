@@ -61,37 +61,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: DecoratedBox(
-        // Ambient brand glows — the sign-in should feel like the product.
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(-1.1, -0.9),
-            radius: 1.4,
-            colors: [Color(0x336C8CFF), Color(0x000A0E1A)],
-            stops: [0, 1],
-          ),
-        ),
-        child: Stack(
+      body: Stack(
           children: [
-            Positioned(
-              right: -80,
-              bottom: -60,
-              child: IgnorePointer(
-                child: Container(
-                  width: 260,
-                  height: 260,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        AppColors.accent.withValues(alpha: 0.10),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
             SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
@@ -125,7 +96,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     hintText: 'you@company.com',
-                    prefixIcon: Icon(Icons.email, size: 18),
+                    prefixIcon: Icon(Icons.mail_outline, size: 18),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
@@ -228,7 +199,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
           ],
         ),
-      ),
     );
   }
 }

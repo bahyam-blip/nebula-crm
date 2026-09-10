@@ -18,7 +18,7 @@
  *      the action is stored, the chat shows an Approve/Decline card, and
  *      POST /v1/assistant/approve executes or cancels it.
  *
- * Tool registry (28 tools, three risk tiers):
+ * Tool registry (33 tools, three risk tiers):
  *   read           — direct D1 reads + public-web research, always safe
  *   write          — create/update CRM records, build/host sites, publish to
  *                    GitHub/Vercel/Firebase, point domains, role-checked server-side
@@ -42,6 +42,8 @@ import { getLatestAnalytics } from './analytics.js';
 import { listTasks, newTask, putTask, progressOf, addEvent } from './tasks.js';
 import { getDoc, putDoc, canWrite, isManagerUp, loadUser } from '../data.js';
 import { buildWebsite, refineSite, saveNote, listArtifacts } from './builder.js';
+import { listSkills, learnSkill, forgetSkill } from './skills.js';
+import { rateLimit } from './guard.js';
 import { webSearch, webFetch } from './research.js';
 import {
   connectPlatform,
@@ -95,6 +97,9 @@ export const TOOLS = {
   build_website: { tier: 'write', roles: WRITE_ROLES, spec: 'BUILD AND HOST a complete website or mini web app {title, brief, kind?: landing|promo|event|portfolio|webapp|report, style?, cta_text?, cta_url?} — a design director plans the art direction, live web research grounds the copy, then a premium template engine renders and hosts it. Returns a PUBLIC URL + build stages. Use for landing pages, offer pages, event invites, portfolios, product showcases, market-research one-pagers, or small interactive web apps' },
   refine_site: { tier: 'write', roles: WRITE_ROLES, spec: 'UPDATE an already-built site with a change request {artifact_id, instruction} — e.g. "make the headline punchier", "change accent to green", "add a pricing FAQ". Re-renders the SAME public URL as a new version (previous versions stay accessible with ?v=N)' },
   save_note: { tier: 'write', roles: WRITE_ROLES, spec: 'save a research summary, plan or report as a shareable artifact {title, content} — the owner sees it in the app' },
+  plan_task: { tier: 'read', spec: 'THINK in the open: turn a goal into an ordered execution plan {goal, steps: ["step 1", ...], risk?: "one-line main risk"} — the plan is shown to the user and remembered; then execute it step by step with other tools. Use BEFORE complex multi-step requests (research + build + email)' },
+  list_skills: { tier: 'read', spec: 'list the agent\'s skill library {domain?}: seeded expert skills + everything learned live from research — these skills actively improve every site build' },
+  learn_skill: { tier: 'write', roles: WRITE_ROLES, spec: 'DISTILL a lasting capability into the skill library {title, domain: design|layout|motion|copy|ux|engineering|marketing, body: "the actual RULES, <=80 words"} — after research reveals a pattern worth keeping, or when the user teaches a preference. Learned skills are injected into every future site build. Improving an existing skill (same title) sharpens it' },
   connector_status: { tier: 'read', spec: 'which platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger, Supabase) are connected and what they do' },
   connect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'connect a platform once {connector: github|vercel|firebase|godaddy|hostinger|supabase, ...credentials} — credentials are encrypted server-side; afterwards publishing and SQL need NO tokens. Only report that connecting is possible; the app Studio screen collects the credentials' },
   disconnect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'remove a stored platform connection and destroy its stored credentials {connector}' },
@@ -115,6 +120,8 @@ You SEE the current CRM snapshot below (contacts, pipeline, team, campaigns, ana
 
 You can also BUILD: with build_website you produce a complete, branded, hosted website or mini web app (landing page, promo, event invite, portfolio, webapp, report) and return its public URL — the design director + research + copy pipeline does the quality work, so write rich briefs. With refine_site you apply change requests to an existing build ("make the headline bolder") without rebuilding from scratch. With save_note you file research summaries and plans the owner keeps. With web_search + web_fetch you research the live web before advising or building.
 
+You IMPROVE YOURSELF: your work is guided by a SKILL LIBRARY (seeded expert rules + everything you have learned). When research or a build teaches you a lasting pattern, distill it with learn_skill (title, domain, body = the actual RULES in <=80 words) — every future site build then applies it. Check or show the library with list_skills. For multi-step requests, first lay the plan out with plan_task, then execute it step by step and report progress.
+
 Reply with ONE JSON object and nothing else. Two shapes:
 
 1) Answer directly:
@@ -132,6 +139,8 @@ RULES:
 - RESEARCH CHAINS are encouraged: web_search → web_fetch (a promising result) → then answer or build. When you present web facts, cite the source (name + url).
 - build_website: when the user asks for a site/page/app, write a RICH brief (audience, message, sections, CTA) into args.brief — you are briefing a designer. ALWAYS quote the returned public URL exactly and tell the user the page is live. If a build fails, say what you would need and offer to retry.
 - save_note: after a meaningful research or planning session, offer to save (or save) a short summary artifact.
+- plan_task: for anything with 3+ moving parts (research → build → publish → email), call it FIRST so the user sees the plan, then execute the steps in order.
+- learn_skill: after web research that surfaces a transferable design/copy/engineering pattern, or when the user states a durable preference, distill it into a skill. Do not save trivia; save RULES.
 - The snapshot's "me" block is the CALLER. Respect their role: if a tool is outside their role, do not attempt it — explain in one line what they should ask a manager for. If a tool result says not-permitted, say it plainly.
 - create_task / assign / distribute: match people against the snapshot team roster (or list_team). Never invent a teammate. If the user's request names no assignee and it is ambiguous, ask ONE short clarifying question.
 - create_email_task: quote the user's intent faithfully, add the recipient target (segment or explicit emails). If the request is vague about WHAT to send, ask ONE short clarifying question instead of guessing. If the result is a pending approval, tell the user to confirm it with the Approve button.
@@ -445,11 +454,42 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
       return { ok: true, count: rows.length, artifacts: rows };
     }
 
-    case 'web_search':
+    case 'web_search': {
+      const rl = await rateLimit(store, user?.uid || '', 'web_search');
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
       return webSearch(args);
+    }
 
-    case 'web_fetch':
+    case 'web_fetch': {
+      const rl = await rateLimit(store, user?.uid || '', 'web_fetch');
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
       return webFetch(args);
+    }
+
+    case 'list_skills':
+      return { ok: true, ...(await listSkills(store, user?.uid || '')) };
+
+    case 'plan_task': {
+      const goal = String(args.goal || args.task || '').trim().slice(0, 300);
+      const steps = (Array.isArray(args.steps) ? args.steps : [])
+        .map((x) => String(x).trim().slice(0, 200)).filter(Boolean).slice(0, 10);
+      if (goal.length < 6 || steps.length < 2) return { ok: false, error: 'plan_task needs a goal (>=6 chars) and at least 2 steps' };
+      const risk = String(args.risk || '').slice(0, 200);
+      const plan = { goal, steps, ...(risk ? { risk } : {}), at: new Date().toISOString(), by: user?.displayName || 'agent' };
+      if (store) {
+        await store.put(`agent:plan:${user?.uid || ''}:${Date.now().toString(36)}`, JSON.stringify(plan)).catch(() => {});
+        await teach(env, store, { note: `Execution plan — ${goal}: ${steps.join(' → ')}`, origin: 'agent' }).catch(() => {});
+      }
+      return { ok: true, goal, steps, ...(risk ? { risk } : {}), note: 'plan locked in — executing step by step; I will report as each step lands' };
+    }
+
+    case 'learn_skill': {
+      const rl = await rateLimit(store, user?.uid || '', 'learn_skill');
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
+      const r = await learnSkill(store, user?.uid || '', args, { source: 'agent' });
+      if (r.ok) await teach(env, store, { note: `Skill learned: ${r.title} (${r.domain})`, origin: 'agent' }).catch(() => {});
+      return r;
+    }
 
     case 'build_website':
       return buildWebsite(env, store, user, args, ctx?.origin || '');
@@ -480,11 +520,17 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
     case 'list_platform_domains':
       return listPlatformDomains(env, store, user, args);
 
-    case 'publish_site':
+    case 'publish_site': {
+      const rl = await rateLimit(store, user?.uid || '', 'publish_site');
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
       return publishSite(env, store, user, args);
+    }
 
-    case 'supabase_sql':
+    case 'supabase_sql': {
+      const rl = await rateLimit(store, user?.uid || '', 'supabase_sql');
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
       return supabaseQuery(env, store, user, args);
+    }
 
     /* ── write ── */
     case 'create_contact': {

@@ -265,8 +265,9 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
 
   static const _suggestions = [
     'How many open leads do I have right now?',
-    'Build me a festive offer page for Diwali',
-    'Research the latest packaging trends for bakeries',
+    'Build me an onyx-dark landing page for my studio',
+    'Plan a launch: research trends, build the page, then draft the announcement',
+    'Research the latest packaging trends and learn a skill from it',
     'Send an announcement about our new offer to all leads',
     'Make a mini web app to collect custom cake orders',
     'Distribute 10 unassigned leads across the team',
@@ -309,24 +310,18 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
   Widget _empty() => ListView(
         padding: const EdgeInsets.fromLTRB(16, 28, 16, 16),
         children: [
-          // Glowing AI mark — the assistant's "face".
+          // The assistant's mark — a quiet white ring on black.
           Center(
             child: Container(
-              width: 76,
-              height: 76,
+              width: 68,
+              height: 68,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: AppColors.premiumGradient,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.35),
-                    blurRadius: 28,
-                    spreadRadius: 2,
-                  ),
-                ],
+                border: Border.all(color: AppColors.glassEdge, width: 1),
+                color: AppColors.surfaceElevated,
               ),
-              child: const Icon(Icons.auto_awesome,
-                  size: 32, color: Colors.white),
+              child: const Icon(Icons.auto_awesome_outlined,
+                  size: 28, color: AppColors.textPrimary),
             ),
           ),
           const SizedBox(height: 16),
@@ -389,8 +384,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
           decoration: BoxDecoration(
-            gradient: m.mine ? AppColors.premiumGradient : null,
-            color: m.mine ? null : AppColors.surfaceElevated,
+            color: m.mine ? AppColors.primary : AppColors.surfaceElevated,
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(16),
               topRight: const Radius.circular(16),
@@ -399,17 +393,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             ),
             border: m.mine
                 ? null
-                : Border.all(color: AppColors.glassEdge, width: 1),
-            boxShadow: m.pending
-                ? []
-                : [
-                    BoxShadow(
-                      color: (m.mine ? AppColors.primary : Colors.black)
-                          .withValues(alpha: m.mine ? 0.30 : 0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                : Border.all(color: AppColors.border, width: 1),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -418,7 +402,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
               Text(
                 m.text,
                 style: context.textTheme.bodyMedium?.copyWith(
-                  color: m.mine ? Colors.white : AppColors.textPrimary,
+                  color: m.mine ? const Color(0xFF0A0A0A) : AppColors.textPrimary,
                 ),
               ),
               // Show what the agent actually DID — trust through transparency.
@@ -477,22 +461,14 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.45), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(color: AppColors.glassEdge, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(children: [
-            Icon(Icons.forward_to_inbox, size: 15, color: AppColors.primary),
+            Icon(Icons.forward_to_inbox_outlined, size: 15, color: AppColors.textPrimary),
             const SizedBox(width: 6),
             Expanded(
               child: Text('Ready to send — your approval required',
@@ -570,24 +546,9 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.primary.withValues(alpha: 0.10),
-            AppColors.surface,
-          ],
-        ),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.45), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(color: AppColors.glassEdge, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -597,10 +558,11 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.14),
+                color: AppColors.surfaceHigh,
                 borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: AppColors.border),
               ),
-              child: Icon(ar.icon, size: 15, color: AppColors.primary),
+              child: Icon(ar.icon, size: 15, color: AppColors.textPrimary),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -697,7 +659,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                Icon(Icons.hub_outlined, size: 18, color: AppColors.primary),
+                Icon(Icons.hub_outlined, size: 18, color: AppColors.textPrimary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text('Connect an AI to this CRM',
@@ -870,13 +832,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: _busy
-                    ? null
-                    : AppColors.primaryGradient,
-                color: _busy ? AppColors.surfaceHigh : null,
-                boxShadow: _busy
-                    ? null
-                    : AppColors.glow(AppColors.primary, alpha: 0.35),
+                color: _busy ? AppColors.surfaceHigh : AppColors.primary,
               ),
               child: IconButton(
                 onPressed: _busy ? null : _send,
@@ -886,8 +842,8 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                         width: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.arrow_upward_rounded,
-                        size: 19, color: Colors.white),
+                    : const Icon(Icons.arrow_upward_outlined,
+                        size: 19, color: Color(0xFF0A0A0A)),
               ),
             ),
           ],

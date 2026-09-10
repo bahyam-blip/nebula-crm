@@ -21,8 +21,10 @@
 
 import { sarvamChat } from './sarvam.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
-import { designBrief, researchFacts, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml } from './designer.js';
+import { designBrief, researchFacts, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
+import { skillsForDomain } from './skills.js';
+import { rateLimit, sha256Hex } from './guard.js';
 import { esc } from './htmlutil.js';
 
 const SITE_KINDS = ['landing', 'promo', 'event', 'portfolio', 'webapp', 'report'];
@@ -45,7 +47,10 @@ function sanitizeSiteHtml(html) {
     .replace(/<script[^>]*\ssrc\s*=\s*['"]?(https?:)?\/\/[^>]*>/gi, '')
     .replace(/<iframe[\s\S]*?<\/iframe\s*>/gi, '')
     .replace(/<iframe[^>]*>/gi, '')
-    .replace(/<link[^>]*\shref\s*=\s*['"]?(https?:)?\/\/[^>]*>/gi, '');
+    // Remote stylesheets: ONLY Google Fonts is allowlisted (real typography
+    // is the #1 quality lift; it is a pure-CSS resource, no code surface).
+    .replace(/<link[^>]*\shref\s*=\s*['"]?(https?:)?\/\/(?!fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)[^>]*>/gi,
+      (m) => /fonts\.(googleapis|gstatic)\.com/.test(m) ? m : '');
 }
 
 /* ── Registry (per-user, in the state store) ────────────────────────── */
@@ -125,7 +130,7 @@ function webappSystemPrompt(brand, factsLine) {
 HARD RULES:
 - Start with <!DOCTYPE html> and end with </html>. ALL CSS in one <style>; ALL JS in one inline <script> at the end of <body>.
 - Mobile-first, feels native on a phone: sticky bottom tab bar or big touch targets, cards, rounded corners, system font stack.
-- The app MUST work fully offline in one file. State persists in localStorage. No network calls, no external resources, no CDNs, no iframes, no images.
+- The app MUST work fully offline in one file. State persists in localStorage. No network calls, no iframes, no images. ONE allowed external resource: a Google Fonts stylesheet (fonts.googleapis.com) for typography.
 - Keep it SMALL: one core interaction done really well (tracker, checklist, calculator, quiz, notes, counter...). 2-3 screens max.
 - Premium visual standard: consistent spacing, accessible contrast, subtle transitions, on-brand.
 - Branding: color ${brand.color}, name "${brand.name}"${factsLine ? `; facts: ${factsLine}` : ''}.
@@ -205,18 +210,53 @@ async function buildWebapp(env, { title, brief, style, brand }) {
   return { html: signatureApp({ title, brief, brand }), builder: 'signature' };
 }
 
-/* ── v2 build pipeline (marketing kinds) ────────────────────────────── */
+/* ── v3 build pipeline (marketing kinds) ────────────────────────────── */
 
-async function buildViaDesigner(env, { kind, title, brief, style, ctaArgs, brand }) {
+/**
+ * POLISH — the self-critique loop. One small AI call reviews the written
+ * copy against the senior rubric; if material improvements exist, the
+ * patched copy is merged and the page re-rendered. Bounded: exactly one
+ * critique per build, never throws, falls back to the as-written copy.
+ */
+async function polishCopy(env, { kind, content, brand, skillsBlock }) {
+  try {
+    const j = await sarvamChat(
+      env,
+      [
+        {
+          role: 'system',
+          content: `You are the design director doing the FINAL review of a ${kind} page before it ships. Review the copy JSON against the rubric: headline is a concrete payoff (4-9 words); every feature title is an outcome; sub answers what+why in one breath; FAQ pre-empts price/time/trust objections; no cliches ("unleash", "elevate", "discover"); no invented hard numbers. Respond with ONLY JSON:
+{"verdict":"good"} — if it already meets the bar
+{"verdict":"improve","content":{...ONLY the groups you improved, full schema...}} — otherwise${skillsBlock ? `\n\n${skillsBlock}` : ''}`,
+        },
+        { role: 'user', content: JSON.stringify(content).slice(0, 5200) },
+      ],
+      { json: true, maxTokens: 1300, temperature: 0.5 }
+    );
+    if (j?.verdict !== 'improve' || !j.content || typeof j.content !== 'object') return { content, polished: false };
+    const patched = sanitizeCopy(j.content, { kind, brand });
+    const next = mergeCopy(patched, content);
+    return { content: next, polished: true };
+  } catch {
+    return { content, polished: false };
+  }
+}
+
+async function buildViaDesigner(env, store, uid, { kind, title, brief, style, ctaArgs, brand }) {
   const stages = [];
 
+  // 0. SKILLS — load the expert skill pack (seeded + everything the agent
+  //    has learned live). Every build gets smarter over time.
+  const designSkills = await skillsForDomain(store, uid, 'design', { maxChars: 1100 });
+  const copySkills = await skillsForDomain(store, uid, 'copy', { maxChars: 700 });
+
   // 1. THINK — design system + section plan + research queries.
-  const thought = await designBrief(env, { kind, brief, style, brand });
+  const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block });
   stages.push({
     stage: 'think',
     ok: true,
     ai: thought.ai,
-    detail: `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'}`,
+    detail: `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero`,
   });
 
   // 2. RESEARCH — live facts (never fails the build).
@@ -225,23 +265,32 @@ async function buildViaDesigner(env, { kind, title, brief, style, ctaArgs, brand
     facts = await researchFacts(thought.queries);
     stages.push({ stage: 'research', ok: true, ai: Boolean(facts), detail: facts ? thought.queries[0] : 'skipped (web unreachable)' });
   } else {
-    // No queries = the design director's own call (or a webapp build).
     stages.push({ stage: 'research', ok: true, ai: thought.ai, detail: 'not needed for this build' });
   }
 
   // 3. WRITE — copy JSON (falls back to brief-derived copy).
   const base = defaultCopy({ kind, title, brief, brand });
-  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts });
+  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts, skillsBlock: copySkills.block });
   let content = mergeCopy(aiCopy, base);
   content = applyCtaOverrides(content, ctaArgs);
   if (!content.headline) content.headline = title;
   stages.push({ stage: 'write', ok: true, ai: copyAi, detail: copyAi ? `${content.features?.length || 0} sections written` : 'from your brief' });
 
-  // 4. RENDER — deterministic assembly (cannot fail malformed).
-  const html = renderSite({ kind, design: thought.design, content, brand });
-  stages.push({ stage: 'render', ok: true, ai: false, detail: `${thought.design.themeLabel} template` });
+  // 4. POLISH — director's final review (skipped when copy fell back to
+  //    deterministic; nothing to critique there).
+  if (copyAi) {
+    const polished = await polishCopy(env, { kind, content, brand, skillsBlock: designSkills.block });
+    content = polished.content;
+    stages.push({ stage: 'polish', ok: true, ai: polished.polished, detail: polished.polished ? 'director pass applied' : 'passed review as written' });
+  } else {
+    stages.push({ stage: 'polish', ok: true, ai: false, detail: 'deterministic copy — review skipped' });
+  }
 
-  return { html, content, design: thought.design, stages, researched: Boolean(facts) };
+  // 5. RENDER — deterministic assembly (cannot fail malformed).
+  const html = renderSite({ kind, design: thought.design, content, brand });
+  stages.push({ stage: 'render', ok: true, ai: false, detail: `${thought.design.themeLabel} · ${thought.design.art} art` });
+
+  return { html, content, design: thought.design, stages, researched: Boolean(facts), skills: designSkills.learnedCount };
 }
 
 /* ── The build_website tool / Studio build endpoint ─────────────────── */
@@ -262,6 +311,10 @@ export async function buildWebsite(env, store, user, args, origin = '') {
   const style = String(args.style || profile?.default_style || '').trim();
   const ctaArgs = { cta_text: args.cta_text, cta_url: args.cta_url, contact_email: args.contact_email };
 
+  // Rate limit — extreme capability, guarded (applies to app + MCP + chat).
+  const rl = await rateLimit(store, user?.uid || '', 'build_website');
+  if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
+
   let html, builder, stages = [], plan = null;
   try {
     if (kind === 'webapp') {
@@ -271,11 +324,15 @@ export async function buildWebsite(env, store, user, args, origin = '') {
       stages = [
         { stage: 'think', ok: true, ai: builder === 'ai', detail: 'app architecture' },
         { stage: 'write', ok: true, ai: builder === 'ai', detail: builder === 'ai' ? 'app coded by AI' : 'signature app shell' },
+        { stage: 'render', ok: true, ai: false, detail: 'sanitized + hosted' },
       ];
     } else {
-      const r = await buildViaDesigner(env, { kind, title: effTitle, brief, style, ctaArgs, brand });
+      const r = await buildViaDesigner(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand });
       html = r.html;
-      builder = r.stages.every((s) => s.ai || s.stage === 'render') ? 'ai' : 'ai+engine';
+      // 'ai' = the AI led design + copy. The polish stage's ai flag means
+      // "director improved something", so it doesn't gate the label.
+      const aiStage = (name) => r.stages.find((s) => s.stage === name)?.ai === true;
+      builder = aiStage('think') && aiStage('write') ? 'ai' : 'ai+engine';
       stages = r.stages;
       plan = { kind, title: effTitle, brief: brief.slice(0, 4000), style, design: r.design, content: r.content };
     }
@@ -292,11 +349,12 @@ export async function buildWebsite(env, store, user, args, origin = '') {
   html = html.trim();
   if (html.length > MAX_SITE_BYTES) html = html.slice(0, MAX_SITE_BYTES) + '\n<!-- truncated -->';
 
+  const digest = await sha256Hex(html);
   const id = `s_${Date.now().toString(36)}${Math.floor(Math.random() * 46656).toString(36)}`;
   const key = `sites/${id}.html`;
   const stored = await env.MEDIA.put(key, html, {
     httpMetadata: { contentType: 'text/html; charset=utf-8' },
-    customMetadata: { builtBy: user?.uid || 'agent', kind, title: effTitle },
+    customMetadata: { builtBy: user?.uid || 'agent', kind, title: effTitle, sha256: digest },
   });
   if (!stored) console.warn('[builder] R2 put returned falsy for', key); // record stays the source of truth
 
@@ -304,8 +362,8 @@ export async function buildWebsite(env, store, user, args, origin = '') {
 
   const finalUrl = origin ? `${origin}/sites/${id}` : `/sites/${id}`;
   await putArtifact(store, user?.uid || '', {
-    id, kind, title: effTitle, url: finalUrl, builder, bytes: html.length,
-    version: 1, versions: [{ v: 1, at: new Date().toISOString(), bytes: html.length }],
+    id, kind, title: effTitle, url: finalUrl, builder, bytes: html.length, sha256: digest,
+    version: 1, versions: [{ v: 1, at: new Date().toISOString(), bytes: html.length, sha256: digest }],
     at: new Date().toISOString(), by: user?.displayName || 'agent',
   });
 
@@ -317,6 +375,7 @@ export async function buildWebsite(env, store, user, args, origin = '') {
     url: finalUrl,
     builder,
     bytes: html.length,
+    sha256: digest,
     version: 1,
     stages,
     note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
@@ -333,6 +392,9 @@ export async function refineSite(env, store, user, args, origin = '') {
   const doc = await getArtifactDoc(store, user?.uid || '', id);
   if (!doc) return { ok: false, error: `artifact ${id} not found in your builds` };
   if (doc.kind === 'note') return { ok: false, error: 'notes cannot be refined — ask me to build an updated one instead' };
+
+  const rl = await rateLimit(store, user?.uid || '', 'refine_site');
+  if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
 
   const plan = safeParse(await store.get(`agent:siteplan:${id}`));
   const profile = store ? await getBusinessProfile(store).catch(() => null) : null;
@@ -369,7 +431,7 @@ export async function refineSite(env, store, user, args, origin = '') {
       // Legacy artifact (v1 build, no plan) → full pipeline with the
       // original brief + instruction folded in.
       const fullBrief = `${brief || doc.title}\n\nUPDATE REQUEST: ${instruction}`;
-      const r = await buildViaDesigner(env, { kind, title, brief: fullBrief, style, ctaArgs: {}, brand });
+      const r = await buildViaDesigner(env, store, user?.uid || '', { kind, title, brief: fullBrief, style, ctaArgs: {}, brand });
       content = r.content;
       design = r.design;
     }
@@ -377,6 +439,8 @@ export async function refineSite(env, store, user, args, origin = '') {
     version = (Number(doc.version) || 1) + 1;
   }
   if (html.length > MAX_SITE_BYTES) html = html.slice(0, MAX_SITE_BYTES) + '\n<!-- truncated -->';
+
+  const digest = await sha256Hex(html);
 
   // Snapshot the previous render, then overwrite latest.
   if (env.MEDIA) {
@@ -390,7 +454,7 @@ export async function refineSite(env, store, user, args, origin = '') {
     }
     await env.MEDIA.put(`sites/${id}.html`, html, {
       httpMetadata: { contentType: 'text/html; charset=utf-8' },
-      customMetadata: { builtBy: user?.uid || 'agent', kind, title, version: String(version) },
+      customMetadata: { builtBy: user?.uid || 'agent', kind, title, version: String(version), sha256: digest },
     });
   }
 
@@ -401,8 +465,8 @@ export async function refineSite(env, store, user, args, origin = '') {
     await store.put(`agent:siteplan:${id}`, JSON.stringify(nextPlan)).catch(() => {});
     await putArtifact(store, user?.uid || '', {
       id, kind, title, url: doc.url || (origin ? `${origin}/sites/${id}` : `/sites/${id}`),
-      builder: doc.builder || 'ai+engine', bytes: html.length, version,
-      versions: [...(doc.versions || []).slice(-9), { v: version, at: new Date().toISOString(), bytes: html.length }],
+      builder: doc.builder || 'ai+engine', bytes: html.length, version, sha256: digest,
+      versions: [...(doc.versions || []).slice(-9), { v: version, at: new Date().toISOString(), bytes: html.length, sha256: digest }],
       at: doc.at, updated_at: new Date().toISOString(), by: doc.by || user?.displayName || 'agent',
       last_refine: instruction.slice(0, 140),
     });
@@ -416,6 +480,7 @@ export async function refineSite(env, store, user, args, origin = '') {
     url: origin ? `${origin}/sites/${id}` : `/sites/${id}`,
     version,
     bytes: html.length,
+    sha256: digest,
     note: `"${title}" updated to v${version} — ${note}. Same link, new look.`,
   };
 }
@@ -431,8 +496,24 @@ function safeParse(raw) {
 /* ── Public serving (index.js hands over /sites/* here) ─────────────── */
 
 export async function serveAgentSite(request, env, path) {
-  const rawId = String(path.split('/')[2] || '');
+  const segments = String(path.split('?')[0] || '').split('/').filter(Boolean); // ['sites', '<id>', maybe 'meta']
+  const rawId = String(segments[1] || '');
+  const wantsMeta = segments[2] === 'meta';
   if (!/^[a-z0-9_]+$/i.test(rawId)) return new Response('bad artifact id', { status: 400 });
+
+  const store = env.DB || env.NEBULA_EMAIL_KV ? (await import('./state.js')).createStore(env) : null;
+
+  // Integrity metadata: GET /sites/<id>/meta (public, CORS-open).
+  if (wantsMeta) {
+    const obj0 = env.MEDIA ? await env.MEDIA.head(`sites/${rawId}.html`).catch(() => null) : null;
+    if (!obj0) return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    const cm = obj0.customMetadata || {};
+    return new Response(JSON.stringify({
+      id: rawId, kind: cm.kind || null, title: cm.title || null,
+      bytes: obj0.size || null, sha256: cm.sha256 || null,
+      built_at: obj0.uploaded?.toISOString?.() || null,
+    }, null, 2), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+  }
 
   // Optional version pin: /sites/<id>?v=2
   let id = rawId;
@@ -443,11 +524,13 @@ export async function serveAgentSite(request, env, path) {
   if (obj) {
     const headers = new Headers({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     obj.writeHttpMetadata(headers);
+    const metaSha = obj.customMetadata?.sha256 || null;
+    if (metaSha) headers.set('X-Content-Sha256', metaSha);
+    headers.set('X-Nebula-Artifact', rawId);
     return new Response(obj.body, { headers });
   }
 
   // Notes live in the state store.
-  const store = env.DB || env.NEBULA_EMAIL_KV ? (await import('./state.js')).createStore(env) : null;
   if (store) {
     const doc = safeParse(await store.get(`agent:artifact:${rawId}`));
     if (doc && doc.kind === 'note') {

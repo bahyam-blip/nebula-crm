@@ -1,161 +1,142 @@
 import 'package:flutter/material.dart';
 
-/// Nebula Design Language 2.0 — color system.
+/// Nebula Design Language 3.0 — "MONO".
 ///
-/// Built on three principles borrowed from the best dark UIs (Linear,
-/// Raycast, Arc):
+/// The user's verdict on 2.0: the colored aurora accents and gradient
+/// buttons read as toy-grade. 3.0 is the correction — deep black,
+/// aggressively minimal, monochrome:
 ///
-/// 1. DEPTH OVER FLATNESS — the canvas is not one black rectangle; it is
-///    layered near-black surfaces with ambient aurora glows that give the
-///    screen atmosphere and a sense of space.
-/// 2. ONE ACCENT FAMILY — indigo/violet/cyan carry brand, action and
-///    energy; semantic colors are reserved for meaning only.
-/// 3. QUIET CHROME, LOUD CONTENT — hairlines and glass fills separate
-///    content instead of heavy borders, so data and words lead.
+/// 1. TRUE BLACK CANVAS — #000000. Battery-friendly OLED, infinite depth,
+///    no blue-cast "near black" that reads as another theme.
+/// 2. WHITE IS THE ACCENT — every action, selection and highlight is
+///    pure white on black. Hierarchy comes from opacity steps of white,
+///    not from hue.
+/// 3. HAIRLINE CHROME — 1px #1F1F1F lines separate everything; no
+///    glows, no glass, no gradients. Content is the only color.
+/// 4. SEMANTICS STAY SEMANTIC — success/warning/danger survive, mildly
+///    desaturated, and are used ONLY for meaning.
+///
+/// All 2.0 symbol names are preserved (aurora*, gradients) with
+/// monochrome values so the entire app flips at once with zero churn.
 abstract class AppColors {
   // ── Backgrounds ──────────────────────────────────────────────
-  /// Deepest canvas — true OLED black with a hint of indigo.
-  static const Color background = Color(0xFF07080D);
+  /// Deepest canvas — true black.
+  static const Color background = Color(0xFF000000);
 
   /// Raised surface behind cards and lists.
-  static const Color surface = Color(0xFF0D0F16);
+  static const Color surface = Color(0xFF070707);
 
   /// Card / list-item background.
-  static const Color surfaceElevated = Color(0xFF12141C);
+  static const Color surfaceElevated = Color(0xFF0C0C0C);
 
   /// Higher-elevation surface (modals, FAB, menus).
-  static const Color surfaceHigh = Color(0xFF181B26);
+  static const Color surfaceHigh = Color(0xFF131313);
 
   /// Highest elevation (dialogs above sheets).
-  static const Color surfaceHighest = Color(0xFF1F2330);
+  static const Color surfaceHighest = Color(0xFF1A1A1A);
 
   /// Hairline borders, dividers.
-  static const Color border = Color(0xFF232734);
+  static const Color border = Color(0xFF1F1F1F);
 
-  // ── Glass system (frosted fills over the aurora) ─────────────
-  /// Fill for glass cards — a whisper of white.
-  static const Color glassFill = Color(0x0AFFFFFF);
-
-  /// Stronger glass fill for emphasized surfaces.
+  // ── Legacy glass tokens (kept for compatibility, now flat) ───
+  static const Color glassFill = Color(0x08FFFFFF);
   static const Color glassFillStrong = Color(0x12FFFFFF);
+  static const Color glassEdge = Color(0x24FFFFFF);
 
-  /// Hairline on glass — light catches the edge.
-  static const Color glassEdge = Color(0x1AFFFFFF);
-
-  // ── Aurora ambient (atmosphere, used at low alpha) ───────────
-  /// Ambient glow color 1 — indigo.
-  static const Color auroraIndigo = Color(0xFF6C8CFF);
-
-  /// Ambient glow color 2 — violet.
-  static const Color auroraViolet = Color(0xFFA78BFA);
-
-  /// Ambient glow color 3 — cyan/mint.
-  static const Color auroraCyan = Color(0xFF5EEAD4);
-
-  /// Ambient glow color 4 — rose (sparingly, for warmth).
-  static const Color auroraRose = Color(0xFFFB7FA8);
+  // ── Ambient (legacy aurora names — now a faint white light) ──
+  static const Color auroraIndigo = Color(0xFFE8E8E8);
+  static const Color auroraViolet = Color(0xFFD6D6D6);
+  static const Color auroraCyan = Color(0xFFB8B8B8);
+  static const Color auroraRose = Color(0xFF9E9E9E);
 
   // ── Text ─────────────────────────────────────────────────────
-  /// Primary text — high-contrast white.
-  static const Color textPrimary = Color(0xFFF5F6F8);
+  /// Primary text — pure white.
+  static const Color textPrimary = Color(0xFFF7F7F7);
 
-  /// Secondary text — labels, captions.
-  static const Color textSecondary = Color(0xFF9AA1B2);
+  /// Secondary text — mid gray.
+  static const Color textSecondary = Color(0xFF8F8F8F);
 
-  /// Tertiary / disabled text.
-  static const Color textTertiary = Color(0xFF5C6373);
+  /// Tertiary / disabled text — dark gray.
+  static const Color textTertiary = Color(0xFF525252);
 
   // ── Brand ────────────────────────────────────────────────────
-  /// Primary accent — electric indigo. CTAs, active nav, focus.
-  static const Color primary = Color(0xFF6C8CFF);
+  /// Primary accent — WHITE. CTAs, active nav, focus.
+  static const Color primary = Color(0xFFFFFFFF);
 
-  /// Pressed / deep variant.
-  static const Color primaryPressed = Color(0xFF5577E6);
+  /// Pressed / dimmed variant.
+  static const Color primaryPressed = Color(0xFFD9D9D9);
 
-  /// Secondary accent — cyan/teal. Highlights, links.
-  static const Color accent = Color(0xFF3DD8D8);
+  /// Secondary accent — white (monochrome system).
+  static const Color accent = Color(0xFFFFFFFF);
 
-  /// Tertiary accent — magenta/pink for alerts, hot streaks.
-  static const Color tertiary = Color(0xFFFF5C8A);
+  /// Tertiary accent — reserved for destructive highlights only.
+  static const Color tertiary = Color(0xFFE5484D);
 
-  // ── Semantic ─────────────────────────────────────────────────
-  static const Color success = Color(0xFF3DD9A0);
-  static const Color warning = Color(0xFFFFB547);
-  static const Color danger = Color(0xFFFF5C5C);
-  static const Color info = Color(0xFF5BB8FF);
+  // ── Semantic (desaturated, meaning-only) ─────────────────────
+  static const Color success = Color(0xFF46A758);
+  static const Color warning = Color(0xFFF5A524);
+  static const Color danger = Color(0xFFE5484D);
+  static const Color info = Color(0xFF8A8F98);
 
-  // ── Stage colors (sales pipeline) ───────────────────────────
-  static const Color stageLead = Color(0xFF8B95B5);
-  static const Color stageQualified = Color(0xFF5BB8FF);
-  static const Color stageProposal = Color(0xFFB07CFF);
-  static const Color stageNegotiation = Color(0xFFFFB547);
-  static const Color stageWon = Color(0xFF3DD9A0);
-  static const Color stageLost = Color(0xFFFF5C5C);
+  // ── Stage colors (sales pipeline) — ink-first, meaning-second ─
+  static const Color stageLead = Color(0xFF6E6E6E);
+  static const Color stageQualified = Color(0xFF9C9C9C);
+  static const Color stageProposal = Color(0xFFC9C9C9);
+  static const Color stageNegotiation = Color(0xFFF5A524);
+  static const Color stageWon = Color(0xFF46A758);
+  static const Color stageLost = Color(0xFFE5484D);
 
-  // ── Gradients ────────────────────────────────────────────────
+  // ── Gradients (kept for compatibility — now monochrome) ──────
+  /// Primary "gradient" — flat white (mono system rejects decoration).
   static const LinearGradient primaryGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF6C8CFF), Color(0xFF3DD8D8)],
+    colors: [Color(0xFFFFFFFF), Color(0xFFEDEDED)],
   );
 
   static const LinearGradient premiumGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF6C8CFF), Color(0xFFB07CFF)],
+    colors: [Color(0xFFF7F7F7), Color(0xFFC9C9C9)],
   );
 
   static const LinearGradient auroraGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [auroraIndigo, auroraViolet, auroraCyan],
-    stops: [0.0, 0.55, 1.0],
+    colors: [Color(0xFFF7F7F7), Color(0xFFB8B8B8)],
+    stops: [0.0, 1.0],
   );
 
   static const LinearGradient revenueGradient = LinearGradient(
     begin: Alignment.bottomCenter,
     end: Alignment.topCenter,
-    colors: [Color(0x006C8CFF), Color(0xFF6C8CFF)],
+    colors: [Color(0x00FFFFFF), Color(0xFFFFFFFF)],
   );
 
   static const LinearGradient dangerGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFFF5C8A), Color(0xFFFF5C5C)],
+    colors: [Color(0xFFE5484D), Color(0xFFC93338)],
   );
 
-  /// Soft wash used behind hero sections (dashboard header, studio hero).
+  /// Soft wash behind hero sections — a whisper of gray light on black.
   static const LinearGradient heroWash = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    colors: [Color(0xFF141B33), Color(0x0007080D)],
+    colors: [Color(0xFF111111), Color(0x00000000)],
     stops: [0.0, 1.0],
   );
 
-  // ── Elevation glow (light emitted by interactive elements) ──
-  /// Glow shadow for primary buttons / hero cards.
+  // ── Elevation ────────────────────────────────────────────────
+  /// Legacy glow factory — now an almost-invisible ambient shadow.
   static List<BoxShadow> glow(Color color, {double alpha = 0.30}) => [
         BoxShadow(
-          color: color.withValues(alpha: alpha),
+          color: const Color(0xFF000000).withValues(alpha: 0.5),
           blurRadius: 24,
           offset: const Offset(0, 6),
-          spreadRadius: -6,
-        ),
-        BoxShadow(
-          color: color.withValues(alpha: alpha * 0.5),
-          blurRadius: 48,
-          offset: const Offset(0, 12),
-          spreadRadius: -12,
+          spreadRadius: -10,
         ),
       ];
 
   /// Ambient card shadow — grounds cards without heaviness.
   static List<BoxShadow> get cardShadow => [
         BoxShadow(
-          color: const Color(0xFF000000).withValues(alpha: 0.35),
-          blurRadius: 20,
-          offset: const Offset(0, 8),
-          spreadRadius: -10,
+          color: const Color(0xFF000000).withValues(alpha: 0.6),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
+          spreadRadius: -12,
         ),
       ];
 

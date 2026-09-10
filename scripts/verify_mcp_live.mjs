@@ -68,7 +68,7 @@ async function main() {
 
   // 1) Public capability advert
   const info = await (await fetch(`${WORKER}/mcp`)).json();
-  ok(info.server === 'nebula-crm-mcp' && info.tools === 23, 'GET /mcp advert live', JSON.stringify(info).slice(0, 120));
+  ok(info.server === 'nebula-crm-mcp' && info.tools === 33, 'GET /mcp advert live', JSON.stringify(info).slice(0, 120));
   ok(String(info.auth?.mode || '').includes('pairing'), 'advert documents grant auth');
 
   // 2) Pairing grant from the app's identity
@@ -91,7 +91,7 @@ async function main() {
 
   const list = await mcpRpc({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, grant);
   const tools = (list.body?.result?.tools || []).map((t) => t.name);
-  ok(tools.length === 20, `tools/list → 20 tools for a salesRep (+refine_site; got ${tools.length})`);
+  ok(tools.length === 23, `tools/list → 23 tools for a salesRep (+refine_site +plan_task +list_skills +learn_skill; got ${tools.length})`);
   ok(['build_website', 'web_search', 'web_fetch', 'save_note', 'list_artifacts', 'create_email_task', 'search_contacts'].every((n) => tools.includes(n)),
     'builder + research + CRM + email tools all exposed');
 

@@ -28,15 +28,15 @@ const html2 = renderSite({ kind: 'landing', design, content, brand });
 console.log('Premium polish layer:');
 ok('scroll progress bar div present', html.includes('<div id="nb-progress"></div>'));
 ok('scroll progress JS wired', html.includes("prog.style.width="));
-ok('hero entrance choreography (rise keyframes)', html.includes('@keyframes rise') && html.includes('.hero h1{animation:rise'));
-ok('drifting aurora orbs', html.includes('@keyframes drift') && html.includes('.orb{animation:drift'));
-ok('animated shine on primary buttons', html.includes('@keyframes shine') && html.includes('.btn.primary::before'));
+ok('hero entrance choreography (blur-in rise reveals)', html.includes('.rev{opacity:0;translate:0 26px;filter:blur(6px)') && html.includes('.rev.in') && html.includes('.rev.d1{transition-delay:.08s}'));
+ok('drifting aurora orbs', html.includes('@keyframes drift') && html.includes('animation:drift'));
+ok('animated shine on primary buttons', html.includes('@keyframes shine') && html.includes('.btn.primary::after'));
 ok('card glass-edge highlight', html.includes('.card::before'));
 ok('accent selection + styled scrollbars', html.includes('::selection') && html.includes('::-webkit-scrollbar-thumb'));
 ok('focus-visible accessibility ring', html.includes(':focus-visible'));
 ok('stat counters runtime', html.includes('animated stat counters') && html.includes('requestAnimationFrame(step)'));
 ok('orb parallax runtime', html.includes('orb parallax'));
-ok('reduced-motion kills all new motion', /\.orb\{animation:none\}/.test(html) && html.includes('#nb-progress{display:none}'));
+ok('reduced-motion kills all new motion', html.includes('.rev{opacity:1;translate:0 0;filter:none}') && html.includes('animation-duration:.001s!important'));
 ok('counter guards en-IN locale', html.includes("toLocaleString('en-IN'"));
 ok('reduced-motion guard in counters', html.includes('&&!rm)'));
 ok('deterministic render unchanged', html === html2);
@@ -47,7 +47,7 @@ ok('document complete', html.startsWith('<!DOCTYPE html>') && html.trim().endsWi
 for (const t of ['aurora', 'luxe', 'editorial', 'swiss', 'festive', 'playful']) {
   const d = normalizeDesign({ theme: t, palette: {}, font: '' }, { kind: 'promo', styleHint: '', brandColor: '' });
   const h = renderSite({ kind: 'promo', design: d, content: { title: 't', headline: 'h', sub: 's', primary_cta: { label: 'x', href: '#' }, offer: { badge: '40% OFF', price: '₹99', perks: ['a'] } }, brand });
-  ok(`theme ${t} renders with polish layer`, h.includes('nb-progress') && h.includes('@keyframes rise'));
+  ok(`theme ${t} renders with polish layer`, h.includes('nb-progress') && h.includes('@keyframes drift') && h.includes('.rev.in'));
 }
 
 ok('style hint mapping intact', themeForStyleHint('dark premium', 'landing') === 'aurora' && themeForStyleHint('minimal clean', 'landing') === 'swiss');

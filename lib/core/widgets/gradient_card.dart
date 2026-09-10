@@ -2,21 +2,24 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 
-/// A card with a gradient background — used for hero CTAs,
+/// A card with an (optional) monochrome wash — used for hero CTAs,
 /// AI insight banners, and premium feature highlights.
+///
+/// MONO edition: the default "gradient" is now a whisper of white light
+/// fading into black — atmosphere without decoration.
 class GradientCard extends StatelessWidget {
   const GradientCard({
     super.key,
-    required this.child,
-    this.gradient = AppColors.primaryGradient,
+    this.gradient,
     this.padding = const EdgeInsets.all(20),
-    this.borderRadius = 20,
+    this.borderRadius = 18,
     this.onTap,
     this.border,
+    this.child,
   });
 
-  final Widget child;
-  final Gradient gradient;
+  final Widget? child;
+  final Gradient? gradient;
   final EdgeInsetsGeometry padding;
   final double borderRadius;
   final VoidCallback? onTap;
@@ -31,19 +34,10 @@ class GradientCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(borderRadius),
         child: Ink(
           decoration: BoxDecoration(
-            gradient: gradient,
+            gradient: gradient ?? AppColors.heroWash,
+            color: gradient == null ? AppColors.surfaceElevated : null,
             borderRadius: BorderRadius.circular(borderRadius),
-            border: border,
-            boxShadow: [
-              BoxShadow(
-                color: (gradient is LinearGradient
-                        ? (gradient as LinearGradient).colors.first
-                        : AppColors.primary)
-                    .withValues(alpha: 0.25),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
+            border: border ?? Border.all(color: AppColors.border, width: 1),
           ),
           padding: padding,
           child: child,

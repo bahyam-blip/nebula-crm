@@ -5,21 +5,26 @@ import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 
 // ═══════════════════════════════════════════════════════════════════
-// NEBULA UI KIT — the signature component layer.
+// NEBULA UI KIT — MONO edition.
 //
-// Every widget here exists because a plain Material equivalent reads
-// "default". The kit adds the three things that separate premium apps:
-//   1. ATMOSPHERE  — aurora ambient light, glass materials, glow.
-//   2. TACTILITY   — spring press physics on everything touchable.
-//   3. CHOREOGRAPHY— staggered entrances that guide the eye.
+// The 2.0 kit decorated (aurora glows, glass, gradients). The 3.0 kit
+// is deliberately quieter — the restraint IS the design:
+//   1. BLACK CANVAS — screens are true black; ambient light is a faint
+//      white breath at 2-4% opacity. Nothing glows.
+//   2. WHITE ACTIONS — primary actions are solid white on black with
+//      black labels. Selection is inversion, not color.
+//   3. HAIRLINE CHROME — 1px #1F1F1F strokes; depth from elevation
+//      steps of black, never from borders-of-color or shadows-of-color.
+//   4. MOTION STAYS — spring presses and staggered entrances survive;
+//      movement is craft, decoration is not.
 // ═══════════════════════════════════════════════════════════════════
 
-// ── Aurora ambient background ─────────────────────────────────────
+// ── Ambient background ────────────────────────────────────────────
 
-/// Ambient aurora backdrop — two/three slow-drifting radial glows behind
-/// content. Gives dark screens depth and brand atmosphere at ~zero cost
-/// (repaints are throttled by the slow controller duration).
-class AuroraBackground extends StatefulWidget {
+/// Ambient backdrop — an almost-imperceptible white breath from the top
+/// of the screen over true black. No hue, no drift; stillness reads as
+/// confidence. (Keeps the AuroraBackground name/API for compatibility.)
+class AuroraBackground extends StatelessWidget {
   const AuroraBackground({
     super.key,
     required this.child,
@@ -28,100 +33,28 @@ class AuroraBackground extends StatefulWidget {
   });
 
   final Widget child;
-
-  /// 0 = invisible, 1 = standard ambience, >1 = stronger for hero screens.
   final double intensity;
-
   final bool animate;
 
   @override
-  State<AuroraBackground> createState() => _AuroraBackgroundState();
-}
-
-class _AuroraBackgroundState extends State<AuroraBackground>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 18),
-    );
-    if (widget.animate) _controller.repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final i = widget.intensity;
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final t = Curves.easeInOut.transform(_controller.value);
-        return CustomPaint(
-          painter: _AuroraPainter(t: t, intensity: i),
-          isComplex: true,
-          willChange: widget.animate,
-          child: child,
-        );
-      },
-      child: widget.child,
+    final i = intensity.clamp(0.0, 2.0);
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0.0, 0.45],
+          colors: [
+            Color.lerp(const Color(0xFF000000), const Color(0xFF161616),
+                0.55 * i)!,
+            AppColors.background,
+          ],
+        ),
+      ),
+      child: child,
     );
   }
-}
-
-class _AuroraPainter extends CustomPainter {
-  _AuroraPainter({required this.t, required this.intensity});
-  final double t;
-  final double intensity;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (intensity <= 0) return;
-    final w = size.width;
-    final h = size.height;
-
-    void orb(Offset c, double r, Color color, double alpha) {
-      final paint = Paint()
-        ..shader = RadialGradient(
-          colors: [color.withValues(alpha: alpha), color.withValues(alpha: 0)],
-        ).createShader(Rect.fromCircle(center: c, radius: r));
-      canvas.drawCircle(c, r, paint);
-    }
-
-    // Top-left indigo bloom.
-    orb(
-      Offset(w * (0.06 + 0.04 * t), -h * 0.08),
-      w * 0.85,
-      AppColors.auroraIndigo,
-      0.10 * intensity,
-    );
-    // Right violet bloom, drifting opposite.
-    orb(
-      Offset(w * (1.02 - 0.03 * t), h * (0.22 + 0.05 * t)),
-      w * 0.6,
-      AppColors.auroraViolet,
-      0.07 * intensity,
-    );
-    // Faint cyan floor glow.
-    orb(
-      Offset(w * 0.5, h * 1.06),
-      w * 0.75,
-      AppColors.auroraCyan,
-      0.05 * intensity,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_AuroraPainter oldDelegate) =>
-      oldDelegate.t != t || oldDelegate.intensity != intensity;
 }
 
 // ── Tactility ─────────────────────────────────────────────────────
@@ -169,8 +102,8 @@ class _PressableScaleState extends State<PressableScale> {
 
 // ── Cards ─────────────────────────────────────────────────────────
 
-/// Signature glass card: hairline that catches light on the top edge,
-/// glass fill, optional accent glow. The workhorse container.
+/// The workhorse container: flat black surface, 1px hairline, nothing
+/// else. Optional [accent] tints ONLY the border for meaning.
 class NebulaCard extends StatelessWidget {
   const NebulaCard({
     super.key,
@@ -179,7 +112,7 @@ class NebulaCard extends StatelessWidget {
     this.padding = const EdgeInsets.all(16),
     this.accent,
     this.glow = false,
-    this.radius = 18,
+    this.radius = 16,
     this.fill,
   });
 
@@ -193,30 +126,16 @@ class NebulaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final a = accent ?? AppColors.primary;
     final card = Container(
       decoration: BoxDecoration(
         color: fill ?? AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(
-          color: AppColors.glassEdge,
+          color: accent != null
+              ? accent!.withValues(alpha: 0.45)
+              : AppColors.border,
           width: 1,
         ),
-        gradient: fill == null
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withValues(alpha: 0.03),
-                  Colors.transparent,
-                ],
-                stops: const [0.0, 0.35],
-              )
-            : null,
-        boxShadow: [
-          ...AppColors.cardShadow,
-          if (glow) ...AppColors.glow(a, alpha: 0.22),
-        ],
       ),
       child: Padding(padding: padding, child: child),
     );
@@ -229,21 +148,25 @@ class NebulaCard extends StatelessWidget {
   }
 }
 
-/// Hero card for the one thing that matters most on a screen — gradient
-/// wash, aurora rim, soft glow. Used sparingly (max one per screen).
+/// Hero card for the one thing that matters most on a screen — a raised
+/// black slab with a brighter hairline. Used sparingly (max one per
+/// screen). Inverted (white) fill is available via [inverted] for the
+/// single loudest surface.
 class NebulaHeroCard extends StatelessWidget {
   const NebulaHeroCard({
     super.key,
     required this.child,
     this.onTap,
     this.padding = const EdgeInsets.all(18),
-    this.radius = 22,
+    this.radius = 20,
+    this.inverted = false,
   });
 
   final Widget child;
   final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
   final double radius;
+  final bool inverted;
 
   @override
   Widget build(BuildContext context) {
@@ -253,19 +176,28 @@ class NebulaHeroCard extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(radius),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF182042), Color(0xFF10131F)],
-            stops: [0.0, 0.7],
-          ),
+          color: inverted ? AppColors.primary : const Color(0xFF101010),
           border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.35),
+            color: inverted ? AppColors.primary : AppColors.glassEdge,
             width: 1,
           ),
-          boxShadow: AppColors.glow(AppColors.primary, alpha: 0.18),
         ),
-        child: Padding(padding: padding, child: child),
+        child: Padding(
+          padding: padding,
+          child: inverted
+              ? Theme(
+                  data: ThemeData.dark().copyWith(
+                    textTheme: Theme.of(context).textTheme.copyWith(
+                          bodyMedium: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: const Color(0xFF0A0A0A)),
+                        ),
+                  ),
+                  child: child,
+                )
+              : child,
+        ),
       ),
     );
   }
@@ -273,7 +205,8 @@ class NebulaHeroCard extends StatelessWidget {
 
 // ── Buttons ───────────────────────────────────────────────────────
 
-/// Primary action button — aurora gradient, glow, spring press, loading.
+/// Primary action button — SOLID WHITE with a black label. The single
+/// loudest element anywhere in the app; everything defers to it.
 class NebulaButton extends StatelessWidget {
   const NebulaButton({
     super.key,
@@ -298,12 +231,12 @@ class NebulaButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onPressed != null && !loading;
     final Widget content = loading
-        ? const SizedBox(
+        ? SizedBox(
             width: 20,
             height: 20,
             child: CircularProgressIndicator(
               strokeWidth: 2.2,
-              valueColor: AlwaysStoppedAnimation(Colors.white),
+              valueColor: AlwaysStoppedAnimation(_fg),
             ),
           )
         : Row(
@@ -318,7 +251,7 @@ class NebulaButton extends StatelessWidget {
                   label,
                   style: TextStyle(
                     fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 0.1,
                     color: _fg,
                   ),
@@ -332,29 +265,25 @@ class NebulaButton extends StatelessWidget {
     final Widget button = PressableScale(
       onTap: enabled ? onPressed : null,
       child: Opacity(
-        opacity: enabled ? 1 : 0.45,
+        opacity: enabled ? 1 : 0.4,
         child: Container(
           height: height,
           padding: const EdgeInsets.symmetric(horizontal: 22),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            gradient: variant == NebulaButtonVariant.primary
-                ? AppColors.primaryGradient
-                : null,
             color: variant == NebulaButtonVariant.primary
-                ? null
-                : (variant == NebulaButtonVariant.ghost
-                    ? Colors.transparent
-                    : AppColors.glassFillStrong),
-            borderRadius: BorderRadius.circular(15),
-            border: variant == NebulaButtonVariant.outlined
-                ? Border.all(color: AppColors.glassEdge, width: 1)
+                ? AppColors.primary
                 : variant == NebulaButtonVariant.ghost
-                    ? null
-                    : null,
-            boxShadow: variant == NebulaButtonVariant.primary && enabled
-                ? AppColors.glow(AppColors.primary, alpha: 0.28)
-                : null,
+                    ? Colors.transparent
+                    : AppColors.glassFillStrong,
+            borderRadius: BorderRadius.circular(14),
+            border: variant == NebulaButtonVariant.primary
+                ? null
+                : Border.all(
+                    color: variant == NebulaButtonVariant.ghost
+                        ? AppColors.glassEdge
+                        : AppColors.glassEdge,
+                    width: 1),
           ),
           child: content,
         ),
@@ -366,7 +295,7 @@ class NebulaButton extends StatelessWidget {
   }
 
   Color get _fg => variant == NebulaButtonVariant.primary
-      ? Colors.white
+      ? const Color(0xFF0A0A0A)
       : AppColors.textPrimary;
 }
 
@@ -374,13 +303,12 @@ enum NebulaButtonVariant { primary, outlined, ghost }
 
 // ── Icon tiles / chips ────────────────────────────────────────────
 
-/// Squircle icon container with tint gradient — the standard way to
-/// render an icon with weight next to text.
+/// Square icon container — quiet gray slab, white outline icon.
 class NebulaIconTile extends StatelessWidget {
   const NebulaIconTile({
     super.key,
     required this.icon,
-    this.color = AppColors.primary,
+    this.color = AppColors.textPrimary,
     this.size = 40,
     this.iconSize,
     this.rounded = 12,
@@ -400,25 +328,16 @@ class NebulaIconTile extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(rounded),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withValues(alpha: 0.22),
-            color.withValues(alpha: 0.08),
-          ],
-        ),
-        border: Border.all(
-          color: color.withValues(alpha: 0.25),
-          width: 1,
-        ),
+        color: AppColors.surfaceHigh,
+        border: Border.all(color: AppColors.border, width: 1),
       ),
-      child: Icon(icon, color: color, size: iconSize ?? size * 0.48),
+      child: Icon(icon,
+          color: color, size: iconSize ?? size * 0.46),
     );
   }
 }
 
-/// Animated selectable pill — morphs to filled gradient when active.
+/// Selectable pill — selection is INVERSION: white fill, black text.
 class NebulaChip extends StatelessWidget {
   const NebulaChip({
     super.key,
@@ -441,24 +360,20 @@ class NebulaChip extends StatelessWidget {
       onTap: onSelected,
       pressedScale: 0.95,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          gradient: selected ? AppColors.primaryGradient : null,
-          color: selected ? null : AppColors.glassFill,
+          color: selected ? AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: selected
-                ? Colors.transparent
+                ? AppColors.primary
                 : (onSelected != null
                     ? AppColors.glassEdge
                     : AppColors.border),
             width: 1,
           ),
-          boxShadow: selected
-              ? AppColors.glow(color, alpha: 0.25)
-              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -466,15 +381,19 @@ class NebulaChip extends StatelessWidget {
             if (icon != null) ...[
               Icon(icon,
                   size: 14,
-                  color: selected ? Colors.white : AppColors.textSecondary),
+                  color: selected
+                      ? const Color(0xFF0A0A0A)
+                      : AppColors.textSecondary),
               const SizedBox(width: 6),
             ],
             Text(
               label,
               style: TextStyle(
                 fontSize: 12.5,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? Colors.white : AppColors.textSecondary,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: selected
+                    ? const Color(0xFF0A0A0A)
+                    : AppColors.textSecondary,
                 letterSpacing: 0.1,
               ),
             ),
@@ -506,7 +425,11 @@ class StaggerIn extends StatelessWidget {
     return child
         .animate(delay: (index * baseDelay).ms)
         .fadeIn(duration: 360.ms, curve: Curves.easeOutCubic)
-        .slideY(begin: 0.06, end: 0, duration: 360.ms, curve: Curves.easeOutCubic);
+        .slideY(
+            begin: 0.06,
+            end: 0,
+            duration: 360.ms,
+            curve: Curves.easeOutCubic);
   }
 }
 
@@ -541,16 +464,16 @@ Future<T?> showNebulaSheet<T>({
     context: context,
     isScrollControlled: isScrollControlled,
     backgroundColor: backgroundColor ?? AppColors.surfaceHigh,
-    barrierColor: Colors.black.withValues(alpha: 0.6),
+    barrierColor: Colors.black.withValues(alpha: 0.7),
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (sheetContext) {
       return Container(
         decoration: const BoxDecoration(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           border: Border(
-            top: BorderSide(color: AppColors.glassEdge, width: 1),
+            top: BorderSide(color: AppColors.border, width: 1),
           ),
         ),
         child: Column(
@@ -558,10 +481,10 @@ Future<T?> showNebulaSheet<T>({
           children: [
             const SizedBox(height: 10),
             Container(
-              width: 38,
+              width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: AppColors.textTertiary.withValues(alpha: 0.5),
+                color: AppColors.textTertiary.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -573,13 +496,12 @@ Future<T?> showNebulaSheet<T>({
   );
 }
 
-/// Floating glass toast — appears at the top with spring physics.
-/// Use for feedback that a SnackBar would render as heavy chrome.
+/// Floating toast — black glass, white text, minimal icon.
 void showNebulaToast(
   BuildContext context,
   String message, {
-  IconData icon = Icons.check_circle,
-  Color color = AppColors.success,
+  IconData icon = Icons.check_circle_outline,
+  Color color = AppColors.textPrimary,
 }) {
   final overlay = OverlayEntry(
     builder: (toastContext) => Positioned(
@@ -591,10 +513,9 @@ void showNebulaToast(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: AppColors.surfaceHighest.withValues(alpha: 0.96),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.glassEdge),
-            boxShadow: AppColors.cardShadow,
+            color: const Color(0xE6141414),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
           ),
           child: Row(
             children: [
@@ -605,7 +526,7 @@ void showNebulaToast(
                   message,
                   style: const TextStyle(
                     fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                     color: AppColors.textPrimary,
                   ),
                 ),
@@ -618,7 +539,7 @@ void showNebulaToast(
               begin: -0.6,
               end: 0,
               duration: 340.ms,
-              curve: Curves.easeOutBack,
+              curve: Curves.easeOutCubic,
             )
             .fadeIn(duration: 200.ms),
       ),
@@ -633,13 +554,13 @@ void showNebulaToast(
 
 // ── Progress ──────────────────────────────────────────────────────
 
-/// Slim glowing progress bar (0..1) — used for quotas, onboarding, funnels.
+/// Slim white progress bar (0..1) — used for quotas, onboarding, funnels.
 class NebulaProgress extends StatelessWidget {
   const NebulaProgress({
     super.key,
     required this.value,
     this.color = AppColors.primary,
-    this.height = 5,
+    this.height = 4,
   });
 
   final double value;
@@ -658,19 +579,7 @@ class NebulaProgress extends StatelessWidget {
             Container(color: AppColors.surfaceHigh),
             FractionallySizedBox(
               widthFactor: v,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [color.withValues(alpha: 0.7), color],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.5),
-                      blurRadius: 6,
-                    ),
-                  ],
-                ),
-              ),
+              child: Container(color: color),
             ),
           ],
         ),
@@ -707,7 +616,7 @@ class ShimmerBox extends StatelessWidget {
         .animate(onPlay: (c) => c.repeat())
         .shimmer(
           duration: 1200.ms,
-          color: Colors.white.withValues(alpha: 0.05),
+          color: Colors.white.withValues(alpha: 0.04),
         );
   }
 }
@@ -725,8 +634,8 @@ class NebulaSkeletonCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border, width: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
