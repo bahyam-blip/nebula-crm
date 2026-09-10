@@ -136,8 +136,24 @@ globalThis.fetch = async (url, init = {}) => {
     const text = parsed.messages?.map((m) => m.content).join('\n') || '';
     captured.sarvam.push(text);
     let content = STUB_SITE_HTML;
-    if (parsed.response_format?.type === 'json_object') {
-      if (text.includes('design director')) {
+    if (text.includes('HAND-CODING one section')) {
+      // Codegen CODE stage — raw section + scoped style, keyed to the section id.
+      const id = /section "sec-([a-z0-9-]+)"/.exec(text)?.[1] || 'hero';
+      const headline = (/"headline":"([^"]*)"/.exec(text)?.[1] || `Hand-coded ${id}`).replace(/[<>]/g, '');
+      const sub = (/"sub":"([^"]*)"/.exec(text)?.[1] || 'Bespoke section content.').replace(/[<>]/g, '');
+      const titles = [...text.matchAll(/"title":"([^"]*)"/g)].map((m) => m[1].replace(/[<>]/g, '')).slice(0, 8);
+      const list = titles.length ? `<ul>${titles.map((x) => `<li>${x}</li>`).join('')}</ul>` : '';
+      content = `<section id="sec-${id}" data-rev><div class="wrap"><span class="kicker">${id}</span><h2>${headline}</h2><p>${sub}</p>${list}<a class="btn btn-accent" href="#sec-contact">Act</a></div></section>\n<style>#sec-${id}{padding:var(--sp6) 0}#sec-${id} h2{font-family:var(--display);font-size:clamp(30px,5vw,54px)}#sec-${id} .btn-accent:hover{transform:translateY(-2px)}@keyframes ${id}-drift{from{transform:translateY(0)}to{transform:translateY(-6px)}}/* ${'z'.repeat(40)} */</style>`;
+    } else if (parsed.response_format?.type === 'json_object') {
+      if (text.includes('reviewing hand-coded sections')) {
+        content = JSON.stringify({ verdicts: [{ id: 'hero', verdict: 'good' }, { id: 'features', verdict: 'good' }, { id: 'contact', verdict: 'good' }] });
+      } else if (text.includes('Plan its information architecture')) {
+        content = JSON.stringify({ sections: [
+          { id: 'hero', name: 'Home', goal: 'state the offer', layout: 'Statement hero with CTA row', content_keys: ['kicker', 'headline', 'sub', 'primary_cta', 'hero_badges'], motion: 'staggered rise' },
+          { id: 'features', name: 'Why us', goal: 'prove it', layout: 'Asymmetric card grid', content_keys: ['features', 'stats'], motion: 'scroll reveal' },
+          { id: 'contact', name: 'Contact', goal: 'convert', layout: 'Split band', content_keys: ['cta_title', 'cta_sub', 'contact', 'primary_cta'], motion: 'slide up' },
+        ], nav: ['hero', 'features', 'contact'] });
+      } else if (text.includes('design director')) {
         content = JSON.stringify({ theme: 'festive', palette: { accent: '#ffb03a', accent2: '#ff5c8a' }, font: 'modern', voice: 'warm festive', audience: 'Diwali shoppers', headline_angle: 'Flat 40% off for Diwali', must_have: ['offer card with countdown'], research_queries: [] });
       } else {
         content = JSON.stringify({ title: 'Diwali Mega Offer', kicker: 'Nebula CRM', headline: 'Diwali Mega Offer', sub: 'Flat 40% off across the store this week only.', primary_cta: { label: 'Shop now', href: 'https://nebula.test/shop' }, features: [{ icon: '🪔', title: 'Same-day delivery', text: 'Order by 2pm for evening delivery across the city.' }], offer: { badge: '40% OFF', price: '₹599', old_price: '₹999', note: 'Applied at checkout', terms: 'Ends Sunday midnight.', perks: ['Free gift wrap', 'Free delivery over ₹499'] }, faq: [{ q: 'Where do you deliver?', a: 'All of Mumbai, same day.' }] });
@@ -373,8 +389,10 @@ let siteId = '';
   ok(built.res.status === 200 && built.json.ok === true, 'POST /v1/studio/build (AI path)', JSON.stringify(built.json).slice(0, 160));
   ok(/^https:\/\/worker\.test\/sites\//.test(built.json.url || ''), 'build returns public URL', built.json.url);
   siteId = built.json.artifact_id;
-  ok(captured.sarvam.length === 3, 'Sarvam called three times for the build (design brief + copy + polish review)', String(captured.sarvam.length));
-  ok(Array.isArray(built.json.stages) && built.json.stages.length >= 5, 'build response carries the stage trace (incl. polish)', JSON.stringify(built.json.stages));
+  // think + polish + write + plan + 3 section codes + review = 8 AI calls
+  ok(captured.sarvam.length === 8, 'Sarvam called 8× for a full codegen build (think/polish/write/plan/3×code/review)', String(captured.sarvam.length));
+  ok(Array.isArray(built.json.stages) && built.json.stages.length >= 8, 'build response carries the full stage trace (plan + code:* + review + wire)', JSON.stringify(built.json.stages));
+  ok(built.json.builder === 'ai', 'builder=ai — the agent hand-coded the page', built.json.builder);
 
   const served = await studioFetch(env, 'GET', `/sites/${siteId}`, null);
   ok(served.res.status === 200 && served.text.includes('Diwali Mega Offer'), 'site publicly served at /sites/<id>');

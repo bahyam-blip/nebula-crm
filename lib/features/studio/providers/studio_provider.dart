@@ -8,9 +8,10 @@ import '../services/studio_api_service.dart';
 /// Studio API service provider.
 final studioApiProvider = Provider<StudioApiService>((ref) => StudioApiService());
 
-/// One visible step of the agent build pipeline. The UI walks the user
-/// through these while the Worker runs the real think → research →
-/// design → build → host pipeline.
+/// One visible step of the agent build pipeline. Mirrors the REAL
+/// server-side pipeline (Agent v7): the agent researches, plans the
+/// architecture, then hand-codes each section's HTML+CSS before a
+/// director review — no templates anywhere in the primary path.
 class BuildStage {
   const BuildStage(this.label, this.icon);
   final String label;
@@ -20,11 +21,12 @@ class BuildStage {
 const kBuildStages = <BuildStage>[
   BuildStage('Understanding your brief', '💡'),
   BuildStage('Researching your market', '🔍'),
-  BuildStage('Designing the look & feel', '🎨'),
+  BuildStage('Designing your look & feel', '🎨'),
   BuildStage('Writing your copy', '✍️'),
+  BuildStage('Planning your sections', '📐'),
+  BuildStage('Hand-coding your page', '🛠️'),
   BuildStage('Director review & polish', '🧐'),
-  BuildStage('Building the pages', '🛠️'),
-  BuildStage('Hosting it live', '🚀'),
+  BuildStage('Wiring & hosting it live', '🚀'),
 ];
 
 /// Studio state: built sites + hosting platform connections + build/refine
@@ -87,9 +89,11 @@ class StudioController extends StateNotifier<StudioState> {
   void _startStages() {
     _stageTimer?.cancel();
     state = state.copyWith(stageIndex: 0);
-    // The real pipeline runs server-side; the ticker walks the visible
-    // stages so progress is honest about ORDER even when timings vary.
-    _stageTimer = Timer.periodic(const Duration(milliseconds: 2600), (t) {
+    // The real pipeline runs server-side (research → plan → per-section
+    // codegen → review → wire) and takes ~40-90s for a bespoke page.
+    // The ticker paces across that window so progress stays honest about
+    // ORDER; it holds on the last stage until the build actually lands.
+    _stageTimer = Timer.periodic(const Duration(milliseconds: 4600), (t) {
       if (!state.building) {
         t.cancel();
         return;

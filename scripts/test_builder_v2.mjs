@@ -107,9 +107,25 @@ function fbToken(uid, { kid = 'test-kid', expiresIn = 3600 } = {}) {
 const captured = { supabase: [], sarvam: [] };
 const sarvamScript = [];
 function sarvamReplyFor(text) {
-  for (const s of sarvamScript) if (s.match(text)) return s.reply;
+  for (const s of sarvamScript) if (s.match(text)) return typeof s.reply === 'function' ? s.reply(text) : s.reply;
   throw new Error('sarvam mock: no scripted reply');
 }
+
+/* Codegen stages (Agent v7): the agent plans + hand-codes each section. */
+const codegenScript = () => [
+  { match: (t) => t.includes('Plan its information architecture'), reply: { sections: [
+      { id: 'hero', name: 'Home', goal: 'state the promise and win the click', layout: 'Statement hero: oversized display headline, CTA row, trust chips', content_keys: ['kicker', 'headline', 'sub', 'primary_cta', 'secondary_cta', 'hero_badges'], motion: 'staggered rise on load' },
+      { id: 'features', name: 'Why us', goal: 'prove it with outcomes', layout: 'Asymmetric two-column: sticky title left, staggered cards right', content_keys: ['features', 'stats'], motion: 'rising blur reveal' },
+      { id: 'contact', name: 'Contact', goal: 'convert', layout: 'Split band: CTA headline left, contact list right', content_keys: ['cta_title', 'cta_sub', 'contact', 'primary_cta'], motion: 'band slides up' },
+    ], nav: ['hero', 'features', 'contact'] } },
+  { match: (t) => t.includes('reviewing hand-coded sections'), reply: { verdicts: [{ id: 'hero', verdict: 'good' }, { id: 'features', verdict: 'good' }, { id: 'contact', verdict: 'good' }] } },
+  { match: (t) => t.includes('HAND-CODING one section'), reply: (t) => {
+      const id = /section "sec-([a-z0-9-]+)"/.exec(t)?.[1] || 'hero';
+      const headline = (/"headline":"([^"]*)"/.exec(t)?.[1] || `Hand-coded ${id}`).replace(/[<>]/g, '');
+      const sub = (/"sub":"([^"]*)"/.exec(t)?.[1] || 'Bespoke section content.').replace(/[<>]/g, '');
+      return { __raw: `<section id="sec-${id}" data-rev><div class="wrap"><span class="kicker">${id}</span><h2>${headline}</h2><p>${sub}</p><a class="btn btn-accent" href="#sec-contact">Act</a></div></section>\n<style>#sec-${id}{padding:var(--sp6) 0}#sec-${id} h2{font-family:var(--display);font-size:clamp(30px,5vw,54px)}#sec-${id} p{color:var(--muted)}#sec-${id} .btn-accent:hover{transform:translateY(-2px)}@keyframes ${id}-drift{from{transform:translateY(0)}to{transform:translateY(-6px)}}/* ${'x'.repeat(40)} */</style>` };
+    } },
+];
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
@@ -287,31 +303,36 @@ let sig = { artifact_id: '' };
 {
   sarvamScript.length = 0;
   sarvamScript.push(
-    { match: (t) => t.includes('design director'), reply: { theme: 'aurora', palette: { accent: '#c07a3d' }, font: 'modern', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee trend'] } },
+    ...codegenScript(),
+    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'aurora', palette: { accent: '#c07a3d' }, font: 'modern', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee trend'] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Musafir Coffee', kicker: 'Mumbai', headline: 'Coffee worth the trip', sub: 'Single-origin pours and weekend cuppings at Musafir.', primary_cta: { label: 'Find us', href: 'mailto:hi@musafir.test' }, features: [{ icon: '☕', title: 'Single origin', text: 'Beans from Coorg estates, roasted weekly.' }, { icon: '🥐', title: 'Fresh bakes', text: 'Croissants at 8am sharp.' }], contact: { email: 'hi@musafir.test' } } },
   );
 
   const res = await buildWebsite(env, st, MGR,
     { title: 'Musafir Coffee', kind: 'landing', brief: 'A cozy specialty coffee shop in Mumbai with single-origin pours and weekend cupping sessions.' },
     'https://worker.test');
-  ok(res.ok === true && res.builder === 'ai', 'AI pipeline build succeeds with builder=ai', JSON.stringify(res).slice(0, 140));
+  ok(res.ok === true && res.builder === 'ai', 'AI codegen build succeeds with builder=ai', JSON.stringify(res).slice(0, 200));
   siteId = res.artifact_id;
   ok(/^https:\/\/worker\.test\/sites\/s_[a-z0-9]+$/.test(res.url || ''), 'returns the public URL', res.url);
   ok(res.version === 1, 'first build is version 1');
   const stages = res.stages.map((s) => s.stage);
-  ok(stages[0] === 'think' && stages.includes('research') && stages.includes('write') && stages.includes('render'),
-    'stage trace: think → research → write → render', JSON.stringify(stages));
+  ok(stages[0] === 'think' && stages.includes('research') && stages.includes('write') && stages.includes('plan') && stages.includes('wire'),
+    'stage trace: think → research → write → plan → code → wire', JSON.stringify(stages));
+  ok(stages.filter((s) => String(s).startsWith('code:')).length === 3, 'three sections hand-coded (hero, features, contact)', JSON.stringify(stages));
   ok(res.stages.find((s) => s.stage === 'research')?.ai === true, 'research stage actually used the live web');
+  ok(res.stages.find((s) => s.stage === 'plan')?.ai === true, 'plan stage was a real AI call');
 
   const page = await serve(siteId);
   ok(page.res.status === 200 && page.text.includes('Coffee worth the trip'), 'served page carries the AI copy');
   ok(!page.text.includes('```') && !page.text.includes('MARKET FACTS'), 'no fences or research scaffolding leak to the page');
-  ok(page.text.includes('scroll-behavior') || page.text.includes('IntersectionObserver'), 'engine page ships premium interactions');
+  ok(page.text.includes('IntersectionObserver') && page.text.includes('data-rev'), 'wired page ships the reveal motion system');
+  ok(page.text.includes('site-nav') && page.text.includes('site-footer'), 'nav + footer chrome present');
   ok(!!await env.MEDIA.get(`agent:siteplan:${siteId}`) === false, 'plan NOT in R2 (lives in state store)');
 
   const planRaw = await st.get(`agent:siteplan:${siteId}`);
   const plan = JSON.parse(planRaw);
   ok(plan?.design?.theme === 'aurora' && Array.isArray(plan.content.features), 'site plan stored for refine', planRaw.slice(0, 80));
+  ok(plan?.engine === 'codegen' && Array.isArray(plan.sections) && plan.sections.length === 3, 'plan records the codegen engine + section architecture');
 
   // CTA override path
   const res2 = await buildWebsite(env, st, MGR,
@@ -320,11 +341,13 @@ let sig = { artifact_id: '' };
   const page2 = await serve(res2.artifact_id);
   ok(page2.text.includes('Order on WhatsApp') && page2.text.includes('wa.me/91123'), 'CTA overrides reach the rendered page');
 
-  // Full fallback: no scripted replies → sarvam 500s → deterministic everywhere
+  // Full fallback: no scripted replies → sarvam 500s everywhere →
+  // codegen fails → deterministic signature render (engine safety net)
   sarvamScript.length = 0;
   const fb = await buildWebsite(env, st, MGR,
     { title: 'Fallback Page', kind: 'landing', brief: 'A quiet bookstore for people who read slowly. Poetry nights on Fridays.' }, 'https://worker.test');
-  ok(fb.ok === true && fb.builder === 'ai+engine', 'total AI outage still ships (ai+engine)', JSON.stringify({ builder: fb.builder }));
+  ok(fb.ok === true && fb.builder === 'signature', 'total AI outage still ships (signature engine fallback)', JSON.stringify({ builder: fb.builder }));
+  ok(fb.stages.some((s) => s.stage === 'render' && /fallback/.test(s.detail)), 'fallback stage trace is honest');
   const fbPage = await serve(fb.artifact_id);
   ok(fbPage.text.includes('Fallback Page') && fbPage.text.includes('</html>'), 'fallback page complete');
 }
@@ -356,17 +379,21 @@ console.log('\n— 5. refine_site (versions, snapshots, guards) —');
   const beforeDoc = before.find((a) => a.id === siteId);
 
   sarvamScript.length = 0;
-  sarvamScript.push({
-    match: (t) => t.includes('updating the content'),
-    reply: { title: 'Musafir Coffee', headline: 'The best cup in Mumbai', sub: 'Updated tagline for the refine test.', features: [{ icon: '☕', title: 'Single origin', text: 'Still Coorg beans.' }] },
-  });
+  sarvamScript.push(
+    ...codegenScript(),
+    {
+      match: (t) => t.includes('updating the content'),
+      reply: { title: 'Musafir Coffee', headline: 'The best cup in Mumbai', sub: 'Updated tagline for the refine test.', features: [{ icon: '☕', title: 'Single origin', text: 'Still Coorg beans.' }] },
+    },
+  );
   const r = await refineSite(env, st, MGR, { artifact_id: siteId, instruction: 'Punch up the headline, keep everything else' }, 'https://worker.test');
   ok(r.ok === true && r.version === 2, 'refine bumps to version 2', JSON.stringify({ v: r.version }));
   ok(r.url === `https://worker.test/sites/${siteId}`, 'same public URL after refine');
 
   const page = await serve(siteId);
-  ok(page.text.includes('The best cup in Mumbai'), 'latest version serves refined copy');
+  ok(page.text.includes('The best cup in Mumbai'), 'latest version serves the RE-CODED refined copy');
   ok(!page.text.includes('Coffee worth the trip'), 'old headline gone from latest');
+  ok(page.text.includes('data-rev'), 'refined page is still hand-coded (motion system intact)');
 
   const v1 = await serve(siteId, '?v=1');
   ok(v1.res.status === 200 && v1.text.includes('Coffee worth the trip'), '?v=1 still serves the original snapshot');

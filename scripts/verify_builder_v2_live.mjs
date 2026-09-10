@@ -91,8 +91,10 @@ async function main() {
   const siteUrl = built.json?.url || '';
   ok(['ai', 'ai+engine'].includes(built.json?.builder || ''), 'builder label recorded', built.json?.builder);
   const stageNames = (built.json?.stages || []).map((s) => s.stage);
-  ok(stageNames[0] === 'think' && stageNames.includes('write') && stageNames.includes('render'),
-    'stage trace: think → research → write → render', JSON.stringify(stageNames));
+  ok(stageNames[0] === 'think' && stageNames.includes('write') && stageNames.includes('plan') && stageNames.includes('wire'),
+    'stage trace: think → research → write → plan → code → wire', JSON.stringify(stageNames));
+  ok(stageNames.some((s) => String(s).startsWith('code:')), 'sections hand-coded by the agent (code:* stages)');
+  ok(built.json?.builder === 'ai', 'builder=ai (the agent wrote the code, not a template)', built.json?.builder);
 
   if (siteId) {
     const siteRes = await fetch(siteUrl);
@@ -103,7 +105,10 @@ async function main() {
     ok(html.includes('</html>') && html.includes('</body>'), 'document is complete');
     ok(html.includes('name="viewport"'), 'mobile viewport present');
     ok(html.includes('Order on WhatsApp'), 'CTA override landed in the page');
-    ok(html.length > 3000, 'page is substantial (premium template, not a stub)', `${html.length}B`);
+    ok(html.length > 3000, 'page is substantial (bespoke code, not a stub)', `${html.length}B`);
+    ok(html.includes('data-rev') && html.includes('IntersectionObserver'), 'scroll-reveal motion system present');
+    ok(html.includes('site-nav') && html.includes('site-footer'), 'nav + footer chrome wired');
+    ok(html.includes('fonts.googleapis.com'), 'real typography loaded');
 
     console.log('— REAL refine (same URL, new version) —');
     const refined = await jfetch('/v1/studio/refine', {

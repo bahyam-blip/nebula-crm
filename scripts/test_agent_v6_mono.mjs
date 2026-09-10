@@ -209,6 +209,24 @@ ok(/^[0-9a-f]{64}$/.test(dig) && dig === (await sha256Hex('nebula')) && dig !== 
 /* ══ 3+4. BUILD PIPELINE — skills, polish, integrity ═════════════ */
 section('BUILD v3 — skills injected + polish loop + integrity');
 sarvamScript.length = 0;
+
+/* Codegen stages (Agent v7): plan + hand-coded sections + review. */
+const codegenScript = () => {
+  script((t) => t.includes('Plan its information architecture'), { sections: [
+    { id: 'hero', name: 'Home', goal: 'state the promise', layout: 'Statement hero with oversized headline and CTA row', content_keys: ['kicker', 'headline', 'sub', 'primary_cta', 'secondary_cta', 'hero_badges', 'marquee'], motion: 'staggered rise' },
+    { id: 'features', name: 'Why us', goal: 'prove it', layout: 'Asymmetric card grid', content_keys: ['features', 'stats'], motion: 'scroll reveal' },
+    { id: 'contact', name: 'Contact', goal: 'convert', layout: 'Split band', content_keys: ['cta_title', 'cta_sub', 'contact', 'primary_cta'], motion: 'slide up' },
+  ], nav: ['hero', 'features', 'contact'] });
+  script((t) => t.includes('reviewing hand-coded sections'), { verdicts: [{ id: 'hero', verdict: 'good' }, { id: 'features', verdict: 'good' }, { id: 'contact', verdict: 'good' }] });
+  script((t) => t.includes('HAND-CODING one section'), (t) => {
+    const id = /section "sec-([a-z0-9-]+)"/.exec(t)?.[1] || 'hero';
+    const headline = (/"headline":"([^"]*)"/.exec(t)?.[1] || `Hand-coded ${id}`).replace(/[<>]/g, '');
+    const sub = (/"sub":"([^"]*)"/.exec(t)?.[1] || 'Bespoke section content.').replace(/[<>]/g, '');
+    const titles = [...t.matchAll(/"title":"([^"]*)"/g)].map((m) => m[1].replace(/[<>]/g, '')).slice(0, 8);
+    const list = titles.length ? `<ul>${titles.map((x) => `<li>${x}</li>`).join('')}</ul>` : '';
+    return { __raw: `<section id="sec-${id}" data-rev><div class="wrap"><span class="kicker">${id}</span><h2>${headline}</h2><p>${sub}</p>${list}<a class="btn btn-accent" href="#sec-contact">Act</a></div></section>\n<style>#sec-${id}{padding:var(--sp6) 0}#sec-${id} h2{font-family:var(--display);font-size:clamp(30px,5vw,54px)}#sec-${id} .btn-accent:hover{transform:translateY(-2px)}@keyframes ${id}-drift{from{transform:translateY(0)}to{transform:translateY(-6px)}}/* ${'m'.repeat(40)} */</style>` };
+  });
+};
 const designReply = {
   theme: 'onyx', hero: 'split', art: 'rings',
   palette: { bg: '#050505', surface: '#0d0d0d', ink: '#f5f5f5', muted: '#8f8f8f', accent: '#ffffff', accent2: '#8f8f8f' },
@@ -228,15 +246,17 @@ script((t) => t.includes('conversion copywriter'), {
   features: [{ icon: '◆', title: 'Ships in 7 days', text: 'One page, done.' }, { icon: '◇', title: 'Conversion-first', text: 'Proof above the fold.' }, { icon: '○', title: 'Yours forever', text: 'Code delivered.' }],
   contact: { email: 'hi@vega.test' }, footer_note: 'Built by Vega',
 });
+codegenScript();
 
 const build1 = await buildWebsite(env, store, MGR, {
   kind: 'landing', brief: 'A premium dark portfolio for Vega Studio, minimal and engineered, for design-led founders.', title: 'Vega Studio',
 }, 'https://nebula.test');
 ok(build1.ok === true, 'build succeeds end-to-end');
 ok(build1.stages.some((s) => s.stage === 'polish' && s.ai === true), 'polish stage applied the director pass');
-ok(build1.stages.some((s) => s.stage === 'render' && /rings/.test(s.detail)), `render names the art motif (${build1.stages.at(-1)?.detail})`);
+ok(build1.stages.some((s) => s.stage === 'wire'), `wire stage assembles the hand-coded sections (${build1.stages.at(-1)?.detail})`);
+ok(build1.stages.filter((s) => String(s.stage).startsWith('code:')).length === 3, 'three sections hand-coded');
 ok(/^[0-9a-f]{64}$/.test(build1.sha256 || ''), 'build returns sha256 digest');
-ok(build1.stages.length === 5, `stage trace: think/research/write/polish/render (${build1.stages.length})`);
+ok(build1.stages.length === 10, `stage trace: think/research/write/polish/plan/code×3/review/wire (${build1.stages.length})`);
 
 // Sarvam received the skill pack + polish budget respected
 ok(sarvamSeen.some((t) => t.includes('EXPERT SKILL PACK') && t.includes('Cafe hero patterns')), 'design prompt carried the learned skill pack');
@@ -274,6 +294,7 @@ sarvamScript.length = 0;
 script((t) => t.includes('FINAL review'), { verdict: 'good' });
 script((t) => t.includes('design director') && !t.includes('FINAL review'), { ...designReply, theme: 'aurora', hero: 'centered', art: 'mesh' });
 script((t) => t.includes('conversion copywriter'), { title: 'T', headline: 'Good enough already', sub: 'Fine sub.', features: [{ icon: 'x', title: 'A', text: 'B.' }] });
+codegenScript();
 const build2 = await buildWebsite(env, store, MGR, { kind: 'landing', brief: 'A cozy bakery landing page fordaily fresh bakes and custom cakes.' }, 'https://nebula.test');
 ok(build2.ok === true && build2.stages.some((s) => s.stage === 'polish' && s.ai === false && /passed review/.test(s.detail)), 'polish verdict=good leaves copy untouched');
 

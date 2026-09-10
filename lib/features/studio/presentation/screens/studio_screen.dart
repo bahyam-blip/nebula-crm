@@ -412,7 +412,23 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         boxShadow: AppColors.cardShadow,
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(
+            'AGENT AT WORK · NO TEMPLATES',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.14,
+              color: AppColors.textTertiary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Your page is being hand-coded section by section — bespoke HTML, CSS and motion. This takes about a minute.',
+            style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textTertiary),
+          ),
+          const SizedBox(height: 14),
           for (int i = 0; i < kBuildStages.length; i++) ...[
             _stageRow(i, state.stageIndex),
             if (i < kBuildStages.length - 1)

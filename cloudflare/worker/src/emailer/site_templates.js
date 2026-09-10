@@ -67,7 +67,7 @@ export function mix(a, b, t) {
 
 /* ══ Typography — real Google-Fonts pairings ═════════════════════════ */
 
-const FONT_STACKS = {
+export const FONT_STACKS = {
   modern: {
     css: `'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`,
     google: 'Inter:wght@400;500;600;700;800',
@@ -107,7 +107,7 @@ export function fontLinks(fontKey) {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${f.google}&display=swap">`;
 }
 
-const DISPLAY_OF_FONT = {
+export const DISPLAY_OF_FONT = {
   modern: `'Inter', sans-serif`,
   grotesk: `'Space Grotesk', sans-serif`,
   serif: `'Fraunces', Georgia, serif`,

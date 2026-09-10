@@ -101,7 +101,7 @@ class StudioApiService {
       if (style != null && style.isNotEmpty) 'style': style,
       if (ctaText != null && ctaText.isNotEmpty) 'cta_text': ctaText,
       if (ctaUrl != null && ctaUrl.isNotEmpty) 'cta_url': ctaUrl,
-    }, timeoutSeconds: 150);
+    }, timeoutSeconds: 240);
     if (json['ok'] != true) {
       throw StudioApiException((json['error'] as String?) ?? 'The build did not finish.');
     }
@@ -123,7 +123,7 @@ class StudioApiService {
     final json = await _send('POST', '/v1/studio/refine', body: {
       'artifact_id': artifactId,
       'instruction': instruction,
-    }, timeoutSeconds: 150);
+    }, timeoutSeconds: 240);
     if (json['ok'] != true) {
       throw StudioApiException((json['error'] as String?) ?? 'The update did not finish.');
     }

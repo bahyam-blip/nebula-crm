@@ -81,9 +81,27 @@ function ok(cond, name, extra = '') {
 const captured = { sarvamSeen: [] };
 const sarvamScript = [];
 function sarvamReplyFor(text) {
-  for (const s of sarvamScript) if (s.match(text)) return s.reply;
+  for (const s of sarvamScript) if (s.match(text)) return typeof s.reply === 'function' ? s.reply(text) : s.reply;
   throw new Error('sarvam mock: no scripted reply for: ' + text.slice(0, 90).replace(/\n/g, ' '));
 }
+
+/* Codegen stages (Agent v7): the agent plans + hand-codes each section. */
+const codegenScript = () => [
+  { match: (t) => t.includes('Plan its information architecture'), reply: { sections: [
+      { id: 'hero', name: 'Home', goal: 'state the promise', layout: 'Statement hero with oversized headline and CTA row', content_keys: ['kicker', 'headline', 'sub', 'primary_cta', 'secondary_cta', 'hero_badges'], motion: 'staggered rise' },
+      { id: 'features', name: 'Why us', goal: 'prove it', layout: 'Asymmetric card grid', content_keys: ['features', 'stats'], motion: 'scroll reveal' },
+      { id: 'contact', name: 'Contact', goal: 'convert', layout: 'Split band with CTA and contact list', content_keys: ['cta_title', 'cta_sub', 'contact', 'primary_cta'], motion: 'slide up' },
+    ], nav: ['hero', 'features', 'contact'] } },
+  { match: (t) => t.includes('reviewing hand-coded sections'), reply: { verdicts: [{ id: 'hero', verdict: 'good' }, { id: 'features', verdict: 'good' }, { id: 'contact', verdict: 'good' }] } },
+  { match: (t) => t.includes('HAND-CODING one section'), reply: (t) => {
+      const id = /section "sec-([a-z0-9-]+)"/.exec(t)?.[1] || 'hero';
+      const headline = (/"headline":"([^"]*)"/.exec(t)?.[1] || `Hand-coded ${id}`).replace(/[<>]/g, '');
+      const sub = (/"sub":"([^"]*)"/.exec(t)?.[1] || 'Bespoke section content.').replace(/[<>]/g, '');
+      const titles = [...t.matchAll(/"title":"([^"]*)"/g)].map((m) => m[1].replace(/[<>]/g, '')).slice(0, 8);
+      const list = titles.length ? `<ul>${titles.map((x) => `<li>${x}</li>`).join('')}</ul>` : '';
+      return { __raw: `<section id="sec-${id}" data-rev><div class="wrap"><span class="kicker">${id}</span><h2>${headline}</h2><p>${sub}</p>${list}<a class="btn btn-accent" href="#sec-contact">Act</a></div></section>\n<style>#sec-${id}{padding:var(--sp6) 0}#sec-${id} h2{font-family:var(--display);font-size:clamp(30px,5vw,54px)}#sec-${id} .btn-accent:hover{transform:translateY(-2px)}@keyframes ${id}-drift{from{transform:translateY(0)}to{transform:translateY(-6px)}}/* ${'y'.repeat(40)} */</style>` };
+    } },
+];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url instanceof Request ? url.url : url);
@@ -303,17 +321,18 @@ let aiSiteId = '';
 {
   const html = '<!DOCTYPE html><html><head><title>Sunrise Bakehouse</title><style>h1{color:#d47}</style></head><body><h1>Sunrise Bakehouse</h1><p>Fresh Mumbai sourdough daily' + 'x'.repeat(600) + '</p></body></html>';
   sarvamScript.length = 0;
-  // v2 pipeline: THINK (design JSON) → WRITE (copy JSON) → engine renders.
+  // v3 pipeline: THINK → RESEARCH → WRITE → POLISH → PLAN → CODE per section → REVIEW → WIRE.
   sarvamScript.push(
-    { match: (t) => t.includes('design director'), reply: { theme: 'editorial', palette: { accent: '#b3402a' }, font: 'serif', voice: 'warm artisan', audience: 'Mumbai foodies', headline_angle: 'Fresh sourdough daily', must_have: ['menu highlights'], research_queries: [] } },
+    ...codegenScript(),
+    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'editorial', palette: { accent: '#b3402a' }, font: 'serif', voice: 'warm artisan', audience: 'Mumbai foodies', headline_angle: 'Fresh sourdough daily', must_have: ['menu highlights'], research_queries: [] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Sunrise Bakehouse', kicker: 'Bakery', headline: 'Sunrise Bakehouse', sub: 'Fresh Mumbai sourdough daily.', primary_cta: { label: 'Order now', href: 'mailto:hello@sunrise.test' }, features: [{ icon: '🥐', title: 'Baked at dawn', text: 'Croissants out of the oven by 7am.' }], contact: { email: 'hello@sunrise.test' } } },
   );
 
   const res = await buildWebsite(env, store, { uid: 'u_mgr', displayName: 'Asha', role: 'manager' },
     { title: 'Sunrise Bakehouse', kind: 'landing', brief: 'Artisan bakery in Mumbai. Fresh sourdough, croissants and filter coffee. CTA: order for pickup.' }, 'https://worker.test');
-  ok(res.ok === true && res.builder === 'ai', 'build_website AI pipeline succeeds (design + copy AI, engine render)', JSON.stringify(res).slice(0, 160));
-  ok(Array.isArray(res.stages) && res.stages.length >= 3 && res.stages.some((s) => s.stage === 'think') && res.stages.some((s) => s.stage === 'write'),
-    'build returns the stage trace (think → research → write → render)', JSON.stringify(res.stages));
+  ok(res.ok === true && res.builder === 'ai', 'build_website AI codegen pipeline succeeds (agent hand-coded the page)', JSON.stringify(res).slice(0, 160));
+  ok(Array.isArray(res.stages) && res.stages.some((s) => s.stage === 'think') && res.stages.some((s) => s.stage === 'write') && res.stages.some((s) => String(s.stage).startsWith('code:')),
+    'build returns the stage trace (think → write → code:<section> → wire)', JSON.stringify(res.stages));
   ok(/^https:\/\/worker\.test\/sites\/s_[a-z0-9]+$/.test(res.url || ''), 'returns public URL', res.url);
   aiSiteId = res.artifact_id;
 
@@ -323,7 +342,7 @@ let aiSiteId = '';
   ok(served.headers.get('Content-Type').includes('text/html'), 'served as text/html');
   ok(servedText.includes('Baked at dawn') && servedText.includes('viewport'), 'engine page carries AI copy + mobile viewport');
 
-  // Fallback: AI garbage at every stage → deterministic design + copy, still shipped
+  // Fallback: AI garbage at every stage → engine fallback, still shipped
   sarvamScript.length = 0;
   sarvamScript.push(
     { match: (t) => t.includes('design director'), reply: 'I cannot do that today.' },
@@ -331,7 +350,7 @@ let aiSiteId = '';
   );
   const fb = await buildWebsite(env, store, { uid: 'u_mgr', displayName: 'Asha', role: 'manager' },
     { title: 'Diwali Offer', kind: 'promo', brief: 'Twenty percent off every gift hamper this Diwali. Family packs available. Order by Friday for delivery before the festival weekend.' }, 'https://worker.test');
-  ok(fb.ok === true && fb.builder === 'ai+engine', 'AI failure degrades to deterministic design+copy — build NEVER fails', JSON.stringify({ builder: fb.builder, ok: fb.ok }));
+  ok(fb.ok === true && fb.builder === 'signature', 'AI failure degrades to the deterministic engine — build NEVER fails', JSON.stringify({ builder: fb.builder, ok: fb.ok }));
   const fbHtml = await (await serveAgentSite(new Request(fb.url), env, `/sites/${fb.artifact_id}`)).text();
   ok(fbHtml.includes('Diwali Offer') && fbHtml.includes('<!DOCTYPE html>') && fbHtml.includes('</html>'), 'fallback site is complete branded HTML');
   ok(!fbHtml.includes('```') && !fbHtml.toLowerCase().includes('doctype]'), 'fallback page never leaks fences or model chatter');

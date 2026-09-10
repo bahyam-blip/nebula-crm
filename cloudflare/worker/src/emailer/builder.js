@@ -1,21 +1,23 @@
 /**
- * Agent BUILDER v2 — the Studio build engine (designer pipeline).
+ * Agent BUILDER v3 — the Studio build engine (AI code generation).
  *
- *   describe → THINK (design brief) → RESEARCH (live web) → WRITE (copy)
- *            → RENDER (deterministic premium templates) → HOST (R2 + URL)
+ *   describe → THINK (art direction) → RESEARCH (live web) → WRITE (copy)
+ *            → POLISH (copy review) → PLAN (architecture) → CODE (bespoke
+ *            HTML+CSS per section, AI hand-written) → REVIEW (director)
+ *            → WIRE (assembly) → HOST (R2 + URL)
  *
  * v1 asked the model for a whole website in one call and saved whatever
  * came back — markdown fences, truncation and model chatter ended up
- * SERVED AS the site (see the user's screenshots). v2 fixes that class
- * of failure permanently:
- *   • the model only ever writes small JSON (brief, copy) or a bounded
- *     webapp document — every path passes extractSiteHtml()
- *   • marketing-site kinds render through site_templates.js, which
- *     cannot produce malformed pages
- *   • refine_site() iterates an existing build (versioned, non-destructive)
+ * SERVED AS the site (see the user's screenshots). v2 fixed that with a
+ * deterministic render engine — but then EVERY site shipped the same
+ * theme skeleton ("building with templates", per the user). v3 keeps v2's
+ * discipline and restores real authorship: the AI hand-writes each
+ * section's HTML+CSS inside a strict contract (small calls, validated,
+ * sanitized); site_templates.js is demoted to the fallback so a build
+ * can never fail or serve garbage.
  *
  * Artifacts: sites/<id>.html (latest) + sites/<id>.v<n>.html snapshots,
- * plan stored at agent:siteplan:<id> so refine re-renders without a full
+ * plan stored at agent:siteplan:<id> so refine re-codes without a full
  * rebuild. Served publicly at GET /sites/<id> (?v=N for a snapshot).
  */
 
@@ -23,6 +25,7 @@ import { sarvamChat } from './sarvam.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
 import { designBrief, researchFacts, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
+import { codegenSite } from './codegen.js';
 import { skillsForDomain } from './skills.js';
 import { rateLimit, sha256Hex } from './guard.js';
 import { esc } from './htmlutil.js';
@@ -242,7 +245,20 @@ async function polishCopy(env, { kind, content, brand, skillsBlock }) {
   }
 }
 
-async function buildViaDesigner(env, store, uid, { kind, title, brief, style, ctaArgs, brand }) {
+/**
+ * MARKETING-KIND PIPELINE (Agent v7) — the agent works like a real studio:
+ *
+ *   skills → THINK (art direction) → RESEARCH (live web) → WRITE (copy)
+ *          → POLISH (director copy review)
+ *          → PLAN (information architecture) → CODE (hand-written HTML+CSS
+ *          per section) → REVIEW (director code review) → WIRE (assembly)
+ *
+ * codegenSite() THROWS only when the code stage cannot produce a viable
+ * page; then — and only then — renderSite() (the deterministic template
+ * engine) ships the page so a build can never fail. Templates are the
+ * safety net, never the product.
+ */
+async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaArgs, brand }) {
   const stages = [];
 
   // 0. SKILLS — load the expert skill pack (seeded + everything the agent
@@ -286,11 +302,44 @@ async function buildViaDesigner(env, store, uid, { kind, title, brief, style, ct
     stages.push({ stage: 'polish', ok: true, ai: false, detail: 'deterministic copy — review skipped' });
   }
 
-  // 5. RENDER — deterministic assembly (cannot fail malformed).
-  const html = renderSite({ kind, design: thought.design, content, brand });
-  stages.push({ stage: 'render', ok: true, ai: false, detail: `${thought.design.themeLabel} · ${thought.design.art} art` });
-
-  return { html, content, design: thought.design, stages, researched: Boolean(facts), skills: designSkills.learnedCount };
+  // 5-8. PLAN → CODE → REVIEW → WIRE — the agent hand-writes the page.
+  try {
+    const cg = await codegenSite(env, {
+      kind,
+      brief,
+      brand,
+      thought,
+      content,
+      skillsBlock: designSkills.block,
+      onStage: (s) => stages.push(s),
+    });
+    return {
+      html: cg.html,
+      content,
+      design: thought.design,
+      stages,
+      researched: Boolean(facts),
+      skills: designSkills.learnedCount,
+      engine: 'codegen',
+      sections: cg.plan.sections,
+      nav: cg.plan.nav,
+    };
+  } catch (e) {
+    console.warn('[builder] codegen → engine fallback:', e?.message || e);
+    stages.push({ stage: 'render', ok: true, ai: false, detail: 'engine fallback — deterministic render' });
+    const html = renderSite({ kind, design: thought.design, content, brand });
+    return {
+      html,
+      content,
+      design: thought.design,
+      stages,
+      researched: Boolean(facts),
+      skills: designSkills.learnedCount,
+      engine: 'template',
+      sections: null,
+      nav: null,
+    };
+  }
 }
 
 /* ── The build_website tool / Studio build endpoint ─────────────────── */
@@ -327,14 +376,20 @@ export async function buildWebsite(env, store, user, args, origin = '') {
         { stage: 'render', ok: true, ai: false, detail: 'sanitized + hosted' },
       ];
     } else {
-      const r = await buildViaDesigner(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand });
+      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand });
       html = r.html;
-      // 'ai' = the AI led design + copy. The polish stage's ai flag means
-      // "director improved something", so it doesn't gate the label.
+      // 'ai' = the AI led design + copy AND hand-wrote the page code.
+      // 'ai+engine' = AI design/copy with the deterministic engine render
+      // (codegen fallback). The polish stage's ai flag means "director
+      // improved something", so it doesn't gate the label.
       const aiStage = (name) => r.stages.find((s) => s.stage === name)?.ai === true;
-      builder = aiStage('think') && aiStage('write') ? 'ai' : 'ai+engine';
+      builder = r.engine === 'codegen' ? 'ai' : aiStage('think') && aiStage('write') ? 'ai+engine' : 'signature';
       stages = r.stages;
-      plan = { kind, title: effTitle, brief: brief.slice(0, 4000), style, design: r.design, content: r.content };
+      plan = {
+        kind, title: effTitle, brief: brief.slice(0, 4000), style,
+        design: r.design, content: r.content,
+        engine: r.engine, sections: r.sections, nav: r.nav,
+      };
     }
   } catch (e) {
     // The pipeline is designed not to throw; this is the last-resort net.
@@ -408,6 +463,9 @@ export async function refineSite(env, store, user, args, origin = '') {
 
   let html, version, note = 'updated from your instruction';
   let content, design;
+  let nextEngine = plan?.engine || null;
+  let nextSections = plan?.sections || null;
+  let nextNav = plan?.nav || null;
 
   if (kind === 'webapp') {
     // Webapps are AI-coded documents — rebuild compact with the instruction.
@@ -419,6 +477,37 @@ export async function refineSite(env, store, user, args, origin = '') {
     });
     html = r.html;
     version = (Number(doc.version) || 1) + 1;
+  } else if (plan?.engine === 'codegen' && Array.isArray(plan?.sections) && plan?.design?.theme) {
+    // CODEGEN site: apply the instruction to the copy, then RE-CODE the
+    // page with the SAME section architecture — a real iteration, not a
+    // re-render. Falls back to the template engine if the re-code fails.
+    const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand });
+    content = r.content;
+    design = plan.design;
+    if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
+    content = applyCtaOverrides(content, { cta_text: args.cta_text, cta_url: args.cta_url });
+    const thought = { design, headlineAngle: '', mustHave: [], queries: [], ai: false };
+    try {
+      const cg = await codegenSite(env, {
+        kind,
+        brief: `${brief || title}\n\nUPDATE REQUEST: ${instruction}`,
+        brand,
+        thought,
+        content,
+        preplanned: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4), ai: false },
+      });
+      html = cg.html;
+      nextSections = cg.plan.sections;
+      nextNav = cg.plan.nav;
+      note = 're-coded from your instruction';
+    } catch (e) {
+      console.warn('[builder] refine codegen → engine fallback:', e?.message || e);
+      html = renderSite({ kind, design, content, brand }).trim();
+      nextEngine = 'template';
+      nextSections = null;
+      nextNav = null;
+    }
+    version = (Number(doc.version) || 1) + 1;
   } else {
     if (plan?.content) {
       // Fast path: re-render from the stored plan with the instruction applied.
@@ -428,14 +517,18 @@ export async function refineSite(env, store, user, args, origin = '') {
       if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
       content = applyCtaOverrides(content, { cta_text: args.cta_text, cta_url: args.cta_url });
     } else {
-      // Legacy artifact (v1 build, no plan) → full pipeline with the
-      // original brief + instruction folded in.
+      // Legacy artifact (pre-codegen build, no plan) → full pipeline with
+      // the original brief + instruction folded in.
       const fullBrief = `${brief || doc.title}\n\nUPDATE REQUEST: ${instruction}`;
-      const r = await buildViaDesigner(env, store, user?.uid || '', { kind, title, brief: fullBrief, style, ctaArgs: {}, brand });
+      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title, brief: fullBrief, style, ctaArgs: {}, brand });
       content = r.content;
       design = r.design;
+      nextEngine = r.engine;
+      nextSections = r.sections;
+      nextNav = r.nav;
+      if (r.engine === 'codegen') html = r.html.trim(); // already a final coded page
     }
-    html = renderSite({ kind, design, content, brand }).trim();
+    if (!html) html = renderSite({ kind, design, content, brand }).trim();
     version = (Number(doc.version) || 1) + 1;
   }
   if (html.length > MAX_SITE_BYTES) html = html.slice(0, MAX_SITE_BYTES) + '\n<!-- truncated -->';
@@ -461,7 +554,7 @@ export async function refineSite(env, store, user, args, origin = '') {
   if (store) {
     const nextPlan = kind === 'webapp'
       ? { kind, title, brief: `${plan?.brief || ''}\n\nUPDATE REQUEST: ${instruction}`.trim(), style }
-      : { kind, title, brief, style, design, content };
+      : { kind, title, brief, style, design, content, engine: nextEngine, sections: nextSections, nav: nextNav };
     await store.put(`agent:siteplan:${id}`, JSON.stringify(nextPlan)).catch(() => {});
     await putArtifact(store, user?.uid || '', {
       id, kind, title, url: doc.url || (origin ? `${origin}/sites/${id}` : `/sites/${id}`),
