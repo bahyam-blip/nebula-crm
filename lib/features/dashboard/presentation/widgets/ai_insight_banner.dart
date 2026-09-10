@@ -64,7 +64,7 @@ class AiInsightBanner extends ConsumerWidget {
             const SizedBox(height: 6),
             Text(
               insight.summary,
-              style: context.textTheme.bodySmall
+              style: AppTypography.textTheme.bodySmall
                   ?.copyWith(color: AppColors.textSecondary, height: 1.5),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
@@ -80,7 +80,7 @@ class AiInsightBanner extends ConsumerWidget {
                 const SizedBox(width: 4),
                 Text(
                   insight.confidenceLabel,
-                  style: context.textTheme.labelSmall?.copyWith(
+                  style: AppTypography.textTheme.labelSmall?.copyWith(
                     color: AppColors.textTertiary,
                   ),
                 ),

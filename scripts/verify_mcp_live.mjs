@@ -91,7 +91,7 @@ async function main() {
 
   const list = await mcpRpc({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, grant);
   const tools = (list.body?.result?.tools || []).map((t) => t.name);
-  ok(tools.length === 23, `tools/list → 23 tools for a salesRep (+refine_site +plan_task +list_skills +learn_skill; got ${tools.length})`);
+  ok(tools.length === 24, `tools/list → 24 tools for a salesRep (write-tier + plan_task + list_skills + learn_skill + supabase_sql; got ${tools.length})`);
   ok(['build_website', 'web_search', 'web_fetch', 'save_note', 'list_artifacts', 'create_email_task', 'search_contacts'].every((n) => tools.includes(n)),
     'builder + research + CRM + email tools all exposed');
 
