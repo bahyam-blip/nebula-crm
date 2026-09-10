@@ -38,7 +38,7 @@ import { sarvamChat } from './sarvam.js';
 import { hex, lum, mix, FONT_STACKS, DISPLAY_OF_FONT } from './site_templates.js';
 import { esc, safeHref } from './htmlutil.js';
 
-const SECTION_AI_TOKENS = 1500;
+const SECTION_AI_TOKENS = 1900;
 const PLAN_AI_TOKENS = 900;
 const REVIEW_AI_TOKENS = 500;
 const MAX_SECTIONS = 6;
@@ -213,7 +213,18 @@ function sanitizeSectionHtml(html, id) {
 
 /** Validate + extract { html, css } from a model answer. Throws on garbage. */
 export function parseSection(raw, id) {
-  const text = String(raw || '');
+  let text = String(raw || '').trim();
+
+  // 0. Prefer a fenced block containing the section — sarvam-105b loves
+  //    markdown fences even when told not to use them.
+  const fences = [...text.matchAll(/```(?:html|HTML)?\s*\n?([\s\S]*?)```/g)];
+  for (const f of fences) {
+    if (/<section[\s>]/i.test(f[1])) {
+      text = f[1].trim();
+      break;
+    }
+  }
+
   const secOpen = /<section[\s>]/i.exec(text);
   if (!secOpen) throw new Error('no <section> element');
   const secClose = text.toLowerCase().lastIndexOf('</section>');
@@ -224,8 +235,17 @@ export function parseSection(raw, id) {
   if (!styleOpen) throw new Error('no <style> block');
   const afterOpen = text.slice(styleOpen.index);
   const styleClose = /<\/style\s*>/i.exec(afterOpen);
-  if (!styleClose) throw new Error('style block not closed (truncation)');
-  const css = afterOpen.slice(text.indexOf('>', styleOpen.index) - styleOpen.index + 1, styleClose.index).trim();
+  let css;
+  if (styleClose) {
+    css = afterOpen.slice(text.indexOf('>', styleOpen.index) - styleOpen.index + 1, styleClose.index).trim();
+  } else {
+    // Truncated mid-CSS: salvage complete rules up to the last '}' —
+    // safe (a rule boundary) and often rescues an otherwise good section.
+    const rawCss = afterOpen.slice(text.indexOf('>', styleOpen.index) - styleOpen.index + 1);
+    const lastBrace = rawCss.lastIndexOf('}');
+    if (lastBrace === -1) throw new Error('style block not closed (truncation)');
+    css = rawCss.slice(0, lastBrace + 1).trim();
+  }
 
   html = sanitizeSectionHtml(html, id);
 
@@ -248,7 +268,7 @@ async function codeSectionOnce(env, ctx, attempt, lastError) {
     { role: 'system', content: sectionSystemPrompt({ id: ctx.section.id, kind: ctx.kind, brand: ctx.brand }) },
     { role: 'user', content: attempt === 1
       ? sectionUserPrompt(ctx)
-      : `${sectionUserPrompt(ctx)}\n\nIMPORTANT — your previous attempt was rejected (${String(lastError || 'invalid output').slice(0, 140)}). Fix that and re-emit ONLY the <section>+<style> answer.` },
+      : `${sectionUserPrompt(ctx)}\n\nIMPORTANT — your previous attempt was rejected: ${String(lastError || 'invalid output').slice(0, 180)}.\n${/truncat|not closed|too large/i.test(String(lastError)) ? 'You ran out of output space: make the section SHORTER (less CSS, fewer elements) while keeping the required motion. ' : ''}Respond with ONLY the <section>+<style> answer — no markdown fences, no commentary.` },
   ];
   const raw = await sarvamChat(env, messages, { maxTokens: SECTION_AI_TOKENS, temperature: attempt === 1 ? 0.7 : 0.5 });
   return parseSection(raw, ctx.section.id);
@@ -266,6 +286,35 @@ export async function codeSection(env, ctx) {
     }
   }
   return null;
+}
+
+/**
+ * Engine-built section for a section the AI could not code. Deterministic,
+ * on-brand, uses the same variables + reveal contract — so one stubborn
+ * section degrades to a clean engine block instead of throwing away the
+ * whole bespoke page.
+ */
+export function engineFallbackSection(section, content, design) {
+  const title = esc(String(section.name || section.id).slice(0, 40));
+  const items = [];
+  for (const k of section.content_keys || []) {
+    const g = content[k];
+    if (Array.isArray(g)) {
+      for (const it of g.slice(0, 4)) {
+        if (it?.title) items.push(`<li><strong>${esc(String(it.title).slice(0, 60))}</strong><span>${esc(String(it.text || '').slice(0, 120))}</span></li>`);
+        else if (typeof it === 'string') items.push(`<li>${esc(it.slice(0, 90))}</li>`);
+      }
+    } else if (k === 'cta_title' && typeof g === 'string' && g) {
+      items.push(`<li><strong>${esc(g.slice(0, 60))}</strong></li>`);
+    }
+  }
+  const list = items.length ? `<ul class="s-list">${items.join('')}</ul>` : `<p class="s-sub">${esc(String(content.sub || '').slice(0, 160))}</p>`;
+  const cta = content.primary_cta?.href
+    ? `<a class="btn btn-accent" href="${safeHref(content.primary_cta.href)}">${esc(content.primary_cta.label || 'Get started')}</a>`
+    : '';
+  const html = `<section id="sec-${section.id}" data-rev><div class="wrap"><span class="kicker">${esc(String(section.id).slice(0, 16))}</span><h2>${title}</h2>${list}${cta}</div></section>`;
+  const css = `#sec-${section.id}{padding:var(--sp6) 0}#sec-${section.id} h2{font-family:var(--display);font-size:clamp(28px,4.5vw,48px);margin:var(--sp2) 0 var(--sp4)}#sec-${section.id} .s-list{list-style:none;display:grid;gap:var(--sp3)}@media(min-width:768px){#sec-${section.id} .s-list{grid-template-columns:1fr 1fr}}#sec-${section.id} .s-list li{border:1px solid var(--border);border-radius:var(--r);padding:var(--sp3);display:grid;gap:6px;background:var(--card)}#sec-${section.id} .s-list strong{font-size:16px}#sec-${section.id} .s-list span{color:var(--muted);font-size:14px}#sec-${section.id} .s-sub{color:var(--muted)}#sec-${section.id} .btn{margin-top:var(--sp4)}@keyframes ${section.id}-rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}/* engine section */`;
+  return { html, css };
 }
 
 /* ══ Stage 6 — REVIEW ════════════════════════════════════════════════ */
@@ -472,7 +521,9 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock }));
   trace('plan', true, plan.ai, `${plan.sections.length} sections planned${plan.ai ? '' : ' · classic plan'}`);
 
-  // 2. CODE — hand-write every section.
+  // 2. CODE — hand-write every section. The hero MUST be AI-coded (it is
+  //    the page's identity); any other section that fails twice degrades
+  //    to a clean engine block rather than discarding the bespoke page.
   const coded = [];
   const ctxBase = { kind, brief, brand, thought, content, design: thought.design };
   let regensLeft = MAX_REGENS;
@@ -485,9 +536,14 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
       ctx.section = { ...section, layout: `${section.layout} Keep it SIMPLER: fewer elements, cleaner grid.` };
       out = await codeSection(env, ctx);
     }
-    if (!out) throw new Error(`codegen failed at section "${section.id}" — falling back to the engine`);
+    if (!out) {
+      if (section.id === 'hero') throw new Error('codegen failed at the hero — falling back to the engine');
+      out = engineFallbackSection(section, content, thought.design);
+      trace(`code:${section.id}`, true, false, `${section.name} — engine section (AI output unusable)`);
+    } else {
+      trace(`code:${section.id}`, true, true, `${section.name} coded (${out.html.length + out.css.length} chars)`);
+    }
     coded.push({ id: section.id, ...out });
-    trace(`code:${section.id}`, true, true, `${section.name} coded (${out.html.length + out.css.length} chars)`);
   }
 
   // 3. REVIEW — director pass; flagged sections get one real regen.
