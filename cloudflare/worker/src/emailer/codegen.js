@@ -203,7 +203,11 @@ function sanitizeSectionHtml(html, id) {
     .replace(/<script[^>]*>/gi, '')
     .replace(/<iframe[\s\S]*?(<\/iframe\s*>|>)/gi, '')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\ssrc\s*=\s*(['"]?)\s*(https?:)?\/\/[^'">\s]*\1/gi, '');
+    .replace(/\ssrc\s*=\s*(['"]?)\s*(https?:)?\/\/[^'">\s]*\1/gi, '')
+    // srcset/source src with remote URLs: strip the attribute (models try
+    // to hotlink stock photos; hallucinated URLs render as broken images).
+    .replace(/\ssrcset\s*=\s*("[^"]*"|'[^']*')/gi, '')
+    .replace(/<source[^>]*>/gi, '');
   // Guarantee the section id on the root element.
   if (!new RegExp(`<section[^>]*id=["']?sec-${id}["']?`, 'i').test(h)) {
     h = h.replace(/<section/i, `<section id="sec-${id}"`);
