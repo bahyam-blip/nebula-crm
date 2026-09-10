@@ -21,7 +21,7 @@
 
 import { createStore, stateBackendName } from './emailer/state.js';
 import { loadUser } from './data.js';
-import { buildWebsite, refineSite, listArtifacts } from './emailer/builder.js';
+import { buildWebsite, refineSite, listArtifacts, startBuildRun, getRunStatus } from './emailer/builder.js';
 import {
   connectPlatform,
   connectorStatus,
@@ -63,12 +63,30 @@ async function handleStudioInner(request, env, { url, path, uid, ctx }) {
   const role = user?.role || 'viewer';
   const origin = url.origin;
 
-  /* ── build (any teammate who may write) ── */
+  /* ── build (any teammate who may write) ──
+   *
+   * Two modes (Agent v9):
+   *   wait !== false  → legacy synchronous build (MCP, chat, old clients).
+   *   wait === false  → LIVE RUN: returns a job id immediately; the team
+   *                     streams its trace to GET /v1/studio/run as every
+   *                     agent finishes a step, so the app can watch the
+   *                     real team work instead of pacing a ticker.
+   */
   if (request.method === 'POST' && path === '/v1/studio/build') {
     if (!WRITE_ROLES.includes(role)) return json({ error: `your role (${role}) cannot build sites` }, 403);
     const args = await body(request);
+    if (args?.wait === false && ctx && typeof ctx.waitUntil === 'function') {
+      const job = await startBuildRun(env, store, user, args, origin, ctx);
+      return json(job, 202);
+    }
     const result = await buildWebsite(env, store, user, args, origin);
     return json(result, result.ok ? 200 : 400);
+  }
+
+  /* ── live run status (owner-scoped) ── */
+  if (request.method === 'GET' && path === '/v1/studio/run') {
+    const run = await getRunStatus(store, uid, url.searchParams.get('id'));
+    return json(run, run.ok ? 200 : 404);
   }
 
   /* ── refine an existing build (any teammate who may write) ── */

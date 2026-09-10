@@ -403,6 +403,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   // ── Stage panel ─────────────────────────────────────────────────────
 
   Widget _stagePanel(StudioState state) {
+    final live = state.liveTrace;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -415,7 +416,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'AGENT TEAM AT WORK · NO TEMPLATES',
+            live.isEmpty ? 'AGENT TEAM ASSEMBLING · NO TEMPLATES' : 'LIVE FROM THE AGENT TEAM · NO TEMPLATES',
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w800,
@@ -425,23 +426,99 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Nine specialists — Lead, Researcher, Art Director, Copywriter, Copy Chief, Architect, Engineers, QA — hand-build your page together. This takes about a minute.',
+            live.isEmpty
+                ? 'Nine specialists — Lead, Researcher, Art Director, Copywriter, Copy Chief, Architect, Engineers, QA — hand-build your page together. This takes about a minute.'
+                : 'Streaming each agent as it works — this is the real team, not an animation. One moment more.',
             style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textTertiary),
           ),
           const SizedBox(height: 14),
-          for (int i = 0; i < kBuildStages.length; i++) ...[
-            _stageRow(i, state.stageIndex),
-            if (i < kBuildStages.length - 1)
-              Container(
-                margin: const EdgeInsets.only(left: 13),
-                width: 1.5,
-                height: 16,
-                color: i < state.stageIndex ? AppColors.success.withValues(alpha: 0.6) : AppColors.border.withValues(alpha: 0.7),
-              ),
-          ],
+          if (live.isEmpty)
+            for (int i = 0; i < kBuildStages.length; i++) ...[
+              _stageRow(i, state.stageIndex),
+              if (i < kBuildStages.length - 1)
+                Container(
+                  margin: const EdgeInsets.only(left: 13),
+                  width: 1.5,
+                  height: 16,
+                  color: i < state.stageIndex ? AppColors.success.withValues(alpha: 0.6) : AppColors.border.withValues(alpha: 0.7),
+                ),
+            ]
+          else
+            for (int i = 0; i < live.length; i++) ...[
+              _liveRow(live[i], isLast: i == live.length - 1),
+              if (i < live.length - 1)
+                Container(
+                  margin: const EdgeInsets.only(left: 13),
+                  width: 1.5,
+                  height: 14,
+                  color: AppColors.success.withValues(alpha: 0.45),
+                ),
+            ],
         ],
       ),
     ).animate().fadeIn(duration: 200.ms);
+  }
+
+  /// One REAL row from the run doc: who did what, how long it took.
+  Widget _liveRow(AgentRunRow row, {bool isLast = false}) {
+    final color = row.ok ? AppColors.success : AppColors.danger;
+    final secs = row.ms / 1000;
+    final time = secs >= 1 ? '${secs.toStringAsFixed(1)}s' : '${row.ms}ms';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 27,
+          height: 27,
+          child: isLast && !row.ok
+              ? SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: AppColors.primary,
+                    backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                  ),
+                )
+              : Icon(row.ok ? Icons.check_circle_rounded : Icons.error_rounded, color: color, size: 24),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      '${row.emoji}  ${row.agent} · ${row.action}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    time,
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textTertiary),
+                  ),
+                ],
+              ),
+              if (row.detail.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    row.detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, height: 1.35, color: AppColors.textTertiary),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ).animate().fadeIn(duration: 220.ms).slideY(begin: 0.35, end: 0, duration: 220.ms, curve: Curves.easeOutCubic);
   }
 
   Widget _stageRow(int i, int active) {

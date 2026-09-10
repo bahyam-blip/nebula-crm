@@ -6,6 +6,42 @@
 /// with credentials pulled from the server-side encrypted vault.
 library;
 
+/// One live row from the agent team's trace, streamed by the Worker while
+/// a build runs (Agent v9 live runs). The Studio shows these AS they land —
+/// the user watches the real team work, not a paced ticker.
+class AgentRunRow {
+  const AgentRunRow({
+    required this.agent,
+    required this.emoji,
+    required this.role,
+    required this.action,
+    required this.ok,
+    required this.ai,
+    required this.ms,
+    this.detail = '',
+  });
+
+  final String agent;
+  final String emoji;
+  final String role;
+  final String action;
+  final bool ok;
+  final bool ai;
+  final int ms;
+  final String detail;
+
+  factory AgentRunRow.fromMap(Map<String, dynamic> m) => AgentRunRow(
+        agent: (m['agent'] as String?) ?? 'Agent',
+        emoji: (m['emoji'] as String?) ?? '🤖',
+        role: (m['role'] as String?) ?? 'specialist',
+        action: (m['action'] as String?) ?? 'working',
+        ok: m['ok'] != false,
+        ai: m['ai'] == true,
+        ms: (m['ms'] as num?)?.toInt() ?? 0,
+        detail: (m['detail'] as String?) ?? '',
+      );
+}
+
 /// One deployment of a site artifact to an external hosting platform.
 class SiteDeployment {
   const SiteDeployment({

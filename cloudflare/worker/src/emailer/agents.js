@@ -1,5 +1,5 @@
 /**
- * AGENTS — the multi-agent runtime (Agent v8).
+ * AGENTS — the multi-agent runtime (Agent v9).
  *
  * The user asked for the open GLM-class agentic engineering pattern,
  * re-engineered into this app: not one prompt doing everything, but a
@@ -18,10 +18,17 @@
  *   • FULL TRACE         — every agent invocation is recorded (who, what,
  *     how long, outcome) and surfaced to the app: the user watches the
  *     team work, and the build response proves there was no template.
+ *   • LIVE RUN SINK      — a team run can persist its trace after EVERY
+ *     row (the live run doc), so the app polls GET /v1/studio/run and
+ *     watches the team work in real time — not a paced ticker.
+ *   • SELF-EVOLUTION     — a Reflector distills each finished build into
+ *     a reusable skill (learn_skill), so the team measurably improves
+ *     with every job it ships.
  *
  * This module is the runtime; builder.js/codegen.js/designer.js are the
  * team's job description. Agent keys: lead | researcher | director |
- * copywriter | copy_chief | architect | engineer | qa | builder.
+ * copywriter | copy_chief | architect | engineer | qa | builder |
+ * reflector.
  */
 
 import { sarvamChat } from './sarvam.js';
@@ -38,6 +45,7 @@ export const AGENT_TEAM = {
   engineer: { name: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections' },
   qa: { name: 'QA Director', emoji: '🔎', role: 'code review & rework' },
   builder: { name: 'Builder', emoji: '🚀', role: 'assembly, hosting & integrity' },
+  reflector: { name: 'Reflector', emoji: '🪞', role: 'turns every build into a lesson' },
 };
 
 /* ══ Team run — the trace bus ════════════════════════════════════════ */
@@ -48,13 +56,33 @@ export const AGENT_TEAM = {
  * (wire, host, fallbacks) are recorded directly. The run carries BOTH
  * output shapes: trace (agent rows, new) and stages (legacy rows kept
  * so existing consumers/tests stay valid).
+ *
+ * v9 LIVE SINK: pass `sink` (an async fn receiving the run doc) and it
+ * fires after every recorded row — fire-and-forget, never throws, never
+ * blocks the build. This is what makes a run watchable in real time.
  */
-export function createTeamRun(meta = {}) {
+export function createTeamRun(meta = {}, sink = null) {
+  const emit = () => {
+    if (typeof sink !== 'function') return;
+    try {
+      const out = sink(run.doc());
+      if (out && typeof out.catch === 'function') out.catch(() => {});
+    } catch { /* the trace must never break the build */ }
+  };
   const run = {
     meta, // { kind, title } — what this team is building
     startedAt: Date.now(),
     trace: [],
     stages: [],
+    doc() {
+      return {
+        meta: run.meta,
+        started_at: new Date(run.startedAt).toISOString(),
+        trace: run.trace,
+        stages: run.stages,
+        summary: run.summary(),
+      };
+    },
     record(key, action, { ok = true, ai = true, ms = 0, detail = '' } = {}) {
       const a = AGENT_TEAM[key] || { name: String(key || 'agent'), emoji: '🤖', role: 'specialist' };
       run.trace.push({
@@ -67,9 +95,11 @@ export function createTeamRun(meta = {}) {
         ms: Math.max(1, Math.round(ms || 0)),
         detail: String(detail || '').slice(0, 140),
       });
+      emit();
     },
     stage(name, ok, ai, detail) {
       run.stages.push({ stage: name, ok: ok !== false, ai: ai === true, detail: String(detail || '').slice(0, 140) });
+      emit();
     },
     summary() {
       const aiCalls = run.trace.filter((t) => t.ai).length;
@@ -112,7 +142,7 @@ export async function runAgent(env, team, key, action, messages, opts = {}, deta
 
 const LEAD_SYSTEM = `You are the Lead of an elite multi-agent web studio. Your team (researcher, art director, copywriter, architect, engineers, QA) is about to build a bespoke page. Read the brief and write the EXECUTION PLAN that makes every specialist sharp. Respond with ONLY JSON:
 
-{"audience":"who this page must convince, 5-10 words","research_focus":"the single most valuable thing to learn from the live web for THIS business, one line","queries":["0-2 short, specific web searches"],"sections_target":4,"emphasis":["2-4 parts of this page that deserve the most craft, e.g. 'the menu section must feel tactile'"],"risks":["1-3 ways this build could feel generic or wrong for this audience"],"tone_note":"one line of direction every writer on the team follows"}
+{"audience":"who this page must convince, 5-10 words","page_goal":"the ONE thing this page must achieve, 3-8 words (book tables, sell the course, win trust)","research_focus":"the single most valuable thing to learn from the live web for THIS business, one line","queries":["0-2 short, specific web searches"],"sections_target":4,"emphasis":["2-4 parts of this page that deserve the most craft, e.g. 'the menu section must feel tactile'"],"risks":["1-3 ways this build could feel generic or wrong for this audience"],"tone_note":"one line of direction every writer on the team follows"}
 
 Rules:
 - Decide from the BRIEF, not habit: a tiffin service and a law firm need different teams' energy.
@@ -130,8 +160,17 @@ export function defaultLeadPlan({ kind, brief, brand }) {
     report: ['the findings must read like research, not filler', 'table + sources credibility'],
     webapp: ['one core interaction done beautifully', 'fast, obvious, thumb-friendly'],
   };
+  const kindGoal = {
+    landing: 'win trust and drive the first contact',
+    promo: 'drive offer redemptions',
+    event: 'fill the room with registrations',
+    portfolio: 'get commissioned for the next project',
+    report: 'make the findings impossible to ignore',
+    webapp: 'make the core action effortless',
+  };
   return {
     audience: `${kind === 'webapp' ? 'people who need this tool daily' : "the business's real customers"}`,
+    page_goal: kindGoal[kind] || kindGoal.landing,
     research_focus: `what customers in this market expect from a ${kind === 'webapp' ? 'tool like this' : 'business like this'}`,
     queries: [],
     sections_target: 4,
@@ -173,6 +212,7 @@ export async function leadPlan(env, { kind, brief, brand, style, team = null }) 
     );
     const plan = {
       audience: String(j.audience || '').slice(0, 140),
+      page_goal: String(j.page_goal || '').slice(0, 90),
       research_focus: String(j.research_focus || '').slice(0, 200),
       queries: Array.isArray(j.queries) ? j.queries.map((q) => String(q).slice(0, 120)).filter(Boolean).slice(0, 2) : [],
       sections_target: [4, 5].includes(Number(j.sections_target)) ? Number(j.sections_target) : 4,
@@ -193,9 +233,59 @@ export function leadBlock(lead) {
   if (!lead) return '';
   const lines = [
     lead.audience ? `AUDIENCE: ${lead.audience}` : '',
+    lead.page_goal ? `THE PAGE MUST: ${lead.page_goal}` : '',
     lead.tone_note ? `TONE: ${lead.tone_note}` : '',
     lead.emphasis.length ? `CRAFT EMPHASIS: ${lead.emphasis.join('; ')}` : '',
     lead.risks.length ? `AVOID: ${lead.risks.join('; ')}` : '',
   ];
   return lines.filter(Boolean).join('\n');
+}
+
+/* ══ The Reflector — the self-evolution loop ═════════════════════════ */
+
+const REFLECTOR_SYSTEM = `You are the Reflector of an elite multi-agent web studio. After every finished build you extract ONE reusable, durable lesson from what the team just made, so future builds start smarter. Respond with ONLY JSON:
+
+{"title":"skill title, 5-12 words, states the rule not the topic","domain":"design|layout|motion|copy|ux|engineering|marketing","body":"2-4 sentences of RULES the team applies next time — what made THIS build work, what to always do or avoid. Concrete, not generic. Max 400 chars."}
+
+Rules:
+- Extract from the ACTUAL build below (goal, audience, sections, QA verdicts) — never generic advice.
+- If nothing was genuinely learnable, respond with {"skip":true}.
+- domain must be the single best fit.`;
+
+/**
+ * REFLECT — the post-build self-evolution step. One small call turns the
+ * finished build into a learned skill (learn_skill stores it per-user;
+ * every later build injects it back). Never throws: reflection failing
+ * must never fail the build that already succeeded. Returns the trace
+ * note, or '' when skipped/unavailable.
+ */
+export async function reflectOnBuild(env, store, uid, { lead, plan, brand, verdicts = {}, team = null }) {
+  try {
+    const digest = [
+      lead?.page_goal ? `PAGE GOAL: ${lead.page_goal}` : '',
+      lead?.audience ? `AUDIENCE: ${lead.audience}` : '',
+      lead?.tone_note ? `TONE: ${lead.tone_note}` : '',
+      `SECTIONS: ${(plan?.sections || []).map((s) => `${s.id} (${s.name}: ${s.motion || 'reveal'})`).join(', ')}`,
+      Object.keys(verdicts).length ? `QA VERDICTS: ${Object.entries(verdicts).map(([id, v]) => `${id}=${v}`).join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+    if (!digest) return '';
+    const j = await runAgent(
+      env,
+      team,
+      'reflector',
+      'learning from this build',
+      [
+        { role: 'system', content: REFLECTOR_SYSTEM },
+        { role: 'user', content: `BUILD by the team for ${brand?.name || 'the client'}:\n${digest.slice(0, 1400)}` },
+      ],
+      { json: true, maxTokens: 450, temperature: 0.4 },
+      (out) => (out?.skip ? 'nothing new worth storing' : `stored skill: ${String(out?.title || '').slice(0, 60)}`)
+    );
+    if (j?.skip || !j?.title || !j?.body) return '';
+    const { learnSkill } = await import('./skills.js');
+    const res = await learnSkill(store, uid, { title: j.title, domain: j.domain, body: j.body, slug: j.title }, { source: 'build-reflection' });
+    return res?.ok ? `skill "${res.title}" ${res.updated ? 'sharpened' : 'learned'}` : '';
+  } catch {
+    return '';
+  }
 }

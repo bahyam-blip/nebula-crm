@@ -259,7 +259,8 @@ ok(build1.stages.some((s) => s.stage === 'polish' && s.ai === true), 'polish sta
 ok(build1.stages.some((s) => s.stage === 'wire'), `wire stage assembles the hand-coded sections (${build1.stages.at(-1)?.detail})`);
 ok(build1.stages.filter((s) => String(s.stage).startsWith('code:')).length === 3, 'three sections hand-coded');
 ok(/^[0-9a-f]{64}$/.test(build1.sha256 || ''), 'build returns sha256 digest');
-ok(build1.stages.length === 11, `stage trace: lead/think/research/write/polish/plan/code×3/review/wire (${build1.stages.length})`);
+ok(build1.stages.length === 12, `stage trace: lead/think/research/write/polish/plan/code×3/review/wire/reflect (${build1.stages.length})`);
+ok(build1.stages.some((s) => s.stage === 'reflect'), 'the Reflector closes the run (v9)');
 ok(Array.isArray(build1.team) && build1.team.some((r) => r.agent === 'Lead' && r.ok) && build1.team_summary?.ai_calls >= 8, 'multi-agent team trace rides the build (v8)', JSON.stringify(build1.team_summary));
 
 // Sarvam received the skill pack + polish budget respected

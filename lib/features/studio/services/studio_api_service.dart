@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -5,6 +6,26 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/services/storage_service.dart' show kStorageBaseUrl;
 import '../models/studio_models.dart';
+
+/// The status of one live agent-team run (Agent v9).
+class StudioRunStatus {
+  const StudioRunStatus({
+    required this.status,
+    required this.trace,
+    this.title,
+    this.error,
+    this.site,
+  });
+
+  /// running | done | error | timeout
+  final String status;
+  final List<AgentRunRow> trace;
+  final String? title;
+  final String? error;
+
+  /// The finished artifact when [status] == done.
+  final StudioSite? site;
+}
 
 /// Studio API exception with a human-friendly message.
 class StudioApiException implements Exception {
@@ -84,8 +105,61 @@ class StudioApiService {
     return json;
   }
 
+  /// START a live build run (Agent v9): returns a job id immediately while
+  /// the agent team streams its trace to [pollRun]. Throws [StudioApiException]
+  /// if the server (old deployment) or network can't do async — the caller
+  /// then falls back to the legacy synchronous [buildSite].
+  Future<String> startBuild({
+    required String title,
+    required String brief,
+    required String kind,
+    String? style,
+    String? ctaText,
+    String? ctaUrl,
+  }) async {
+    final json = await _send('POST', '/v1/studio/build', body: {
+      'title': title,
+      'brief': brief,
+      'kind': kind,
+      'wait': false,
+      if (style != null && style.isNotEmpty) 'style': style,
+      if (ctaText != null && ctaText.isNotEmpty) 'cta_text': ctaText,
+      if (ctaUrl != null && ctaUrl.isNotEmpty) 'cta_url': ctaUrl,
+    }, timeoutSeconds: 30);
+    if (json['ok'] != true || (json['job_id'] as String?) == null) {
+      throw StudioApiException((json['error'] as String?) ?? 'Could not start the build.');
+    }
+    return json['job_id'] as String;
+  }
+
+  /// Poll a live run: status + every agent row so far + the finished site
+  /// when the run is done. [pollPath]/[jobId] map to GET /v1/studio/run.
+  Future<StudioRunStatus> pollRun(String jobId) async {
+    final json = await _send('GET', '/v1/studio/run?id=$jobId');
+    if (json['ok'] != true) {
+      throw StudioApiException((json['error'] as String?) ?? 'Run not found.');
+    }
+    final result = json['result'] as Map<String, dynamic>?;
+    return StudioRunStatus(
+      status: (json['status'] as String?) ?? 'running',
+      trace: ((json['trace'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((r) => AgentRunRow.fromMap(r.cast<String, dynamic>()))
+          .toList(),
+      title: json['title'] as String?,
+      error: json['error'] as String?,
+      site: result == null
+          ? null
+          : StudioSite.fromMap(<String, dynamic>{
+              ...result,
+              'id': result['artifact_id'],
+            }),
+    );
+  }
+
   /// Build a site: AI generates a complete branded page, hosted instantly
-  /// at /sites/<id>. Long timeout — generation takes a while.
+  /// at /sites/<id>. Long timeout — generation takes a while. (Legacy
+  /// synchronous mode; the live path is [startBuild] + [pollRun].)
   Future<StudioSite> buildSite({
     required String title,
     required String brief,
@@ -114,15 +188,18 @@ class StudioApiService {
   }
 
   /// Refine an existing build with a change request. Returns the updated
-  /// site (same id/URL, version bumped). Long timeout — re-render takes a
-  /// few LLM steps.
+  /// site (same id/URL, version bumped). When [sections] is non-empty the
+  /// Worker re-codes ONLY those sections (surgical refine, seconds fast)
+  /// and leaves the rest of the page byte-identical.
   Future<StudioSite> refineSite({
     required String artifactId,
     required String instruction,
+    List<String> sections = const [],
   }) async {
     final json = await _send('POST', '/v1/studio/refine', body: {
       'artifact_id': artifactId,
       'instruction': instruction,
+      if (sections.isNotEmpty) 'sections': sections,
     }, timeoutSeconds: 240);
     if (json['ok'] != true) {
       throw StudioApiException((json['error'] as String?) ?? 'The update did not finish.');

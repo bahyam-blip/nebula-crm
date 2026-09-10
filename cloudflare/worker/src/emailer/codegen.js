@@ -595,8 +595,10 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   //    (at most MAX_REGENS re-codes, sequential to keep the budget honest).
   let regensLeft = MAX_REGENS;
   let reviewed = 0;
+  let qaVerdicts = {};
   if (coded.length >= 2) {
     const review = await reviewSections(env, { kind, brand, sections: coded.map((c) => ({ ...c, ...plan.sections.find((s) => s.id === c.id) })), team });
+    qaVerdicts = review.verdicts || {};
     trace('review', true, review.ai, review.ai ? 'director reviewed the code' : 'review skipped');
     for (const c of coded) {
       if (review.verdicts[c.id] !== 'fix' || regensLeft <= 0) continue;
@@ -621,5 +623,5 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   trace('wire', true, false, `${coded.length} sections wired · fonts + reveal + nav`);
   if (team) team.record('builder', 'wiring & hosting the page', { ok: true, ai: false, detail: `${coded.length} sections assembled with fonts + motion` });
 
-  return { html, plan, coded, stages: { reviewed } };
+  return { html, plan, coded, stages: { reviewed, verdicts: qaVerdicts } };
 }

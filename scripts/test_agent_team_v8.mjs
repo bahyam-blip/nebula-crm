@@ -106,7 +106,8 @@ function memStore() {
 section('AGENT ROSTER');
 {
   const keys = Object.keys(AGENT_TEAM);
-  ok(keys.length === 9, `nine named specialists on the team (${keys.join(', ')})`);
+  ok(keys.length === 10, `ten named specialists on the team (${keys.join(', ')})`);
+  ok(AGENT_TEAM.reflector?.role.toLowerCase().includes('lesson'), 'the Reflector turns builds into lessons');
   ok(keys.every((k) => AGENT_TEAM[k].name && AGENT_TEAM[k].emoji && AGENT_TEAM[k].role), 'every agent has name, emoji and role');
   ok(AGENT_TEAM.lead.role.includes('orchestrator'), 'the Lead is the orchestrator');
   ok(AGENT_TEAM.engineer.role.toLowerCase().includes('hand-codes'), 'the Engineer hand-codes');

@@ -1,10 +1,18 @@
 /**
- * Agent BUILDER v3 — the Studio build engine (AI code generation).
+ * Agent BUILDER v9 — the Studio build engine (AI code generation).
  *
- *   describe → THINK (art direction) → RESEARCH (live web) → WRITE (copy)
- *            → POLISH (copy review) → PLAN (architecture) → CODE (bespoke
- *            HTML+CSS per section, AI hand-written) → REVIEW (director)
- *            → WIRE (assembly) → HOST (R2 + URL)
+ *   describe → LEAD (team plan) → THINK (art direction) → RESEARCH
+ *            (intelligence) → WRITE (copy) → POLISH (copy review) →
+ *            PLAN (architecture) → CODE (bespoke HTML+CSS per section,
+ *            AI hand-written, parallel) → REVIEW (director) → WIRE
+ *            (assembly) → REFLECT (self-evolution) → HOST (R2 + URL)
+ *
+ * v9 additions: the run can stream its team trace LIVE (sink → run doc
+ * → GET /v1/studio/run), the Reflector distills every finished build
+ * into a learned skill (the team gets measurably smarter per job), and
+ * refine accepts a `sections` subset for SURGICAL re-codes — only the
+ * named sections are re-written, the rest are byte-identical stored
+ * fragments, so "fix the hero" takes seconds, not a full rebuild.
  *
  * v1 asked the model for a whole website in one call and saved whatever
  * came back — markdown fences, truncation and model chatter ended up
@@ -22,11 +30,11 @@
  */
 
 import { sarvamChat } from './sarvam.js';
-import { createTeamRun, leadPlan, runAgent } from './agents.js';
+import { createTeamRun, leadPlan, runAgent, reflectOnBuild } from './agents.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
-import { designBrief, researchFacts, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
+import { designBrief, researchIntelligence, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
-import { codegenSite } from './codegen.js';
+import { codegenSite, codeSection, reviewSections, assembleSite } from './codegen.js';
 import { skillsForDomain } from './skills.js';
 import { rateLimit, sha256Hex } from './guard.js';
 import { esc } from './htmlutil.js';
@@ -35,6 +43,8 @@ const SITE_KINDS = ['landing', 'promo', 'event', 'portfolio', 'webapp', 'report'
 const ARTIFACT_LIST_CAP = 60;
 const MAX_SITE_BYTES = 400_000;
 const RESEARCH_KINDS = new Set(['landing', 'promo', 'event', 'portfolio', 'report']);
+const RUN_TIMEOUT_MS = 300_000; // a live run older than this reports timeout
+const CODED_CAP = 5; // stored coded fragments per plan (matches MAX_SECTIONS)
 
 /* ── Sanitizer for AI-authored documents (webapps) ────────────────── */
 
@@ -271,8 +281,8 @@ async function polishCopy(env, { kind, content, brand, skillsBlock, team = null 
  * engine) ships the page so a build can never fail. Templates are the
  * safety net, never the product.
  */
-async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaArgs, brand }) {
-  const team = createTeamRun({ kind, title });
+async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaArgs, brand, sink = null }) {
+  const team = createTeamRun({ kind, title }, sink);
 
   // 0. LEAD — the orchestrator reads the brief and plans the run (the
   //    AI call + its fallback both land in the team trace).
@@ -280,7 +290,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   team.stage('lead', true, lead.ai, lead.ai ? `team plan: ${lead.sections_target} sections · ${String(lead.audience || '').slice(0, 50)}` : 'classic plan');
 
   // 1. SKILLS — load the expert skill pack (seeded + everything the agent
-  //    has learned live). Every build gets smarter over time.
+  //    has learned live, INCLUDING lessons the Reflector stored after
+  //    earlier builds). Every build starts smarter than the last.
   const designSkills = await skillsForDomain(store, uid, 'design', { maxChars: 1100 });
   const copySkills = await skillsForDomain(store, uid, 'copy', { maxChars: 700 });
 
@@ -288,19 +299,23 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block, lead, team });
   team.stage('think', true, thought.ai, `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero`);
 
-  // 3. RESEARCH — the Researcher gathers live facts (never fails the build).
-  //    Lead queries merge with the director's (deduped, capped) — the
-  //    orchestrator decided what is worth learning; the director may add.
+  // 3. RESEARCH — the Researcher gathers live facts and SYNTHESIZES them
+  //    into market intelligence (v9: an agent that thinks, not a fetch).
+  //    Lead queries merge with the director's (deduped, capped). Never
+  //    fails the build: web down or synthesis down → raw facts → brief.
   const queries = [...new Set([...(lead.queries || []), ...thought.queries])].slice(0, 2);
   let facts = '';
+  let researchAi = false;
   if (RESEARCH_KINDS.has(kind) && queries.length) {
-    facts = await researchFacts(queries);
+    const ri = await researchIntelligence(env, { queries, brief, brand, team });
+    facts = ri.block;
+    researchAi = ri.ai;
     team.record('researcher', 'scanning the live web', {
       ok: true,
-      ai: Boolean(facts),
-      detail: facts ? `market facts found for "${queries[0]}"` : 'web unreachable — proceeding on the brief',
+      ai: false, // synthesis already recorded its own runAgent row
+      detail: facts ? (researchAi ? `${queries.length} search(es) distilled into intelligence` : `raw market facts found for "${queries[0]}"`) : 'web unreachable — proceeding on the brief',
     });
-    team.stage('research', true, Boolean(facts), facts ? queries[0] : 'skipped (web unreachable)');
+    team.stage('research', true, Boolean(facts), facts ? (researchAi ? 'market intelligence synthesized' : queries[0]) : 'skipped (web unreachable)');
   } else {
     team.record('researcher', 'scanning the live web', { ok: true, ai: false, detail: 'not needed for this build' });
     team.stage('research', true, thought.ai, 'not needed for this build');
@@ -337,6 +352,23 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       lead,
       team,
     });
+
+    // 10. REFLECT — the Reflector distills this finished build into a
+    //     learned skill so the NEXT build starts smarter (v9
+    //     self-evolution; skipped on fallback renders — nothing bespoke
+    //     to learn from there). Never throws, never blocks the return.
+    let reflected = '';
+    if (store) {
+      reflected = await reflectOnBuild(env, store, uid, {
+        lead,
+        plan: cg.plan,
+        brand,
+        verdicts: cg.stages?.verdicts || {},
+        team,
+      });
+      team.stage('reflect', true, Boolean(reflected), reflected || 'reflection skipped');
+    }
+
     return {
       html: cg.html,
       content,
@@ -349,6 +381,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       engine: 'codegen',
       sections: cg.plan.sections,
       nav: cg.plan.nav,
+      coded: cg.coded,
+      reflected,
     };
   } catch (e) {
     console.warn('[builder] codegen → engine fallback:', e?.message || e);
@@ -373,7 +407,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
 
 /* ── The build_website tool / Studio build endpoint ─────────────────── */
 
-export async function buildWebsite(env, store, user, args, origin = '') {
+export async function buildWebsite(env, store, user, args, origin = '', { sink = null } = {}) {
   const kind = SITE_KINDS.includes(String(args.kind)) ? String(args.kind) : 'landing';
   const title = String(args.title || '').trim().slice(0, 120);
   const brief = String(args.brief || args.instruction || '').trim().slice(0, 4000);
@@ -393,7 +427,7 @@ export async function buildWebsite(env, store, user, args, origin = '') {
   const rl = await rateLimit(store, user?.uid || '', 'build_website');
   if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
 
-  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null;
+  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '';
   try {
     if (kind === 'webapp') {
       const r = await buildWebapp(env, { title: effTitle, brief, style, brand });
@@ -406,7 +440,7 @@ export async function buildWebsite(env, store, user, args, origin = '') {
       ];
       teamTrace = [{ agent: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections', action: 'coding the single-file web app', ok: builder === 'ai', ai: builder === 'ai', ms: 0, detail: builder === 'ai' ? 'app hand-coded in one file' : 'signature app shell' }];
     } else {
-      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand });
+      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand, sink });
       html = r.html;
       // 'ai' = the AI led design + copy AND hand-wrote the page code.
       // 'ai+engine' = AI design/copy with the deterministic engine render
@@ -417,10 +451,16 @@ export async function buildWebsite(env, store, user, args, origin = '') {
       stages = r.stages;
       teamTrace = r.team || [];
       teamSummary = r.teamSummary || null;
+      reflected = r.reflected || '';
       plan = {
         kind, title: effTitle, brief: brief.slice(0, 4000), style,
         design: r.design, content: r.content,
         engine: r.engine, sections: r.sections, nav: r.nav,
+        // Coded fragments (v9) — the raw material for surgical refines:
+        // "recode just the hero" re-uses every other fragment as-is.
+        coded: Array.isArray(r.coded)
+          ? r.coded.slice(0, CODED_CAP).map((c) => ({ id: c.id, html: c.html, css: c.css }))
+          : null,
       };
     }
   } catch (e) {
@@ -467,6 +507,7 @@ export async function buildWebsite(env, store, user, args, origin = '') {
     stages,
     team: teamTrace,
     team_summary: teamSummary,
+    reflected,
     note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
   };
 }
@@ -500,8 +541,31 @@ export async function refineSite(env, store, user, args, origin = '') {
   let nextEngine = plan?.engine || null;
   let nextSections = plan?.sections || null;
   let nextNav = plan?.nav || null;
+  let nextCoded = Array.isArray(plan?.coded) ? plan.coded : null;
   const team = createTeamRun({ kind, title: `refine: ${title}` });
-  team.record('lead', 'reading the change request', { ok: true, ai: false, detail: instruction.slice(0, 90) });
+
+  // v9 SURGICAL REFINE — the caller may name a subset of sections to
+  // re-code ("fix just the hero"). Everything not named is re-used from
+  // the stored coded fragments byte-identical, so a targeted change
+  // costs one section's AI calls, not a whole page rebuild.
+  const storedCoded = Array.isArray(plan?.coded) ? plan.coded : null;
+  const targetsRaw = Array.isArray(args.sections)
+    ? args.sections.map((s) => String(s).toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean)
+    : [];
+  const targets = [...new Set(targetsRaw)]
+    .filter((t) => Array.isArray(plan?.sections) && plan.sections.some((s) => s.id === t))
+    .slice(0, 3);
+  const surgical = Boolean(
+    targets.length &&
+    storedCoded &&
+    plan?.engine === 'codegen' &&
+    targets.every((t) => storedCoded.some((c) => c.id === t))
+  );
+  if (surgical) {
+    team.record('lead', 'reading the change request', { ok: true, ai: false, detail: `surgical: ${targets.join(', ')} · ${instruction.slice(0, 70)}` });
+  } else {
+    team.record('lead', 'reading the change request', { ok: true, ai: false, detail: instruction.slice(0, 90) });
+  }
 
   if (kind === 'webapp') {
     // Webapps are AI-coded documents — rebuild compact with the instruction.
@@ -512,37 +576,102 @@ export async function refineSite(env, store, user, args, origin = '') {
       brand,
     });
     html = r.html;
+    nextCoded = null;
     version = (Number(doc.version) || 1) + 1;
   } else if (plan?.engine === 'codegen' && Array.isArray(plan?.sections) && plan?.design?.theme) {
     // CODEGEN site: apply the instruction to the copy, then RE-CODE the
-    // page with the SAME section architecture — a real iteration, not a
-    // re-render. Falls back to the template engine if the re-code fails.
+    // page — SURGICALLY when a valid `sections` subset is given (only
+    // named sections are re-written; the rest come from the stored
+    // fragments byte-identical), otherwise as a full re-code with the
+    // SAME section architecture. Both are real iterations, not
+    // re-renders; the template engine remains the never-fail net.
     const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand, team });
     content = r.content;
     design = plan.design;
     if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
     content = applyCtaOverrides(content, { cta_text: args.cta_text, cta_url: args.cta_url });
     const thought = { design, headlineAngle: '', mustHave: [], queries: [], ai: false };
+    const updateBrief = `${brief || title}\n\nUPDATE REQUEST: ${instruction}`;
     try {
-      const cg = await codegenSite(env, {
-        kind,
-        brief: `${brief || title}\n\nUPDATE REQUEST: ${instruction}`,
-        brand,
-        thought,
-        content,
-        preplanned: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4), ai: false },
-        team,
-      });
-      html = cg.html;
-      nextSections = cg.plan.sections;
-      nextNav = cg.plan.nav;
-      note = 're-coded from your instruction';
+      if (surgical) {
+        const coded = storedCoded.map((c) => ({ ...c }));
+        const recoded = [];
+        let viable = true;
+        for (const t of targets) {
+          const section = plan.sections.find((s) => s.id === t);
+          const ctx = { kind, brief: updateBrief, brand, thought, content, design, team, section };
+          let out = await codeSection(env, ctx);
+          if (!out) {
+            // One director-forced simpler redo before giving up on surgical.
+            ctx.section = { ...section, layout: `${section.layout} Keep it SIMPLER: fewer elements, cleaner grid.` };
+            out = await codeSection(env, ctx);
+          }
+          if (!out) { viable = false; break; }
+          recoded.push({ id: t, out });
+        }
+        if (viable) {
+          // QA review scoped to the re-coded subset, one bounded rework each.
+          const review = await reviewSections(env, {
+            kind,
+            brand,
+            sections: recoded.map(({ id, out }) => {
+              const sec = plan.sections.find((s) => s.id === id) || {};
+              return { id, name: sec.name || id, goal: sec.goal || '', css: out.css };
+            }),
+            team,
+          });
+          for (const { id } of recoded) {
+            if (review.verdicts[id] !== 'fix') continue;
+            const section = plan.sections.find((s) => s.id === id);
+            const ctx = { kind, brief: updateBrief, brand, thought, content, design, team, section, critique: review.notes[id] || 'director flagged this section' };
+            const redo = await codeSection(env, ctx);
+            if (!redo) continue;
+            const at = recoded.findIndex((x) => x.id === id);
+            recoded[at] = { id, out: redo };
+          }
+          for (const { id, out } of recoded) {
+            const idx = coded.findIndex((c) => c.id === id);
+            if (idx >= 0) coded[idx] = { id, html: out.html, css: out.css };
+          }
+          html = assembleSite({
+            design,
+            brand,
+            content,
+            coded,
+            plan: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4) },
+            kind,
+          }).trim();
+          nextSections = plan.sections;
+          nextNav = plan.nav || plan.sections.map((s) => s.id).slice(0, 4);
+          nextCoded = coded;
+          note = `surgical re-code of ${targets.join(' + ')} — every other section untouched`;
+          team.record('builder', 'wiring the surgical update', { ok: true, ai: false, detail: `${recoded.length} section(s) re-coded · rest byte-identical` });
+          team.stage('wire', true, false, `surgical: ${recoded.length} re-coded, ${coded.length - recoded.length} reused`);
+        }
+      }
+      if (!html) {
+        const cg = await codegenSite(env, {
+          kind,
+          brief: updateBrief,
+          brand,
+          thought,
+          content,
+          preplanned: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4), ai: false },
+          team,
+        });
+        html = cg.html;
+        nextSections = cg.plan.sections;
+        nextNav = cg.plan.nav;
+        nextCoded = Array.isArray(cg.coded) ? cg.coded.slice(0, CODED_CAP).map((c) => ({ id: c.id, html: c.html, css: c.css })) : null;
+        note = 're-coded from your instruction';
+      }
     } catch (e) {
       console.warn('[builder] refine codegen → engine fallback:', e?.message || e);
       html = renderSite({ kind, design, content, brand }).trim();
       nextEngine = 'template';
       nextSections = null;
       nextNav = null;
+      nextCoded = null;
     }
     version = (Number(doc.version) || 1) + 1;
   } else {
@@ -553,6 +682,7 @@ export async function refineSite(env, store, user, args, origin = '') {
       design = plan.design?.theme ? plan.design : normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, brandColor: brand.color });
       if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
       content = applyCtaOverrides(content, { cta_text: args.cta_text, cta_url: args.cta_url });
+      nextCoded = null;
     } else {
       // Legacy artifact (pre-codegen build, no plan) → full pipeline with
       // the original brief + instruction folded in.
@@ -563,6 +693,7 @@ export async function refineSite(env, store, user, args, origin = '') {
       nextEngine = r.engine;
       nextSections = r.sections;
       nextNav = r.nav;
+      nextCoded = Array.isArray(r.coded) ? r.coded.slice(0, CODED_CAP).map((c) => ({ id: c.id, html: c.html, css: c.css })) : null;
       if (r.engine === 'codegen') html = r.html.trim(); // already a final coded page
     }
     if (!html) html = renderSite({ kind, design, content, brand }).trim();
@@ -591,7 +722,7 @@ export async function refineSite(env, store, user, args, origin = '') {
   if (store) {
     const nextPlan = kind === 'webapp'
       ? { kind, title, brief: `${plan?.brief || ''}\n\nUPDATE REQUEST: ${instruction}`.trim(), style }
-      : { kind, title, brief, style, design, content, engine: nextEngine, sections: nextSections, nav: nextNav };
+      : { kind, title, brief, style, design, content, engine: nextEngine, sections: nextSections, nav: nextNav, coded: nextCoded };
     await store.put(`agent:siteplan:${id}`, JSON.stringify(nextPlan)).catch(() => {});
     await putArtifact(store, user?.uid || '', {
       id, kind, title, url: doc.url || (origin ? `${origin}/sites/${id}` : `/sites/${id}`),
@@ -614,6 +745,122 @@ export async function refineSite(env, store, user, args, origin = '') {
     team: team.trace,
     team_summary: team.summary(),
     note: `"${title}" updated to v${version} — ${note}. Same link, new look.`,
+  };
+}
+
+/* ── Live runs (v9) — watch the team work, in real time ─────────────── */
+
+/**
+ * START A LIVE BUILD RUN — async mode for the Studio. Persists a run doc
+ * (`agent:run:<jobId>`) that the team's sink updates after EVERY agent
+ * row, so GET /v1/studio/run shows the real team working in real time.
+ * The build itself continues under ctx.waitUntil; the same pipeline,
+ * rate limits and fallbacks as the synchronous path apply. When ctx is
+ * unavailable the run simply completes inline (legacy behavior).
+ */
+export async function startBuildRun(env, store, user, args, origin = '', ctx = null) {
+  const uid = user?.uid || '';
+  const kind = SITE_KINDS.includes(String(args.kind)) ? String(args.kind) : 'landing';
+  const title = String(args.title || '').trim().slice(0, 120) || 'your page';
+  const jobId = `b_${Date.now().toString(36)}${Math.floor(Math.random() * 46656).toString(36)}`;
+  const jobKey = `agent:run:${jobId}`;
+  const at = new Date().toISOString();
+
+  let latest = { id: jobId, uid, kind, title, at, status: 'running', trace: [], stages: [], summary: null, result: null, error: null };
+  // All writes for one job go through ONE queue so a trailing trace-row
+  // write can never land after the final 'done' write and resurrect
+  // status:'running' after completion.
+  let q = Promise.resolve();
+  const persist = (patch = {}) => {
+    q = q
+      .then(async () => {
+        if (!store) return;
+        latest = { ...latest, ...patch };
+        await store.put(jobKey, JSON.stringify(latest));
+      })
+      .catch(() => {});
+    return q;
+  };
+  const sink = (runDoc) => persist({
+    trace: Array.isArray(runDoc?.trace) ? runDoc.trace : [],
+    stages: Array.isArray(runDoc?.stages) ? runDoc.stages : [],
+    summary: runDoc?.summary || null,
+  });
+
+  await persist({ status: 'running' });
+
+  const run = (async () => {
+    try {
+      const result = await buildWebsite(env, store, user, args, origin, { sink });
+      await persist({
+        status: result.ok ? 'done' : 'error',
+        result: result.ok
+          ? {
+              artifact_id: result.artifact_id,
+              kind: result.kind,
+              title: result.title,
+              url: result.url,
+              builder: result.builder,
+              bytes: result.bytes,
+              sha256: result.sha256,
+              version: result.version,
+              team: result.team || [],
+              team_summary: result.team_summary || null,
+              reflected: result.reflected || '',
+              note: result.note || '',
+            }
+          : null,
+        error: result.ok ? null : String(result.error || 'the build did not finish'),
+      });
+    } catch (e) {
+      console.error('[builder] live run failed:', e?.stack || e);
+      await persist({ status: 'error', error: String(e?.message || e).slice(0, 200) });
+    }
+  })();
+
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(run);
+  else await run;
+
+  return {
+    ok: true,
+    job_id: jobId,
+    status: 'running',
+    poll: `/v1/studio/run?id=${jobId}`,
+    note: 'the team is assembling — poll the run endpoint to watch every agent work',
+  };
+}
+
+/**
+ * READ A LIVE RUN — status + the team trace so far. Owner-scoped: a run
+ * doc belongs to exactly one uid. A 'running' doc older than the run
+ * budget reports 'timeout' honestly instead of hanging the app forever.
+ */
+export async function getRunStatus(store, uid, id) {
+  const runId = String(id || '').trim();
+  if (!store || !/^[a-z0-9_]+$/i.test(runId)) return { ok: false, error: 'run not found' };
+  const doc = safeParse(await store.get(`agent:run:${runId}`));
+  if (!doc || !doc.uid || doc.uid !== uid) return { ok: false, error: 'run not found' };
+
+  const startedMs = Date.parse(doc.at || '') || 0;
+  const ageMs = Math.max(0, Date.now() - startedMs);
+  let status = doc.status === 'done' || doc.status === 'error' ? doc.status : 'running';
+  if (status === 'running' && ageMs > RUN_TIMEOUT_MS) status = 'timeout';
+
+  return {
+    ok: true,
+    id: runId,
+    status,
+    kind: doc.kind || null,
+    title: doc.title || null,
+    age_seconds: Math.round(ageMs / 1000),
+    trace: Array.isArray(doc.trace) ? doc.trace : [],
+    stages: Array.isArray(doc.stages) ? doc.stages : [],
+    summary: doc.summary || null,
+    result: doc.result || null,
+    error: doc.error || null,
+    ...(status === 'timeout'
+      ? { note: 'the run exceeded its time budget — check your sites list; the build may still have landed' }
+      : {}),
   };
 }
 

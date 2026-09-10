@@ -96,11 +96,14 @@ class _SitePreviewScreenState extends ConsumerState<SitePreviewScreen> {
   }
 
   /// Ask the agent to change the site ("bolder headline, green accent").
-  Future<void> _doRefine(String instruction) async {
+  /// [sections] limits the re-code to named sections (surgical refine) —
+  /// an empty list re-codes the whole page.
+  Future<void> _doRefine(String instruction, {List<String> sections = const []}) async {
     try {
       final updated = await ref.read(studioProvider.notifier).refineSite(
             artifactId: widget.site.id,
             instruction: instruction,
+            sections: sections,
           );
       if (!mounted) return;
       setState(() {
@@ -120,12 +123,14 @@ class _SitePreviewScreenState extends ConsumerState<SitePreviewScreen> {
   }
 
   void _openRefineSheet() {
+    String scope = 'page'; // 'page' | 'hero'
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (sheetCtx) => Padding(
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) => Padding(
         padding: EdgeInsets.only(
           left: 20, right: 20, top: 20,
           bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 24,
@@ -160,6 +165,48 @@ class _SitePreviewScreenState extends ConsumerState<SitePreviewScreen> {
             Text(
               'Same link, new version. Try "make the headline bolder", "add a pricing FAQ", "switch to a green, minimal look".',
               style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.45),
+            ),
+            const SizedBox(height: 14),
+            // RE-CODE SCOPE (Agent v9 surgical refine): hero-only re-codes
+            // one section in seconds; whole page re-codes everything.
+            Row(
+              children: [
+                Text('Scope', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textTertiary, letterSpacing: 0.06)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Whole page'),
+                        selected: scope == 'page',
+                        selectedColor: AppColors.primary.withValues(alpha: 0.22),
+                        labelStyle: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: scope == 'page' ? AppColors.primary : AppColors.textSecondary,
+                        ),
+                        side: BorderSide(color: scope == 'page' ? AppColors.primary : AppColors.border),
+                        showCheckmark: false,
+                        onSelected: (_) => setSheetState(() => scope = 'page'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Just the hero · faster'),
+                        selected: scope == 'hero',
+                        selectedColor: AppColors.primary.withValues(alpha: 0.22),
+                        labelStyle: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: scope == 'hero' ? AppColors.primary : AppColors.textSecondary,
+                        ),
+                        side: BorderSide(color: scope == 'hero' ? AppColors.primary : AppColors.border),
+                        showCheckmark: false,
+                        onSelected: (_) => setSheetState(() => scope = 'hero'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 14),
             TextField(
@@ -202,17 +249,22 @@ class _SitePreviewScreenState extends ConsumerState<SitePreviewScreen> {
                     ? null
                     : () {
                         final instruction = v.text.trim();
+                        final sections = scope == 'hero' ? ['hero'] : const <String>[];
                         Navigator.of(sheetCtx).pop();
                         _composeCtrl.clear();
-                        _doRefine(instruction);
+                        _doRefine(instruction, sections: sections);
                       },
-                child: const Text('Apply change', style: TextStyle(fontWeight: FontWeight.w700)),
+                child: Text(
+                  scope == 'hero' ? 'Re-code the hero' : 'Apply change',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
             ),
-          ],
-        ),
-      ),
-    );
+          ],        // children
+        ),          // Column
+        ),          // Padding
+      ),            // StatefulBuilder
+    );              // showModalBottomSheet
   }
 
   @override

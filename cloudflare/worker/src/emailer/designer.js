@@ -125,6 +125,94 @@ export async function researchFacts(queries, { maxResults = 4, maxChars = 1300 }
   }
 }
 
+/* ══ Stage 2b — RESEARCH INTELLIGENCE (Agent v9) ═════════════════════ */
+
+const RESEARCHER_SYSTEM = `You are the Researcher of an elite multi-agent web studio. You just ran live web searches for a client's page. Turn the raw results into MARKET INTELLIGENCE the copywriter and architect can actually build with. Respond with ONLY JSON:
+
+{"facts":["4-6 concrete, usable facts — numbers, names, prices, local truths, trends — each <=140 chars"],"implication":"one line: what this means for how THIS page should position and talk"}
+
+Rules:
+- Keep only facts relevant to this business and audience. Drop SEO spam, nav junk, duplicates.
+- Never invent facts that are not in the raw results. Thin results → fewer facts.
+- Facts the team can ACT on (expectations, price anchors, what locals value) beat encyclopedia trivia.`;
+
+/** Raw multi-query gathering shared by both research paths. */
+async function gatherRawResults(queries, { maxResults = 4 } = {}) {
+  const settled = await Promise.allSettled(
+    queries.slice(0, 2).map((q) => webSearch({ query: q }))
+  );
+  const seen = new Set();
+  const items = [];
+  for (const s of settled) {
+    if (s.status !== 'fulfilled') continue;
+    for (const r of s.value?.results || []) {
+      if (!r?.title || seen.has(r.url)) continue;
+      seen.add(r.url);
+      items.push(r);
+      if (items.length >= maxResults * 2) break;
+    }
+  }
+  return items;
+}
+
+/**
+ * RESEARCH INTELLIGENCE — the Researcher agent THINKS instead of dumping
+ * raw snippets: two live searches in parallel, then one small synthesis
+ * call distills usable facts + the positioning implication. Degrades to
+ * the raw fact block when the synthesis is unreachable — research never
+ * fails the build. Returns { block, ai } (block '' when the web itself
+ * was unreachable).
+ */
+export async function researchIntelligence(env, { queries, brief = '', brand, team = null }) {
+  if (!queries?.length) return { block: '', ai: false };
+  let items = [];
+  try {
+    items = await gatherRawResults(queries);
+  } catch {
+    items = [];
+  }
+  if (!items.length) return { block: '', ai: false };
+  const raw = items
+    .map((r, i) => `${i + 1}. ${r.title}${r.snippet ? ` — ${r.snippet}` : ''}`)
+    .join('\n')
+    .slice(0, 1500);
+  const rawBlock = `MARKET FACTS (from live web searches for: ${queries.join(' | ')}):\n${raw.slice(0, 1300)}`;
+  try {
+    const j = await runAgent(
+      env,
+      team,
+      'researcher',
+      'synthesizing market intelligence',
+      [
+        { role: 'system', content: RESEARCHER_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            `BUSINESS: ${brand?.name || 'the client'}${brand?.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
+            `PAGE BRIEF: ${String(brief).slice(0, 300)}`,
+            `SEARCH QUERIES: ${queries.join(' | ')}`,
+            `RAW RESULTS:\n${raw}`,
+          ].join('\n'),
+        },
+      ],
+      { json: true, maxTokens: 550, temperature: 0.35 },
+      (out) => `${Array.isArray(out?.facts) ? out.facts.length : 0} facts synthesized`
+    );
+    const facts = Array.isArray(j?.facts)
+      ? j.facts.map((f) => String(f).slice(0, 160)).filter(Boolean).slice(0, 6)
+      : [];
+    if (!facts.length) return { block: rawBlock, ai: false };
+    const block = [
+      'MARKET INTELLIGENCE (Researcher synthesis of live web searches — treat as grounding, verify nothing invented):',
+      ...facts.map((f) => `- ${f}`),
+      j?.implication ? `WHAT IT MEANS FOR THIS PAGE: ${String(j.implication).slice(0, 200)}` : '',
+    ].filter(Boolean).join('\n');
+    return { block, ai: true };
+  } catch {
+    return { block: rawBlock, ai: false };
+  }
+}
+
 /* ══ Stage 3 — WRITE ═════════════════════════════════════════════════ */
 
 const COPY_SCHEMA = `{

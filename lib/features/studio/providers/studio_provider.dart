@@ -9,10 +9,12 @@ import '../services/studio_api_service.dart';
 final studioApiProvider = Provider<StudioApiService>((ref) => StudioApiService());
 
 /// One visible step of the agent build pipeline. Mirrors the REAL
-/// server-side team (Agent v8): a Lead orchestrator plans the run, then
+/// server-side team (Agent v9): a Lead orchestrator plans the run, then
 /// named specialists — Researcher, Art Director, Copywriter, Copy Chief,
-/// Architect, Engineers, QA Director — build the page section by section
-/// with a QA rework loop. No templates anywhere in the primary path.
+/// Architect, Engineers, QA Director, Reflector — build the page section
+/// by section with a QA rework loop, and every build ends with a lesson
+/// stored back into the skill library. No templates anywhere in the
+/// primary path.
 class BuildStage {
   const BuildStage(this.label, this.icon);
   final String label;
@@ -32,7 +34,7 @@ const kBuildStages = <BuildStage>[
 ];
 
 /// Studio state: built sites + hosting platform connections + build/refine
-/// progress.
+/// progress + the LIVE agent-team trace (Agent v9).
 class StudioState {
   const StudioState({
     this.sites = const [],
@@ -41,6 +43,7 @@ class StudioState {
     this.building = false,
     this.refiningId,
     this.stageIndex = 0,
+    this.liveTrace = const [],
     this.error,
   });
 
@@ -52,8 +55,15 @@ class StudioState {
   /// Artifact currently being refined (null when none).
   final String? refiningId;
 
-  /// Index into [kBuildStages] shown as agent progress while building.
+  /// Index into [kBuildStages] — the fallback pacer used until the first
+  /// real agent row arrives from the live run stream.
   final int stageIndex;
+
+  /// REAL rows from the agent team's run doc, streamed from the Worker as
+  /// each agent finishes a step. Empty until the live stream connects;
+  /// non-empty rows replace the ticker in the UI.
+  final List<AgentRunRow> liveTrace;
+
   final String? error;
 
   bool get anyHostingConnected =>
@@ -67,6 +77,8 @@ class StudioState {
     String? refiningId,
     bool clearRefining = false,
     int? stageIndex,
+    List<AgentRunRow>? liveTrace,
+    bool clearTrace = false,
     String? error,
     bool clearError = false,
   }) =>
@@ -77,6 +89,7 @@ class StudioState {
         building: building ?? this.building,
         refiningId: clearRefining ? null : (refiningId ?? this.refiningId),
         stageIndex: stageIndex ?? this.stageIndex,
+        liveTrace: clearTrace ? const [] : (liveTrace ?? this.liveTrace),
         error: clearError ? null : (error ?? this.error),
       );
 }
@@ -88,14 +101,15 @@ class StudioController extends StateNotifier<StudioState> {
   final StudioApiService _api;
   Timer? _stageTimer;
 
+  static const _pollInterval = Duration(milliseconds: 2500);
+  static const _maxPolls = 120; // 300s budget, mirrors the server-side run cap
+
   void _startStages() {
     _stageTimer?.cancel();
-    state = state.copyWith(stageIndex: 0);
-    // The real pipeline runs server-side (lead → research → design → copy
-    // → architecture → parallel section codegen → QA review → wire) and
-    // takes ~50-70s for a bespoke page. The ticker paces across that
-    // window so progress stays honest about ORDER; it holds on the last
-    // stage until the build actually lands.
+    state = state.copyWith(stageIndex: 0, clearTrace: true);
+    // Fallback pacer: while the live stream has not connected yet (or on an
+    // old Worker), the ticker keeps progress honest about ORDER. It holds
+    // on the last stage until the build actually lands.
     _stageTimer = Timer.periodic(const Duration(milliseconds: 4600), (t) {
       if (!state.building) {
         t.cancel();
@@ -110,6 +124,35 @@ class StudioController extends StateNotifier<StudioState> {
   void _stopStages() {
     _stageTimer?.cancel();
     _stageTimer = null;
+  }
+
+  /// Watch a live run: poll GET /v1/studio/run every 2.5s, push every new
+  /// agent row into [state.liveTrace] (the UI swaps the ticker for the real
+  /// team), and complete when the run lands.
+  Future<StudioSite> _watchRun(String jobId) async {
+    var seen = 0;
+    for (var i = 0; i < _maxPolls; i++) {
+      await Future<void>.delayed(i == 0 ? const Duration(milliseconds: 700) : _pollInterval);
+      final StudioRunStatus s;
+      try {
+        s = await _api.pollRun(jobId);
+      } on StudioApiException {
+        continue; // transient network error — keep watching
+      }
+      if (s.trace.length > seen) {
+        seen = s.trace.length;
+        state = state.copyWith(liveTrace: s.trace);
+      }
+      if (s.status == 'done' && s.site != null) return s.site!;
+      if (s.status == 'error') {
+        throw StudioApiException(s.error ?? 'The build failed.');
+      }
+      if (s.status == 'timeout') {
+        throw StudioApiException(
+            'The team took longer than its budget. Check your sites list — the build may still have landed.');
+      }
+    }
+    throw StudioApiException('Lost contact with the build team. Check your sites list in a moment.');
   }
 
   Future<void> refresh() async {
@@ -132,6 +175,11 @@ class StudioController extends StateNotifier<StudioState> {
 
   /// Build a site. [onDone] hands back the fresh artifact so the caller can
   /// navigate straight into the live preview.
+  ///
+  /// Primary path (Agent v9): start a LIVE RUN and stream the real team
+  /// trace into [state.liveTrace] while it works. If the server or network
+  /// can't do live runs, fall back to the legacy synchronous build with the
+  /// ticker pacer — the user never sees a dead screen either way.
   Future<void> buildSite({
     required String title,
     required String brief,
@@ -144,14 +192,29 @@ class StudioController extends StateNotifier<StudioState> {
     state = state.copyWith(building: true, clearError: true);
     _startStages();
     try {
-      final site = await _api.buildSite(
-        title: title,
-        brief: brief,
-        kind: kind,
-        style: style,
-        ctaText: ctaText,
-        ctaUrl: ctaUrl,
-      );
+      String? jobId;
+      try {
+        jobId = await _api.startBuild(
+          title: title,
+          brief: brief,
+          kind: kind,
+          style: style,
+          ctaText: ctaText,
+          ctaUrl: ctaUrl,
+        );
+      } catch (_) {
+        jobId = null; // old deployment / offline hiccup → legacy path below
+      }
+      final site = jobId != null
+          ? await _watchRun(jobId)
+          : await _api.buildSite(
+              title: title,
+              brief: brief,
+              kind: kind,
+              style: style,
+              ctaText: ctaText,
+              ctaUrl: ctaUrl,
+            );
       _stopStages();
       state = state.copyWith(building: false);
       await refresh();
@@ -166,14 +229,21 @@ class StudioController extends StateNotifier<StudioState> {
   }
 
   /// Refine an existing build ("make the headline bolder"). Returns the
-  /// updated site so the preview can reload it.
+  /// updated site so the preview can reload it. [sections] names a subset
+  /// for a SURGICAL re-code ("just the hero") — everything else stays
+  /// byte-identical and the round-trip takes seconds, not a minute.
   Future<StudioSite> refineSite({
     required String artifactId,
     required String instruction,
+    List<String> sections = const [],
   }) async {
     state = state.copyWith(refiningId: artifactId, clearError: true);
     try {
-      final site = await _api.refineSite(artifactId: artifactId, instruction: instruction);
+      final site = await _api.refineSite(
+        artifactId: artifactId,
+        instruction: instruction,
+        sections: sections,
+      );
       await refresh();
       state = state.copyWith(clearRefining: true);
       return site;
