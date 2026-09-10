@@ -41,7 +41,7 @@ import { esc, safeHref } from './htmlutil.js';
 const SECTION_AI_TOKENS = 1900;
 const PLAN_AI_TOKENS = 900;
 const REVIEW_AI_TOKENS = 500;
-const MAX_SECTIONS = 6;
+const MAX_SECTIONS = 5;
 const MAX_REGENS = 2;
 const HTML_MIN = 150;
 const HTML_MAX = 9500;
@@ -525,32 +525,45 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock }));
   trace('plan', true, plan.ai, `${plan.sections.length} sections planned${plan.ai ? '' : ' · classic plan'}`);
 
-  // 2. CODE — hand-write every section. The hero MUST be AI-coded (it is
-  //    the page's identity); any other section that fails twice degrades
-  //    to a clean engine block rather than discarding the bespoke page.
-  const coded = [];
+  // 2. CODE — hand-write every section, IN PARALLEL (sections are
+  //    independent: each gets the full design contract + its own copy).
+  //    The hero MUST be AI-coded (it is the page's identity); any other
+  //    section that fails twice degrades to a clean engine block rather
+  //    than discarding the bespoke page. One simpler-redo per failed
+  //    section; wall time ≈ one section, not the sum of all sections.
   const ctxBase = { kind, brief, brand, thought, content, design: thought.design };
-  let regensLeft = MAX_REGENS;
-  for (const section of plan.sections) {
-    const ctx = { ...ctxBase, section };
-    let out = await codeSection(env, ctx);
-    if (!out && regensLeft > 0) {
-      // One director-forced redo with a tighter brief before giving up.
-      regensLeft--;
-      ctx.section = { ...section, layout: `${section.layout} Keep it SIMPLER: fewer elements, cleaner grid.` };
-      out = await codeSection(env, ctx);
-    }
+  const results = await Promise.all(
+    plan.sections.map(async (section) => {
+      const ctx = { ...ctxBase, section };
+      let out = await codeSection(env, ctx);
+      if (!out) {
+        // One director-forced redo with a tighter brief before degrading.
+        ctx.section = { ...section, layout: `${section.layout} Keep it SIMPLER: fewer elements, cleaner grid.` };
+        out = await codeSection(env, ctx);
+      }
+      if (!out) {
+        if (section.id === 'hero') throw new Error('codegen failed at the hero — falling back to the engine');
+        return { section, out: null };
+      }
+      return { section, out };
+    })
+  );
+  const coded = [];
+  let engineSections = 0;
+  for (const { section, out } of results) {
     if (!out) {
-      if (section.id === 'hero') throw new Error('codegen failed at the hero — falling back to the engine');
-      out = engineFallbackSection(section, content, thought.design);
+      coded.push({ id: section.id, ...engineFallbackSection(section, content, thought.design) });
       trace(`code:${section.id}`, true, false, `${section.name} — engine section (AI output unusable)`);
+      engineSections++;
     } else {
+      coded.push({ id: section.id, ...out });
       trace(`code:${section.id}`, true, true, `${section.name} coded (${out.html.length + out.css.length} chars)`);
     }
-    coded.push({ id: section.id, ...out });
   }
 
-  // 3. REVIEW — director pass; flagged sections get one real regen.
+  // 3. REVIEW — director pass; flagged sections get one real regen
+  //    (at most MAX_REGENS re-codes, sequential to keep the budget honest).
+  let regensLeft = MAX_REGENS;
   let reviewed = 0;
   if (coded.length >= 2) {
     const review = await reviewSections(env, { kind, brand, sections: coded.map((c) => ({ ...c, ...plan.sections.find((s) => s.id === c.id) })) });

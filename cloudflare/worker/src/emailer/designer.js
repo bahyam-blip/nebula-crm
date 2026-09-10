@@ -169,7 +169,7 @@ function copyPromptContext({ kind, title, brief, brand, thought }) {
 }
 
 export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock, skillsBlock = '' }) {
-  const sys = `You are a senior conversion copywriter (top 1%) writing for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders):
+  const sys = `You are a senior conversion copywriter (top 1%) writing for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders; keep the WHOLE JSON compact — short strings, total under 220 words — truncation destroys the page):
 
 ${COPY_SCHEMA}
 
@@ -193,7 +193,7 @@ Craft rules — this is what makes copy convert:
 ${skillsBlock}` : sys },
         { role: 'user', content: [copyPromptContext({ kind, title, brief, brand, thought }), factsBlock].filter(Boolean).join('\n\n') },
       ],
-      { json: true, maxTokens: 1500, temperature: 0.75 }
+      { json: true, maxTokens: 2000, temperature: 0.75 }
     );
     return { content: sanitizeCopy(j, { kind, brand }), ai: true };
   } catch {
