@@ -120,7 +120,7 @@ async function main() {
 
   console.log('— run scoping —');
   const stranger = await jfetch(`/v1/studio/run?id=${runId}`); // no token
-  ok(stranger.status === 404, 'runs without a token are not readable', String(stranger.status));
+  ok([401, 403].includes(stranger.status), 'runs without a token are rejected at the auth layer', String(stranger.status));
 
   console.log('— SURGICAL refine: re-code just the hero —');
   const t1 = Date.now();
