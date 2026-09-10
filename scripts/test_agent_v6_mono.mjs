@@ -234,9 +234,12 @@ const designReply = {
   headline_angle: 'Websites that feel engineered', must_have: ['proof strip', 'process bento'],
   research_queries: ['studio portfolio trends 2026'],
 };
-// NOTE: matcher order matters — the POLISH prompt also says "design
-// director", so the FINAL-review script must come first and the design
-// script must exclude it.
+// Agent v8: the Lead orchestrator plans the run before the specialists
+script((t) => t.includes('elite multi-agent web studio'), {
+  audience: 'design-led founders evaluating studios', research_focus: 'studio portfolio trends',
+  queries: ['studio portfolio trends 2026'], sections_target: 4, emphasis: ['proof strip'],
+  risks: ['generic agency look'], tone_note: 'engineered precision in every line',
+});
 script((t) => t.includes('FINAL review'), { verdict: 'improve', content: { headline: 'Sites that feel engineered to sell', sub: 'A studio shipping fast, minimal, conversion-first sites in seven days.' } });
 script((t) => t.includes('design director') && !t.includes('FINAL review'), designReply);
 script((t) => t.includes('conversion copywriter'), {
@@ -256,7 +259,8 @@ ok(build1.stages.some((s) => s.stage === 'polish' && s.ai === true), 'polish sta
 ok(build1.stages.some((s) => s.stage === 'wire'), `wire stage assembles the hand-coded sections (${build1.stages.at(-1)?.detail})`);
 ok(build1.stages.filter((s) => String(s.stage).startsWith('code:')).length === 3, 'three sections hand-coded');
 ok(/^[0-9a-f]{64}$/.test(build1.sha256 || ''), 'build returns sha256 digest');
-ok(build1.stages.length === 10, `stage trace: think/research/write/polish/plan/code×3/review/wire (${build1.stages.length})`);
+ok(build1.stages.length === 11, `stage trace: lead/think/research/write/polish/plan/code×3/review/wire (${build1.stages.length})`);
+ok(Array.isArray(build1.team) && build1.team.some((r) => r.agent === 'Lead' && r.ok) && build1.team_summary?.ai_calls >= 8, 'multi-agent team trace rides the build (v8)', JSON.stringify(build1.team_summary));
 
 // Sarvam received the skill pack + polish budget respected
 ok(sarvamSeen.some((t) => t.includes('EXPERT SKILL PACK') && t.includes('Cafe hero patterns')), 'design prompt carried the learned skill pack');

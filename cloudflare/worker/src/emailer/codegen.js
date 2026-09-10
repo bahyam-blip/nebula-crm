@@ -34,7 +34,7 @@
  * the assembler guarantees a complete document (doctype → </html>).
  */
 
-import { sarvamChat } from './sarvam.js';
+import { runAgent } from './agents.js';
 import { hex, lum, mix, FONT_STACKS, DISPLAY_OF_FONT } from './site_templates.js';
 import { esc, safeHref } from './htmlutil.js';
 
@@ -101,11 +101,15 @@ function defaultPlan(kind, content) {
 
 const hasValue = (v) => (Array.isArray(v) ? v.length > 0 : v && typeof v === 'object' ? Object.values(v).some((x) => x !== null && x !== undefined && String(x).trim() !== '') : v !== null && v !== undefined && String(v).trim() !== '');
 
-export async function planSections(env, { kind, brief, brand, thought, content, skillsBlock = '' }) {
+export async function planSections(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, team = null }) {
   const vocabNote = `Available copy groups for THIS page: ${Object.keys(content).filter((k) => hasValue(content[k])).join(', ') || 'headline, sub'}`;
+  const cap = Math.min(MAX_SECTIONS, Number(lead?.sections_target) || MAX_SECTIONS);
   try {
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'architect',
+      'planning the sections',
       [
         { role: 'system', content: [PLAN_SYSTEM, skillsBlock].filter(Boolean).join('\n\n') },
         {
@@ -116,11 +120,15 @@ export async function planSections(env, { kind, brief, brand, thought, content, 
             `BRIEF: ${String(brief).slice(0, 900)}`,
             `DESIGN DIRECTION: theme ${thought.design.themeLabel}, voice "${thought.design.voice || 'clear, confident'}", audience "${thought.design.audience || 'general'}", hero style ${thought.design.hero}`,
             thought.mustHave.length ? `MUST INCLUDE: ${thought.mustHave.join('; ')}` : '',
+            lead?.risks?.length ? `THE LEAD FLAGGED THESE RISKS — design against them: ${lead.risks.join('; ')}` : '',
+            lead?.emphasis?.length ? `THE LEAD WANTS EXTRA CRAFT ON: ${lead.emphasis.join('; ')}` : '',
+            `PLAN EXACTLY ${cap} SECTIONS (or fewer if the page is tighter for it).`,
             vocabNote,
           ].filter(Boolean).join('\n'),
         },
       ],
-      { json: true, maxTokens: PLAN_AI_TOKENS, temperature: 0.65 }
+      { json: true, maxTokens: PLAN_AI_TOKENS, temperature: 0.65 },
+      (out) => `${Math.min(cap, Array.isArray(out?.sections) ? out.sections.length : 0)} sections architected`
     );
     const raw = Array.isArray(j.sections) ? j.sections : [];
     const seen = new Set();
@@ -137,7 +145,7 @@ export async function planSections(env, { kind, brief, brand, thought, content, 
         content_keys: Array.isArray(sec?.content_keys) ? sec.content_keys.map((k) => String(k).slice(0, 20)).filter((k) => k in content).slice(0, 6) : [],
         motion: String(sec?.motion || '').slice(0, 120),
       });
-      if (sections.length >= MAX_SECTIONS) break;
+      if (sections.length >= cap) break;
     }
     if (!sections.length || sections[0].id !== 'hero') throw new Error('plan rejected: needs a hero first');
     // Guarantee the copy survives: append keys no section claimed onto the
@@ -268,17 +276,32 @@ export function parseSection(raw, id) {
 }
 
 async function codeSectionOnce(env, ctx, attempt, lastError) {
+  const critique = String(ctx.critique || '').slice(0, 200);
   const messages = [
     { role: 'system', content: sectionSystemPrompt({ id: ctx.section.id, kind: ctx.kind, brand: ctx.brand }) },
-    { role: 'user', content: attempt === 1
+    { role: 'user', content: attempt === 1 && !critique
       ? sectionUserPrompt(ctx)
-      : `${sectionUserPrompt(ctx)}\n\nIMPORTANT — your previous attempt was rejected: ${String(lastError || 'invalid output').slice(0, 180)}.\n${/truncat|not closed|too large/i.test(String(lastError)) ? 'You ran out of output space: make the section SHORTER (less CSS, fewer elements) while keeping the required motion. ' : ''}Respond with ONLY the <section>+<style> answer — no markdown fences, no commentary.` },
+      : [
+          sectionUserPrompt(ctx),
+          critique ? `QA REWORK NOTE from the review pass: "${critique}" — fix exactly this while keeping what already works.` : '',
+          lastError && !critique ? `IMPORTANT — your previous attempt was rejected: ${String(lastError).slice(0, 180)}.` : '',
+          /truncat|not closed|too large/i.test(String(lastError)) ? 'You ran out of output space: make the section SHORTER (less CSS, fewer elements) while keeping the required motion. ' : '',
+          'Respond with ONLY the <section>+<style> answer — no markdown fences, no commentary.',
+        ].filter(Boolean).join('\n\n') },
   ];
-  const raw = await sarvamChat(env, messages, { maxTokens: SECTION_AI_TOKENS, temperature: attempt === 1 ? 0.7 : 0.5 });
+  const raw = await runAgent(
+    env,
+    ctx.team,
+    'engineer',
+    `hand-coding "${ctx.section.name}"`,
+    messages,
+    { maxTokens: SECTION_AI_TOKENS, temperature: attempt === 1 && !critique ? 0.7 : 0.5 },
+    () => `sec-${ctx.section.id} written for ${ctx.brand.name}`
+  );
   return parseSection(raw, ctx.section.id);
 }
 
-/** Code one section with the single retry+regen policy. Returns null on failure. */
+/** Code one section with the retry + rework policy. Returns null on failure. */
 export async function codeSection(env, ctx) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -323,14 +346,17 @@ export function engineFallbackSection(section, content, design) {
 
 /* ══ Stage 6 — REVIEW ════════════════════════════════════════════════ */
 
-export async function reviewSections(env, { kind, brand, sections }) {
+export async function reviewSections(env, { kind, brand, sections, team = null }) {
   try {
     const digest = sections
       .map((s) => `#${s.id} (${s.name}) — goal: ${s.goal}\nCSS head: ${s.css.slice(0, 180)}`)
       .join('\n\n')
       .slice(0, 2600);
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'qa',
+      'reviewing the hand-written code',
       [
         {
           role: 'system',
@@ -338,7 +364,8 @@ export async function reviewSections(env, { kind, brand, sections }) {
         },
         { role: 'user', content: digest },
       ],
-      { json: true, maxTokens: REVIEW_AI_TOKENS, temperature: 0.3 }
+      { json: true, maxTokens: REVIEW_AI_TOKENS, temperature: 0.3 },
+      (out) => `${(Array.isArray(out?.verdicts) ? out.verdicts : []).filter((v) => v?.verdict === 'fix').length} section(s) flagged for rework`
     );
     const verdicts = {};
     let notes = {};
@@ -518,11 +545,14 @@ ${footerHtml(brand, content)}
  *        the PLAN call and keeps the page architecture stable.
  * @param onStage optional (stage, ok, ai, detail) => void trace callback
  */
-export async function codegenSite(env, { kind, brief, brand, thought, content, skillsBlock = '', preplanned = null, onStage = () => {} }) {
-  const trace = (stage, ok, ai, detail) => onStage({ stage, ok, ai, detail });
+export async function codegenSite(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, preplanned = null, onStage = () => {}, team = null }) {
+  const trace = (stage, ok, ai, detail) => {
+    onStage({ stage, ok, ai, detail });
+    if (team) team.stage(stage, ok, ai, detail);
+  };
 
   // 1. PLAN — information architecture (or reuse the stored plan).
-  const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock }));
+  const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock, lead, team }));
   trace('plan', true, plan.ai, `${plan.sections.length} sections planned${plan.ai ? '' : ' · classic plan'}`);
 
   // 2. CODE — hand-write every section, IN PARALLEL (sections are
@@ -531,7 +561,7 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   //    section that fails twice degrades to a clean engine block rather
   //    than discarding the bespoke page. One simpler-redo per failed
   //    section; wall time ≈ one section, not the sum of all sections.
-  const ctxBase = { kind, brief, brand, thought, content, design: thought.design };
+  const ctxBase = { kind, brief, brand, thought, content, design: thought.design, team };
   const results = await Promise.all(
     plan.sections.map(async (section) => {
       const ctx = { ...ctxBase, section };
@@ -566,18 +596,20 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   let regensLeft = MAX_REGENS;
   let reviewed = 0;
   if (coded.length >= 2) {
-    const review = await reviewSections(env, { kind, brand, sections: coded.map((c) => ({ ...c, ...plan.sections.find((s) => s.id === c.id) })) });
+    const review = await reviewSections(env, { kind, brand, sections: coded.map((c) => ({ ...c, ...plan.sections.find((s) => s.id === c.id) })), team });
     trace('review', true, review.ai, review.ai ? 'director reviewed the code' : 'review skipped');
     for (const c of coded) {
       if (review.verdicts[c.id] !== 'fix' || regensLeft <= 0) continue;
       regensLeft--;
       const section = plan.sections.find((s) => s.id === c.id);
-      const ctx = { ...ctxBase, section, _lastError: review.notes[c.id] || 'director flagged this section' };
+      // REWORK LOOP — the QA verdict goes back to the engineer WITH the
+      // critique attached (ctx.critique), the GLM-class review→fix cycle.
+      const ctx = { ...ctxBase, section, critique: review.notes[c.id] || 'director flagged this section' };
       const redo = await codeSection(env, ctx);
       if (redo) {
         reviewed++;
         coded[coded.indexOf(c)] = { id: c.id, ...redo };
-        trace(`code:${c.id}`, true, true, `${section.name} re-coded after review`);
+        trace(`code:${c.id}`, true, true, `${section.name} re-coded after QA rework`);
       }
     }
   } else {
@@ -587,6 +619,7 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   // 4. WIRE — deterministic assembly (cannot produce a malformed page).
   const html = assembleSite({ design: thought.design, brand, content, coded, plan, kind });
   trace('wire', true, false, `${coded.length} sections wired · fonts + reveal + nav`);
+  if (team) team.record('builder', 'wiring & hosting the page', { ok: true, ai: false, detail: `${coded.length} sections assembled with fonts + motion` });
 
   return { html, plan, coded, stages: { reviewed } };
 }

@@ -9,9 +9,10 @@ import '../services/studio_api_service.dart';
 final studioApiProvider = Provider<StudioApiService>((ref) => StudioApiService());
 
 /// One visible step of the agent build pipeline. Mirrors the REAL
-/// server-side pipeline (Agent v7): the agent researches, plans the
-/// architecture, then hand-codes each section's HTML+CSS before a
-/// director review — no templates anywhere in the primary path.
+/// server-side team (Agent v8): a Lead orchestrator plans the run, then
+/// named specialists — Researcher, Art Director, Copywriter, Copy Chief,
+/// Architect, Engineers, QA Director — build the page section by section
+/// with a QA rework loop. No templates anywhere in the primary path.
 class BuildStage {
   const BuildStage(this.label, this.icon);
   final String label;
@@ -19,14 +20,15 @@ class BuildStage {
 }
 
 const kBuildStages = <BuildStage>[
-  BuildStage('Understanding your brief', '💡'),
-  BuildStage('Researching your market', '🔍'),
-  BuildStage('Designing your look & feel', '🎨'),
-  BuildStage('Writing your copy', '✍️'),
-  BuildStage('Planning your sections', '📐'),
-  BuildStage('Hand-coding your page', '🛠️'),
-  BuildStage('Director review & polish', '🧐'),
-  BuildStage('Wiring & hosting it live', '🚀'),
+  BuildStage('Lead · forming your build team', '🧠'),
+  BuildStage('Researcher · scanning your market', '🔍'),
+  BuildStage('Art Director · designing the system', '🎨'),
+  BuildStage('Copywriter · writing your words', '✍️'),
+  BuildStage('Copy Chief · tightening every line', '🧐'),
+  BuildStage('Architect · planning your sections', '📐'),
+  BuildStage('Engineers · hand-coding the page', '🛠️'),
+  BuildStage('QA Director · reviewing the code', '🔎'),
+  BuildStage('Builder · wiring & hosting it live', '🚀'),
 ];
 
 /// Studio state: built sites + hosting platform connections + build/refine
@@ -89,10 +91,11 @@ class StudioController extends StateNotifier<StudioState> {
   void _startStages() {
     _stageTimer?.cancel();
     state = state.copyWith(stageIndex: 0);
-    // The real pipeline runs server-side (research → plan → per-section
-    // codegen → review → wire) and takes ~40-90s for a bespoke page.
-    // The ticker paces across that window so progress stays honest about
-    // ORDER; it holds on the last stage until the build actually lands.
+    // The real pipeline runs server-side (lead → research → design → copy
+    // → architecture → parallel section codegen → QA review → wire) and
+    // takes ~50-70s for a bespoke page. The ticker paces across that
+    // window so progress stays honest about ORDER; it holds on the last
+    // stage until the build actually lands.
     _stageTimer = Timer.periodic(const Duration(milliseconds: 4600), (t) {
       if (!state.building) {
         t.cancel();

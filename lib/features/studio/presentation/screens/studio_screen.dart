@@ -415,7 +415,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'AGENT AT WORK · NO TEMPLATES',
+            'AGENT TEAM AT WORK · NO TEMPLATES',
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w800,
@@ -425,7 +425,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Your page is being hand-coded section by section — bespoke HTML, CSS and motion. This takes about a minute.',
+            'Nine specialists — Lead, Researcher, Art Director, Copywriter, Copy Chief, Architect, Engineers, QA — hand-build your page together. This takes about a minute.',
             style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textTertiary),
           ),
           const SizedBox(height: 14),

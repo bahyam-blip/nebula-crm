@@ -22,6 +22,7 @@
  */
 
 import { sarvamChat } from './sarvam.js';
+import { createTeamRun, leadPlan, runAgent } from './agents.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
 import { designBrief, researchFacts, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
@@ -221,10 +222,13 @@ async function buildWebapp(env, { title, brief, style, brand }) {
  * patched copy is merged and the page re-rendered. Bounded: exactly one
  * critique per build, never throws, falls back to the as-written copy.
  */
-async function polishCopy(env, { kind, content, brand, skillsBlock }) {
+async function polishCopy(env, { kind, content, brand, skillsBlock, team = null }) {
   try {
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'copy_chief',
+      'reviewing every line of copy',
       [
         {
           role: 'system',
@@ -234,7 +238,8 @@ async function polishCopy(env, { kind, content, brand, skillsBlock }) {
         },
         { role: 'user', content: JSON.stringify(content).slice(0, 5200) },
       ],
-      { json: true, maxTokens: 1300, temperature: 0.5 }
+      { json: true, maxTokens: 1300, temperature: 0.5 },
+      (out) => (out?.verdict === 'improve' ? 'director tightened the copy' : 'copy passed as written')
     );
     if (j?.verdict !== 'improve' || !j.content || typeof j.content !== 'object') return { content, polished: false };
     const patched = sanitizeCopy(j.content, { kind, brand });
@@ -246,63 +251,81 @@ async function polishCopy(env, { kind, content, brand, skillsBlock }) {
 }
 
 /**
- * MARKETING-KIND PIPELINE (Agent v7) — the agent works like a real studio:
+ * MARKETING-KIND PIPELINE (Agent v8) — a MULTI-AGENT TEAM, GLM-class
+ * agentic engineering on Nebula's runtime:
  *
- *   skills → THINK (art direction) → RESEARCH (live web) → WRITE (copy)
- *          → POLISH (director copy review)
- *          → PLAN (information architecture) → CODE (hand-written HTML+CSS
- *          per section) → REVIEW (director code review) → WIRE (assembly)
+ *   LEAD (orchestrator) forms the adaptive team plan from the brief
+ *   → RESEARCHER scans the live web for real market facts
+ *   → ART DIRECTOR designs the design system
+ *   → COPYWRITER writes the words → COPY CHIEF reviews every line
+ *   → ARCHITECT plans the information architecture
+ *   → ENGINEERS (parallel) hand-code each section's HTML+CSS+motion
+ *   → QA DIRECTOR reviews the code → flagged sections re-coded WITH
+ *     the critique attached (rework loop)
+ *   → BUILDER wires + hosts deterministically
  *
+ * Every agent runs in an ISOLATED context (role prompt + artifacts only)
+ * and every invocation lands in the team trace the app shows the user.
  * codegenSite() THROWS only when the code stage cannot produce a viable
  * page; then — and only then — renderSite() (the deterministic template
  * engine) ships the page so a build can never fail. Templates are the
  * safety net, never the product.
  */
 async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaArgs, brand }) {
-  const stages = [];
+  const team = createTeamRun({ kind, title });
 
-  // 0. SKILLS — load the expert skill pack (seeded + everything the agent
+  // 0. LEAD — the orchestrator reads the brief and plans the run (the
+  //    AI call + its fallback both land in the team trace).
+  const lead = await leadPlan(env, { kind, brief, brand, style, team });
+  team.stage('lead', true, lead.ai, lead.ai ? `team plan: ${lead.sections_target} sections · ${String(lead.audience || '').slice(0, 50)}` : 'classic plan');
+
+  // 1. SKILLS — load the expert skill pack (seeded + everything the agent
   //    has learned live). Every build gets smarter over time.
   const designSkills = await skillsForDomain(store, uid, 'design', { maxChars: 1100 });
   const copySkills = await skillsForDomain(store, uid, 'copy', { maxChars: 700 });
 
-  // 1. THINK — design system + section plan + research queries.
-  const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block });
-  stages.push({
-    stage: 'think',
-    ok: true,
-    ai: thought.ai,
-    detail: `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero`,
-  });
+  // 2. THINK — the Art Director's design system + research queries.
+  const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block, lead, team });
+  team.stage('think', true, thought.ai, `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero`);
 
-  // 2. RESEARCH — live facts (never fails the build).
+  // 3. RESEARCH — the Researcher gathers live facts (never fails the build).
+  //    Lead queries merge with the director's (deduped, capped) — the
+  //    orchestrator decided what is worth learning; the director may add.
+  const queries = [...new Set([...(lead.queries || []), ...thought.queries])].slice(0, 2);
   let facts = '';
-  if (RESEARCH_KINDS.has(kind) && thought.queries.length) {
-    facts = await researchFacts(thought.queries);
-    stages.push({ stage: 'research', ok: true, ai: Boolean(facts), detail: facts ? thought.queries[0] : 'skipped (web unreachable)' });
+  if (RESEARCH_KINDS.has(kind) && queries.length) {
+    facts = await researchFacts(queries);
+    team.record('researcher', 'scanning the live web', {
+      ok: true,
+      ai: Boolean(facts),
+      detail: facts ? `market facts found for "${queries[0]}"` : 'web unreachable — proceeding on the brief',
+    });
+    team.stage('research', true, Boolean(facts), facts ? queries[0] : 'skipped (web unreachable)');
   } else {
-    stages.push({ stage: 'research', ok: true, ai: thought.ai, detail: 'not needed for this build' });
+    team.record('researcher', 'scanning the live web', { ok: true, ai: false, detail: 'not needed for this build' });
+    team.stage('research', true, thought.ai, 'not needed for this build');
   }
 
-  // 3. WRITE — copy JSON (falls back to brief-derived copy).
+  // 4. WRITE — the Copywriter drafts (falls back to brief-derived copy).
   const base = defaultCopy({ kind, title, brief, brand });
-  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts, skillsBlock: copySkills.block });
+  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts, skillsBlock: copySkills.block, lead, team });
   let content = mergeCopy(aiCopy, base);
   content = applyCtaOverrides(content, ctaArgs);
   if (!content.headline) content.headline = title;
-  stages.push({ stage: 'write', ok: true, ai: copyAi, detail: copyAi ? `${content.features?.length || 0} sections written` : 'from your brief' });
+  team.stage('write', true, copyAi, copyAi ? `${content.features?.length || 0} sections written` : 'from your brief');
 
-  // 4. POLISH — director's final review (skipped when copy fell back to
-  //    deterministic; nothing to critique there).
+  // 5. POLISH — the Copy Chief's final review (skipped when copy fell
+  //    back to deterministic; nothing to critique there).
   if (copyAi) {
-    const polished = await polishCopy(env, { kind, content, brand, skillsBlock: designSkills.block });
+    const polished = await polishCopy(env, { kind, content, brand, skillsBlock: designSkills.block, team });
     content = polished.content;
-    stages.push({ stage: 'polish', ok: true, ai: polished.polished, detail: polished.polished ? 'director pass applied' : 'passed review as written' });
+    team.stage('polish', true, polished.polished, polished.polished ? 'director pass applied' : 'passed review as written');
   } else {
-    stages.push({ stage: 'polish', ok: true, ai: false, detail: 'deterministic copy — review skipped' });
+    team.stage('polish', true, false, 'deterministic copy — review skipped');
   }
 
-  // 5-8. PLAN → CODE → REVIEW → WIRE — the agent hand-writes the page.
+  // 6-9. PLAN → CODE → REVIEW → WIRE — Architect, Engineers (parallel),
+  //       QA Director (rework loop), Builder (deterministic assembly).
   try {
     const cg = await codegenSite(env, {
       kind,
@@ -311,13 +334,16 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       thought,
       content,
       skillsBlock: designSkills.block,
-      onStage: (s) => stages.push(s),
+      lead,
+      team,
     });
     return {
       html: cg.html,
       content,
       design: thought.design,
-      stages,
+      stages: team.stages,
+      team: team.trace,
+      teamSummary: team.summary(),
       researched: Boolean(facts),
       skills: designSkills.learnedCount,
       engine: 'codegen',
@@ -326,13 +352,16 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
     };
   } catch (e) {
     console.warn('[builder] codegen → engine fallback:', e?.message || e);
-    stages.push({ stage: 'render', ok: true, ai: false, detail: 'engine fallback — deterministic render' });
+    team.record('builder', 'shipping the engine render', { ok: true, ai: false, detail: 'AI page unviable — deterministic engine shipped the build' });
+    team.stage('render', true, false, 'engine fallback — deterministic render');
     const html = renderSite({ kind, design: thought.design, content, brand });
     return {
       html,
       content,
       design: thought.design,
-      stages,
+      stages: team.stages,
+      team: team.trace,
+      teamSummary: team.summary(),
       researched: Boolean(facts),
       skills: designSkills.learnedCount,
       engine: 'template',
@@ -364,7 +393,7 @@ export async function buildWebsite(env, store, user, args, origin = '') {
   const rl = await rateLimit(store, user?.uid || '', 'build_website');
   if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
 
-  let html, builder, stages = [], plan = null;
+  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null;
   try {
     if (kind === 'webapp') {
       const r = await buildWebapp(env, { title: effTitle, brief, style, brand });
@@ -375,6 +404,7 @@ export async function buildWebsite(env, store, user, args, origin = '') {
         { stage: 'write', ok: true, ai: builder === 'ai', detail: builder === 'ai' ? 'app coded by AI' : 'signature app shell' },
         { stage: 'render', ok: true, ai: false, detail: 'sanitized + hosted' },
       ];
+      teamTrace = [{ agent: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections', action: 'coding the single-file web app', ok: builder === 'ai', ai: builder === 'ai', ms: 0, detail: builder === 'ai' ? 'app hand-coded in one file' : 'signature app shell' }];
     } else {
       const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand });
       html = r.html;
@@ -385,6 +415,8 @@ export async function buildWebsite(env, store, user, args, origin = '') {
       const aiStage = (name) => r.stages.find((s) => s.stage === name)?.ai === true;
       builder = r.engine === 'codegen' ? 'ai' : aiStage('think') && aiStage('write') ? 'ai+engine' : 'signature';
       stages = r.stages;
+      teamTrace = r.team || [];
+      teamSummary = r.teamSummary || null;
       plan = {
         kind, title: effTitle, brief: brief.slice(0, 4000), style,
         design: r.design, content: r.content,
@@ -433,6 +465,8 @@ export async function buildWebsite(env, store, user, args, origin = '') {
     sha256: digest,
     version: 1,
     stages,
+    team: teamTrace,
+    team_summary: teamSummary,
     note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
   };
 }
@@ -466,6 +500,8 @@ export async function refineSite(env, store, user, args, origin = '') {
   let nextEngine = plan?.engine || null;
   let nextSections = plan?.sections || null;
   let nextNav = plan?.nav || null;
+  const team = createTeamRun({ kind, title: `refine: ${title}` });
+  team.record('lead', 'reading the change request', { ok: true, ai: false, detail: instruction.slice(0, 90) });
 
   if (kind === 'webapp') {
     // Webapps are AI-coded documents — rebuild compact with the instruction.
@@ -481,7 +517,7 @@ export async function refineSite(env, store, user, args, origin = '') {
     // CODEGEN site: apply the instruction to the copy, then RE-CODE the
     // page with the SAME section architecture — a real iteration, not a
     // re-render. Falls back to the template engine if the re-code fails.
-    const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand });
+    const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand, team });
     content = r.content;
     design = plan.design;
     if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
@@ -495,6 +531,7 @@ export async function refineSite(env, store, user, args, origin = '') {
         thought,
         content,
         preplanned: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4), ai: false },
+        team,
       });
       html = cg.html;
       nextSections = cg.plan.sections;
@@ -511,7 +548,7 @@ export async function refineSite(env, store, user, args, origin = '') {
   } else {
     if (plan?.content) {
       // Fast path: re-render from the stored plan with the instruction applied.
-      const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand });
+      const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand, team });
       content = r.content;
       design = plan.design?.theme ? plan.design : normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, brandColor: brand.color });
       if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
@@ -574,6 +611,8 @@ export async function refineSite(env, store, user, args, origin = '') {
     version,
     bytes: html.length,
     sha256: digest,
+    team: team.trace,
+    team_summary: team.summary(),
     note: `"${title}" updated to v${version} — ${note}. Same link, new look.`,
   };
 }

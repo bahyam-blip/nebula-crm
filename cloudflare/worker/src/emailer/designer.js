@@ -24,6 +24,7 @@
  * markdown fences, prose and truncation can never reach R2 again.
  */
 
+import { runAgent, leadBlock } from './agents.js';
 import { sarvamChat } from './sarvam.js';
 import { webSearch } from './research.js';
 import { normalizeDesign, themeForStyleHint, THEMES } from './site_templates.js';
@@ -64,7 +65,7 @@ Design principles you apply (this is what separates premium from template):
 Rules: hex colors only.${style ? ` The client asked for this style: "${style}" — honor it in theme/palette.` : ''} Business context: brand "${brand.name}", color ${brand.color}${brand.profile?.industry ? `, industry ${brand.profile.industry}` : ''}${brand.profile?.audience ? `, audience ${brand.profile.audience}` : ''}.`;
 }
 
-export async function designBrief(env, { kind, brief, style, brand, skillsBlock = '' }) {
+export async function designBrief(env, { kind, brief, style, brand, skillsBlock = '', lead = null, team = null }) {
   const fallback = () => ({
     design: normalizeDesign(
       { theme: themeForStyleHint(style, kind), palette: {}, font: '' },
@@ -76,13 +77,17 @@ export async function designBrief(env, { kind, brief, style, brand, skillsBlock 
     ai: false,
   });
   try {
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'director',
+      'designing the art direction',
       [
         { role: 'system', content: [briefSystemPrompt(kind, brand, style), skillsBlock].filter(Boolean).join('\n\n') },
-        { role: 'user', content: String(brief).slice(0, 2200) },
+        { role: 'user', content: [String(brief).slice(0, 2200), leadBlock(lead)].filter(Boolean).join('\n\n') },
       ],
-      { json: true, maxTokens: 900, temperature: 0.7 }
+      { json: true, maxTokens: 900, temperature: 0.7 },
+      (out) => `${out.theme || 'classic'} direction for ${brand.name}`
     );
     const theme = THEME_NAMES.includes(String(j.theme)) ? String(j.theme) : themeForStyleHint(style, kind);
     const design = normalizeDesign(
@@ -168,7 +173,7 @@ function copyPromptContext({ kind, title, brief, brand, thought }) {
     .join('\n');
 }
 
-export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock, skillsBlock = '' }) {
+export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock, skillsBlock = '', lead = null, team = null }) {
   const sys = `You are a senior conversion copywriter (top 1%) writing for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders; keep the WHOLE JSON compact — short strings, total under 220 words — truncation destroys the page):
 
 ${COPY_SCHEMA}
@@ -185,15 +190,19 @@ Craft rules — this is what makes copy convert:
 - marquee: 3-6 punchy keywords for a scrolling band (cafes, studios, offers) — omit for reports.
 - Respect the design voice: "${thought.design.voice || 'clear, confident'}" for audience "${thought.design.audience || 'general'}".`;
   try {
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'copywriter',
+      'writing the page copy',
       [
         { role: 'system', content: skillsBlock ? `${sys}
 
 ${skillsBlock}` : sys },
-        { role: 'user', content: [copyPromptContext({ kind, title, brief, brand, thought }), factsBlock].filter(Boolean).join('\n\n') },
+        { role: 'user', content: [copyPromptContext({ kind, title, brief, brand, thought }), factsBlock, leadBlock(lead)].filter(Boolean).join('\n\n') },
       ],
-      { json: true, maxTokens: 2000, temperature: 0.75 }
+      { json: true, maxTokens: 2000, temperature: 0.75 },
+      (out) => `"${String(out?.headline || '').slice(0, 60)}"`
     );
     return { content: sanitizeCopy(j, { kind, brand }), ai: true };
   } catch {
@@ -369,10 +378,13 @@ export function applyCtaOverrides(content, { cta_text, cta_url, contact_email } 
  * One JSON call: the model returns the UPDATED content object. Falls
  * back to the unchanged plan when the call fails (caller still re-renders).
  */
-export async function applyRefinement(env, { instruction, kind, content, design, brand }) {
+export async function applyRefinement(env, { instruction, kind, content, design, brand, team = null }) {
   try {
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'copywriter',
+      'applying the change request',
       [
         {
           role: 'system',
@@ -380,7 +392,8 @@ export async function applyRefinement(env, { instruction, kind, content, design,
         },
         { role: 'user', content: `INSTRUCTION: ${String(instruction).slice(0, 600)}\n\nBrand: ${brand.name}. Return the full updated content JSON now.` },
       ],
-      { json: true, maxTokens: 1600, temperature: 0.6 }
+      { json: true, maxTokens: 1600, temperature: 0.6 },
+      () => 'content updated from the instruction'
     );
     const merged = sanitizeCopy(j, { kind, brand });
     // The model may legitimately drop groups — start from the old content

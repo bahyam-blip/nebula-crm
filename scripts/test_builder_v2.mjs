@@ -304,6 +304,8 @@ let sig = { artifact_id: '' };
   sarvamScript.length = 0;
   sarvamScript.push(
     ...codegenScript(),
+    // Agent v8: the Lead orchestrator plans the run first
+    { match: (t) => t.includes('elite multi-agent web studio'), reply: { audience: 'coffee lovers in mumbai', research_focus: 'mumbai cafe market', queries: ['mumbai specialty coffee trend'], sections_target: 4, emphasis: ['menu tactile'], risks: ['generic cafe look'], tone_note: 'warm, specific, sensory' } },
     { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'aurora', palette: { accent: '#c07a3d' }, font: 'modern', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee trend'] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Musafir Coffee', kicker: 'Mumbai', headline: 'Coffee worth the trip', sub: 'Single-origin pours and weekend cuppings at Musafir.', primary_cta: { label: 'Find us', href: 'mailto:hi@musafir.test' }, features: [{ icon: '☕', title: 'Single origin', text: 'Beans from Coorg estates, roasted weekly.' }, { icon: '🥐', title: 'Fresh bakes', text: 'Croissants at 8am sharp.' }], contact: { email: 'hi@musafir.test' } } },
   );
@@ -316,11 +318,14 @@ let sig = { artifact_id: '' };
   ok(/^https:\/\/worker\.test\/sites\/s_[a-z0-9]+$/.test(res.url || ''), 'returns the public URL', res.url);
   ok(res.version === 1, 'first build is version 1');
   const stages = res.stages.map((s) => s.stage);
-  ok(stages[0] === 'think' && stages.includes('research') && stages.includes('write') && stages.includes('plan') && stages.includes('wire'),
-    'stage trace: think → research → write → plan → code → wire', JSON.stringify(stages));
+  ok(stages[0] === 'lead' && stages.includes('think') && stages.includes('research') && stages.includes('write') && stages.includes('plan') && stages.includes('wire'),
+    'stage trace: lead → think → research → write → plan → code → wire', JSON.stringify(stages));
   ok(stages.filter((s) => String(s).startsWith('code:')).length === 3, 'three sections hand-coded (hero, features, contact)', JSON.stringify(stages));
   ok(res.stages.find((s) => s.stage === 'research')?.ai === true, 'research stage actually used the live web');
   ok(res.stages.find((s) => s.stage === 'plan')?.ai === true, 'plan stage was a real AI call');
+  ok(Array.isArray(res.team) && ['Lead', 'Researcher', 'Art Director', 'Copywriter', 'Architect', 'Engineer', 'QA Director', 'Builder'].every((a) => res.team.some((r) => r.agent === a)),
+    'multi-agent team trace in the response (v8)', JSON.stringify((res.team || []).map((r) => r.agent)));
+  ok(res.team_summary?.ai_calls >= 8 && res.team_summary?.agents >= 8, `team summary honest (${JSON.stringify(res.team_summary)})`);
 
   const page = await serve(siteId);
   ok(page.res.status === 200 && page.text.includes('Coffee worth the trip'), 'served page carries the AI copy');

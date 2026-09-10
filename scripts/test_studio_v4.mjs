@@ -390,7 +390,7 @@ let siteId = '';
   ok(/^https:\/\/worker\.test\/sites\//.test(built.json.url || ''), 'build returns public URL', built.json.url);
   siteId = built.json.artifact_id;
   // think + polish + write + plan + 3 section codes + review = 8 AI calls
-  ok(captured.sarvam.length === 8, 'Sarvam called 8× for a full codegen build (think/polish/write/plan/3×code/review)', String(captured.sarvam.length));
+  ok(captured.sarvam.length === 9, 'Sarvam called 9× for a full codegen build (lead/think/polish/write/plan/3×code/review)', String(captured.sarvam.length));
   ok(Array.isArray(built.json.stages) && built.json.stages.length >= 8, 'build response carries the full stage trace (plan + code:* + review + wire)', JSON.stringify(built.json.stages));
   ok(built.json.builder === 'ai', 'builder=ai — the agent hand-coded the page', built.json.builder);
 

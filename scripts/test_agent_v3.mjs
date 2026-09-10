@@ -324,6 +324,8 @@ let aiSiteId = '';
   // v3 pipeline: THINK → RESEARCH → WRITE → POLISH → PLAN → CODE per section → REVIEW → WIRE.
   sarvamScript.push(
     ...codegenScript(),
+    // Agent v8: the Lead orchestrator plans the run before the specialists
+    { match: (t) => t.includes('elite multi-agent web studio'), reply: { audience: 'Mumbai foodies', research_focus: 'mumbai bakery market', queries: [], sections_target: 4, emphasis: ['menu highlights'], risks: ['generic bakery look'], tone_note: 'warm artisan specificity' } },
     { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'editorial', palette: { accent: '#b3402a' }, font: 'serif', voice: 'warm artisan', audience: 'Mumbai foodies', headline_angle: 'Fresh sourdough daily', must_have: ['menu highlights'], research_queries: [] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Sunrise Bakehouse', kicker: 'Bakery', headline: 'Sunrise Bakehouse', sub: 'Fresh Mumbai sourdough daily.', primary_cta: { label: 'Order now', href: 'mailto:hello@sunrise.test' }, features: [{ icon: '🥐', title: 'Baked at dawn', text: 'Croissants out of the oven by 7am.' }], contact: { email: 'hello@sunrise.test' } } },
   );
@@ -333,6 +335,8 @@ let aiSiteId = '';
   ok(res.ok === true && res.builder === 'ai', 'build_website AI codegen pipeline succeeds (agent hand-coded the page)', JSON.stringify(res).slice(0, 160));
   ok(Array.isArray(res.stages) && res.stages.some((s) => s.stage === 'think') && res.stages.some((s) => s.stage === 'write') && res.stages.some((s) => String(s.stage).startsWith('code:')),
     'build returns the stage trace (think → write → code:<section> → wire)', JSON.stringify(res.stages));
+  ok(Array.isArray(res.team) && ['Lead', 'Art Director', 'Copywriter', 'Architect', 'Engineer', 'QA Director'].every((a) => res.team.some((r) => r.agent === a)),
+    'build returns the multi-agent team trace (v8)', JSON.stringify((res.team || []).map((r) => r.agent)));
   ok(/^https:\/\/worker\.test\/sites\/s_[a-z0-9]+$/.test(res.url || ''), 'returns public URL', res.url);
   aiSiteId = res.artifact_id;
 
