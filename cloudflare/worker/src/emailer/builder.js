@@ -407,7 +407,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
 
 /* ── The build_website tool / Studio build endpoint ─────────────────── */
 
-export async function buildWebsite(env, store, user, args, origin = '', { sink = null } = {}) {
+export async function buildWebsite(env, store, user, args, origin = '', { sink = null, runId = null } = {}) {
   const kind = SITE_KINDS.includes(String(args.kind)) ? String(args.kind) : 'landing';
   const title = String(args.title || '').trim().slice(0, 120);
   const brief = String(args.brief || args.instruction || '').trim().slice(0, 4000);
@@ -415,6 +415,28 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     return { ok: false, error: 'brief is too short — describe what the site is for, its audience and the key message.' };
   }
   const effTitle = title || brief.split(/(?:[.!?]|\n)/)[0].trim().slice(0, 80) || `${kind} page`;
+
+  // LIVE RUN (v9.1): a client-supplied run id turns this build into a
+  // watchable run — the run doc streams team rows while the request runs.
+  let liveSink = sink;
+  let finalizeRun = null;
+  const cleanRunId = String(runId || '').trim();
+  if (!liveSink && store && /^[a-z0-9_]{4,24}$/i.test(cleanRunId)) {
+    const runKey = `agent:run:${cleanRunId}`;
+    let latest = {
+      id: cleanRunId, uid: user?.uid || '', kind, title: effTitle,
+      at: new Date().toISOString(), status: 'running', trace: [], stages: [], summary: null, result: null, error: null,
+    };
+    await store.put(runKey, JSON.stringify(latest)).catch(() => {});
+    const persist = async (patch = {}) => {
+      try {
+        latest = { ...latest, ...patch };
+        await store.put(runKey, JSON.stringify(latest));
+      } catch { /* telemetry must never fail the build */ }
+    };
+    liveSink = (doc) => persist({ trace: Array.isArray(doc?.trace) ? doc.trace : [], stages: Array.isArray(doc?.stages) ? doc.stages : [], summary: doc?.summary || null });
+    finalizeRun = (patch) => persist(patch);
+  }
 
   const profile = store ? await getBusinessProfile(store).catch(() => null) : null;
   const brand = brandFor(env, profile);
@@ -425,7 +447,10 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
 
   // Rate limit — extreme capability, guarded (applies to app + MCP + chat).
   const rl = await rateLimit(store, user?.uid || '', 'build_website');
-  if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
+  if (!rl.ok) {
+    if (finalizeRun) await finalizeRun({ status: 'error', error: String(rl.error || 'rate limited').slice(0, 200) });
+    return { ok: false, rateLimited: true, error: rl.error };
+  }
 
   let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '';
   try {
@@ -440,7 +465,7 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
       ];
       teamTrace = [{ agent: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections', action: 'coding the single-file web app', ok: builder === 'ai', ai: builder === 'ai', ms: 0, detail: builder === 'ai' ? 'app hand-coded in one file' : 'signature app shell' }];
     } else {
-      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand, sink });
+      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand, sink: liveSink });
       html = r.html;
       // 'ai' = the AI led design + copy AND hand-wrote the page code.
       // 'ai+engine' = AI design/copy with the deterministic engine render
@@ -493,6 +518,26 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     version: 1, versions: [{ v: 1, at: new Date().toISOString(), bytes: html.length, sha256: digest }],
     at: new Date().toISOString(), by: user?.displayName || 'agent',
   });
+
+  if (finalizeRun) {
+    await finalizeRun({
+      status: 'done',
+      result: {
+        artifact_id: id,
+        kind,
+        title: effTitle,
+        url: finalUrl,
+        builder,
+        bytes: html.length,
+        sha256: digest,
+        version: 1,
+        team: teamTrace,
+        team_summary: teamSummary,
+        reflected,
+        note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
+      },
+    });
+  }
 
   return {
     ok: true,
@@ -748,87 +793,22 @@ export async function refineSite(env, store, user, args, origin = '') {
   };
 }
 
-/* ── Live runs (v9) — watch the team work, in real time ─────────────── */
+/* ── Live runs (v9.1) — watch the team work, in real time ─────────── */
 
 /**
- * START A LIVE BUILD RUN — async mode for the Studio. Persists a run doc
- * (`agent:run:<jobId>`) that the team's sink updates after EVERY agent
- * row, so GET /v1/studio/run shows the real team working in real time.
- * The build itself continues under ctx.waitUntil; the same pipeline,
- * rate limits and fallbacks as the synchronous path apply. When ctx is
- * unavailable the run simply completes inline (legacy behavior).
+ * HOW LIVE RUNS WORK (v9.1): the CLIENT generates the run id and sends it
+ * with the build request. buildWebsite then persists a run doc
+ * (agent:run:<runId>) and the team's sink streams every agent row into it
+ * WHILE THE BUILD REQUEST IS IN FLIGHT - the app (or any client) polls
+ * GET /v1/studio/run?id=<runId> and watches the real team work. The final
+ * write (result payload) lands in the same request, so the run doc is
+ * always complete when the POST response arrives.
+ *
+ * WHY NOT waitUntil: a background promise only survives ~30s after the
+ * response - a 60-90s bespoke build gets killed mid-flight (verified
+ * live). Streaming inside the synchronous request is unbounded by that
+ * cap and keeps the proven pipeline, rate limits and fallbacks untouched.
  */
-export async function startBuildRun(env, store, user, args, origin = '', ctx = null) {
-  const uid = user?.uid || '';
-  const kind = SITE_KINDS.includes(String(args.kind)) ? String(args.kind) : 'landing';
-  const title = String(args.title || '').trim().slice(0, 120) || 'your page';
-  const jobId = `b_${Date.now().toString(36)}${Math.floor(Math.random() * 46656).toString(36)}`;
-  const jobKey = `agent:run:${jobId}`;
-  const at = new Date().toISOString();
-
-  let latest = { id: jobId, uid, kind, title, at, status: 'running', trace: [], stages: [], summary: null, result: null, error: null };
-  // All writes for one job go through ONE queue so a trailing trace-row
-  // write can never land after the final 'done' write and resurrect
-  // status:'running' after completion.
-  let q = Promise.resolve();
-  const persist = (patch = {}) => {
-    q = q
-      .then(async () => {
-        if (!store) return;
-        latest = { ...latest, ...patch };
-        await store.put(jobKey, JSON.stringify(latest));
-      })
-      .catch(() => {});
-    return q;
-  };
-  const sink = (runDoc) => persist({
-    trace: Array.isArray(runDoc?.trace) ? runDoc.trace : [],
-    stages: Array.isArray(runDoc?.stages) ? runDoc.stages : [],
-    summary: runDoc?.summary || null,
-  });
-
-  await persist({ status: 'running' });
-
-  const run = (async () => {
-    try {
-      const result = await buildWebsite(env, store, user, args, origin, { sink });
-      await persist({
-        status: result.ok ? 'done' : 'error',
-        result: result.ok
-          ? {
-              artifact_id: result.artifact_id,
-              kind: result.kind,
-              title: result.title,
-              url: result.url,
-              builder: result.builder,
-              bytes: result.bytes,
-              sha256: result.sha256,
-              version: result.version,
-              team: result.team || [],
-              team_summary: result.team_summary || null,
-              reflected: result.reflected || '',
-              note: result.note || '',
-            }
-          : null,
-        error: result.ok ? null : String(result.error || 'the build did not finish'),
-      });
-    } catch (e) {
-      console.error('[builder] live run failed:', e?.stack || e);
-      await persist({ status: 'error', error: String(e?.message || e).slice(0, 200) });
-    }
-  })();
-
-  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(run);
-  else await run;
-
-  return {
-    ok: true,
-    job_id: jobId,
-    status: 'running',
-    poll: `/v1/studio/run?id=${jobId}`,
-    note: 'the team is assembling — poll the run endpoint to watch every agent work',
-  };
-}
 
 /**
  * READ A LIVE RUN — status + the team trace so far. Owner-scoped: a run

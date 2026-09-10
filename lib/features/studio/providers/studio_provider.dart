@@ -102,14 +102,23 @@ class StudioController extends StateNotifier<StudioState> {
   Timer? _stageTimer;
 
   static const _pollInterval = Duration(milliseconds: 2500);
-  static const _maxPolls = 120; // 300s budget, mirrors the server-side run cap
+  static const _maxPolls = 120; // 300s of watching, > the 240s build timeout
+
+  /// A unique run id (client-side, `b_` + base36 time + jitter) — the Worker
+  /// streams the team's trace into `agent:run:<runId>` while the build
+  /// request is in flight.
+  String _newRunId() {
+    final t = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+    final r = (DateTime.now().microsecondsSinceEpoch % 1679616).toRadixString(36).padLeft(4, '0');
+    return 'b_$t$r';
+  }
 
   void _startStages() {
     _stageTimer?.cancel();
     state = state.copyWith(stageIndex: 0, clearTrace: true);
-    // Fallback pacer: while the live stream has not connected yet (or on an
-    // old Worker), the ticker keeps progress honest about ORDER. It holds
-    // on the last stage until the build actually lands.
+    // Fallback pacer: while the live run doc has not appeared (old Worker)
+    // or before its first row lands, the ticker keeps progress honest about
+    // ORDER. Real agent rows replace it the moment they stream in.
     _stageTimer = Timer.periodic(const Duration(milliseconds: 4600), (t) {
       if (!state.building) {
         t.cancel();
@@ -126,33 +135,26 @@ class StudioController extends StateNotifier<StudioState> {
     _stageTimer = null;
   }
 
-  /// Watch a live run: poll GET /v1/studio/run every 2.5s, push every new
-  /// agent row into [state.liveTrace] (the UI swaps the ticker for the real
-  /// team), and complete when the run lands.
-  Future<StudioSite> _watchRun(String jobId) async {
+  /// Watch the run doc while the build request is in flight: poll every
+  /// 2.5s and push every new agent row into [state.liveTrace] — the UI
+  /// swaps the ticker for the REAL team. Telemetry only: never throws,
+  /// never affects the build's outcome (the POST response is the truth).
+  Future<void> _watchRun(String runId) async {
     var seen = 0;
     for (var i = 0; i < _maxPolls; i++) {
-      await Future<void>.delayed(i == 0 ? const Duration(milliseconds: 700) : _pollInterval);
-      final StudioRunStatus s;
+      await Future<void>.delayed(i == 0 ? const Duration(milliseconds: 900) : _pollInterval);
+      if (!state.building) return; // build finished — stop watching
       try {
-        s = await _api.pollRun(jobId);
+        final s = await _api.pollRun(runId);
+        if (s.trace.length > seen) {
+          seen = s.trace.length;
+          state = state.copyWith(liveTrace: s.trace);
+        }
+        if (s.status != 'running') return; // done/error/timeout — final doc
       } on StudioApiException {
-        continue; // transient network error — keep watching
-      }
-      if (s.trace.length > seen) {
-        seen = s.trace.length;
-        state = state.copyWith(liveTrace: s.trace);
-      }
-      if (s.status == 'done' && s.site != null) return s.site!;
-      if (s.status == 'error') {
-        throw StudioApiException(s.error ?? 'The build failed.');
-      }
-      if (s.status == 'timeout') {
-        throw StudioApiException(
-            'The team took longer than its budget. Check your sites list — the build may still have landed.');
+        continue; // old server (404: no run doc) or a network blip — keep going
       }
     }
-    throw StudioApiException('Lost contact with the build team. Check your sites list in a moment.');
   }
 
   Future<void> refresh() async {
@@ -176,10 +178,11 @@ class StudioController extends StateNotifier<StudioState> {
   /// Build a site. [onDone] hands back the fresh artifact so the caller can
   /// navigate straight into the live preview.
   ///
-  /// Primary path (Agent v9): start a LIVE RUN and stream the real team
-  /// trace into [state.liveTrace] while it works. If the server or network
-  /// can't do live runs, fall back to the legacy synchronous build with the
-  /// ticker pacer — the user never sees a dead screen either way.
+  /// WATCHABLE RUN (Agent v9.1): the build request carries a client-run id
+  /// and a concurrent poll loop streams the team's REAL trace into
+  /// [state.liveTrace] while the request is in flight. On an old Worker the
+  /// run doc never appears, the poll loop quietly no-ops, and the ticker
+  /// paces the wait — the user sees a live team either way.
   Future<void> buildSite({
     required String title,
     required String brief,
@@ -192,29 +195,17 @@ class StudioController extends StateNotifier<StudioState> {
     state = state.copyWith(building: true, clearError: true);
     _startStages();
     try {
-      String? jobId;
-      try {
-        jobId = await _api.startBuild(
-          title: title,
-          brief: brief,
-          kind: kind,
-          style: style,
-          ctaText: ctaText,
-          ctaUrl: ctaUrl,
-        );
-      } catch (_) {
-        jobId = null; // old deployment / offline hiccup → legacy path below
-      }
-      final site = jobId != null
-          ? await _watchRun(jobId)
-          : await _api.buildSite(
-              title: title,
-              brief: brief,
-              kind: kind,
-              style: style,
-              ctaText: ctaText,
-              ctaUrl: ctaUrl,
-            );
+      final runId = _newRunId();
+      unawaited(_watchRun(runId)); // telemetry only — never throws
+      final site = await _api.buildSite(
+        title: title,
+        brief: brief,
+        kind: kind,
+        style: style,
+        ctaText: ctaText,
+        ctaUrl: ctaUrl,
+        runId: runId,
+      );
       _stopStages();
       state = state.copyWith(building: false);
       await refresh();

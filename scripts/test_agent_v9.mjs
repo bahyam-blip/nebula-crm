@@ -12,8 +12,8 @@
  *     degradation)
  *   • reflectOnBuild — the post-build self-evolution loop (learn,
  *     sharpen, skip, outage-safe)
- *   • startBuildRun/getRunStatus — the async live-run flow (job doc,
- *     result payload, owner scoping, timeout honesty)
+ *   • getRunStatus + the client-run-id flow — the run doc streams the
+ *     team trace DURING the build request (owner-scoped, timeout honesty)
  *   • SURGICAL refine — sections:['hero'] re-codes ONLY the hero, reuses
  *     every other fragment byte-identical, bumps the version; missing
  *     fragments / unknown ids fall back to a full re-code
@@ -33,7 +33,7 @@ const D = await import('../cloudflare/worker/src/emailer/designer.js');
 const B = await import('../cloudflare/worker/src/emailer/builder.js');
 const { AGENT_TEAM, createTeamRun, leadPlan, leadBlock, defaultLeadPlan, reflectOnBuild } = A;
 const { researchIntelligence, researchFacts } = D;
-const { buildWebsite, refineSite, startBuildRun, getRunStatus } = B;
+const { buildWebsite, refineSite, getRunStatus } = B;
 
 /* ── Sarvam + web fetch mock (scripted + captured) ────────────────── */
 const sarvamScript = [];
@@ -267,35 +267,41 @@ section('BUILD v9 — reflect stage + response');
   ok(plan.coded.find((c) => c.id === 'menu').html.includes('Bespoke menu section'), 'menu fragment is the real coded HTML');
 }
 
-/* ══ 7. LIVE RUNS — start + poll, owner-scoped ═════════════════════ */
+/* ══ 7. LIVE RUNS — client-generated run id, streamed during the request ══ */
 section('LIVE RUNS — watch the team work');
 {
   primeFullBuild();
   const st = memStore();
-  let captured;
-  const ctx = { waitUntil(p) { captured = p; } };
-  const job = await startBuildRun(env, st, { uid: 'u_live', displayName: 'Owner' },
-    { title: 'Musafir Live', kind: 'landing', brief: 'A cozy specialty coffee shop in Mumbai with single-origin pours.' }, 'https://worker.test', ctx);
-  ok(job.ok === true && /^b_[a-z0-9]+$/.test(job.job_id), 'job id issued', job.job_id);
-  ok(job.poll === `/v1/studio/run?id=${job.job_id}`, 'poll path returned');
+  const runId = 'b_livetest01';
 
-  // wait for the detached run to land (mock AI is fast)
-  let doc = null;
-  for (let i = 0; i < 200; i++) {
-    await sleep(25);
-    doc = JSON.parse(await st.get(`agent:run:${job.job_id}`));
-    if (doc?.status === 'done' || doc?.status === 'error') break;
+  // Simulate the app: poll the run doc WHILE the build request runs.
+  const buildPromise = buildWebsite(env, st, { uid: 'u_live', displayName: 'Owner' },
+    { title: 'Musafir Live', kind: 'landing', brief: 'A cozy specialty coffee shop in Mumbai with single-origin pours.', run_id: runId },
+    'https://worker.test', { runId });
+  let grewDuringRun = false, midRunRows = 0, polls = 0;
+  while (st.__map.get(`agent:run:${runId}`) === undefined) await sleep(2); // doc appears once validation passes
+  const docMid = JSON.parse(await st.get(`agent:run:${runId}`));
+  ok(docMid.status === 'running' && docMid.uid === 'u_live', 'run doc pre-created, running, owner-scoped');
+  for (;;) {
+    await sleep(2);
+    polls++;
+    const d = JSON.parse((await st.get(`agent:run:${runId}`)) || 'null');
+    if (d?.trace?.length > midRunRows) { grewDuringRun = midRunRows > 0 || d.trace.length > 1; midRunRows = d.trace.length; }
+    if (d?.status !== 'running' || polls > 20000) break;
   }
-  ok(doc?.status === 'done', 'run doc reached done');
-  ok(doc?.result?.artifact_id && doc.result.url === `https://worker.test/sites/${doc.result.artifact_id}`, 'result payload carries the artifact');
+  const res = await buildPromise;
+  ok(res.ok === true && res.builder === 'ai', 'watchable build succeeds (same sync pipeline)');
+  const doc = JSON.parse(await st.get(`agent:run:${runId}`));
+  ok(doc.status === 'done', 'run doc finalized INSIDE the request (no waitUntil)');
+  ok(doc.result?.artifact_id && doc.result.url === `https://worker.test/sites/${doc.result.artifact_id}`, 'result payload carries the artifact');
   ok(doc.result.builder === 'ai' && doc.result.team_summary?.ai_calls >= 9, `result carries builder + team summary (${doc.result?.team_summary?.ai_calls})`);
   ok((doc.trace || []).some((r) => r.agent === 'Reflector'), 'live trace streamed the Reflector row');
-  ok(captured instanceof Promise, 'run handed to ctx.waitUntil');
+  ok(doc.trace.length === (res.team || []).length, `run doc trace matches the response trace (${doc.trace.length})`);
 
-  const status = await getRunStatus(st, 'u_live', job.job_id);
+  const status = await getRunStatus(st, 'u_live', runId);
   ok(status.ok === true && status.status === 'done', 'getRunStatus: done');
   ok(status.trace.length >= 10 && status.result?.artifact_id, 'poll returns the full trace + result');
-  ok((await getRunStatus(st, 'u_other', job.job_id)).ok === false, 'runs are owner-scoped');
+  ok((await getRunStatus(st, 'u_other', runId)).ok === false, 'runs are owner-scoped');
   ok((await getRunStatus(st, 'u_live', '../etc')).ok === false, 'bad ids rejected');
   ok((await getRunStatus(st, 'u_live', 'b_missing')).ok === false, 'unknown id → not found');
 
@@ -303,6 +309,14 @@ section('LIVE RUNS — watch the team work');
   await st.put('agent:run:z_old', JSON.stringify({ id: 'z_old', uid: 'u_live', kind: 'landing', title: 'stale', at: new Date(Date.now() - 400_000).toISOString(), status: 'running', trace: [], stages: [] }));
   const stale = await getRunStatus(st, 'u_live', 'z_old');
   ok(stale.status === 'timeout' && /time budget/.test(stale.note), 'stale running doc reports timeout honestly');
+
+  // invalid run ids are ignored cleanly (no doc, build still fine)
+  const st2 = memStore();
+  primeFullBuild();
+  const res2 = await buildWebsite(env, st2, { uid: 'u_live2' },
+    { title: 'Musafir', kind: 'landing', brief: 'A cozy specialty coffee shop in Mumbai with single-origin pours.', run_id: 'BAD ID!' },
+    'https://worker.test', { runId: 'BAD ID!' });
+  ok(res2.ok === true && (await st2.get('agent:run:BAD ID!')) === null, 'invalid run id ignored — build unaffected');
 }
 
 /* ══ 8. SURGICAL REFINE — re-code only the hero ════════════════════ */

@@ -105,37 +105,10 @@ class StudioApiService {
     return json;
   }
 
-  /// START a live build run (Agent v9): returns a job id immediately while
-  /// the agent team streams its trace to [pollRun]. Throws [StudioApiException]
-  /// if the server (old deployment) or network can't do async — the caller
-  /// then falls back to the legacy synchronous [buildSite].
-  Future<String> startBuild({
-    required String title,
-    required String brief,
-    required String kind,
-    String? style,
-    String? ctaText,
-    String? ctaUrl,
-  }) async {
-    final json = await _send('POST', '/v1/studio/build', body: {
-      'title': title,
-      'brief': brief,
-      'kind': kind,
-      'wait': false,
-      if (style != null && style.isNotEmpty) 'style': style,
-      if (ctaText != null && ctaText.isNotEmpty) 'cta_text': ctaText,
-      if (ctaUrl != null && ctaUrl.isNotEmpty) 'cta_url': ctaUrl,
-    }, timeoutSeconds: 30);
-    if (json['ok'] != true || (json['job_id'] as String?) == null) {
-      throw StudioApiException((json['error'] as String?) ?? 'Could not start the build.');
-    }
-    return json['job_id'] as String;
-  }
-
-  /// Poll a live run: status + every agent row so far + the finished site
-  /// when the run is done. [pollPath]/[jobId] map to GET /v1/studio/run.
-  Future<StudioRunStatus> pollRun(String jobId) async {
-    final json = await _send('GET', '/v1/studio/run?id=$jobId');
+  /// Poll a live run: status + every agent row so far (+ the finished site
+  /// in the result payload when the run doc is done).
+  Future<StudioRunStatus> pollRun(String runId) async {
+    final json = await _send('GET', '/v1/studio/run?id=$runId');
     if (json['ok'] != true) {
       throw StudioApiException((json['error'] as String?) ?? 'Run not found.');
     }
@@ -158,8 +131,12 @@ class StudioApiService {
   }
 
   /// Build a site: AI generates a complete branded page, hosted instantly
-  /// at /sites/<id>. Long timeout — generation takes a while. (Legacy
-  /// synchronous mode; the live path is [startBuild] + [pollRun].)
+  /// at /sites/<id>. Long timeout — generation takes a while.
+  ///
+  /// Pass [runId] (client-generated, e.g. `b_x7g2k1abcd`) to make the build
+  /// a WATCHABLE RUN: the Worker streams the team's trace into that run doc
+  /// while the request is in flight; poll [pollRun] concurrently for the
+  /// live agent feed. Old deployments simply ignore it.
   Future<StudioSite> buildSite({
     required String title,
     required String brief,
@@ -167,11 +144,13 @@ class StudioApiService {
     String? style,
     String? ctaText,
     String? ctaUrl,
+    String? runId,
   }) async {
     final json = await _send('POST', '/v1/studio/build', body: {
       'title': title,
       'brief': brief,
       'kind': kind,
+      if (runId != null && runId.isNotEmpty) 'run_id': runId,
       if (style != null && style.isNotEmpty) 'style': style,
       if (ctaText != null && ctaText.isNotEmpty) 'cta_text': ctaText,
       if (ctaUrl != null && ctaUrl.isNotEmpty) 'cta_url': ctaUrl,
