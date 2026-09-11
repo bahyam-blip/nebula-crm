@@ -34,7 +34,7 @@
  * the assembler guarantees a complete document (doctype → </html>).
  */
 
-import { runAgent } from './agents.js';
+import { runAgent, understandingBlock } from './agents.js';
 import { hex, lum, mix, FONT_STACKS, DISPLAY_OF_FONT } from './site_templates.js';
 import { esc, safeHref } from './htmlutil.js';
 
@@ -61,14 +61,15 @@ function copyFragment(content, keys) {
 
 /* ══ Stage 4 — PLAN ══════════════════════════════════════════════════ */
 
-const PLAN_SYSTEM = `You are the lead architect of a world-class web studio. A client wants a bespoke page. Plan its information architecture. Respond with ONLY JSON:
+const PLAN_SYSTEM = `You are the lead architect of a world-class web studio. A client wants a bespoke page. Plan its information architecture — mapped to the design director's UX flow. Respond with ONLY JSON:
 
-{"sections":[{"id":"short-id (a-z, 3-10 chars)","name":"Nav label, 1-2 words","goal":"what this section must make the visitor think or do","layout":"1-2 sentences describing the COMPOSITION you will hand-code for this content — asymmetry, columns, alignment, art placement. Decide like a designer, not a menu.","content_keys":["which copy JSON groups this section renders, e.g. headline, sub, primary_cta, features"],"motion":"the entrance/ambient motion idea, 5-12 words"}],"nav":["section ids to show in the navbar, 3-5, ending with a contact-ish section"]}
+{"sections":[{"id":"short-id (a-z, 3-10 chars)","name":"Nav label, 1-2 words","goal":"what this section must make the visitor think or do","journey":"which UX-flow beat this section serves, 2-6 words","layout":"1-2 sentences describing the COMPOSITION you will hand-code for this content — asymmetry, columns, alignment, art placement. Decide like a designer, not a menu.","content_keys":["which copy JSON groups this section renders, e.g. headline, sub, primary_cta, features"],"motion":"the entrance/ambient motion idea, 5-12 words"}],"nav":["section ids to show in the navbar, 3-5, ending with a contact-ish section"]}
 
 Rules:
 - 4-6 sections total. First MUST be a hero (id "hero"). Last MUST convert (contact/booking/CTA band).
 - Sections must serve THIS business — no generic "About us" filler unless the brief demands proof.
 - Vary composition across sections: do not plan two identical column grids.
+- journey: quote or compress the matching beat from the UX FLOW the Art Director gave you — every section must advance the journey; no dead sections.
 - content_keys come from this vocabulary: kicker, headline, sub, primary_cta, secondary_cta, hero_badges, marquee, stats, features, showcase, testimonials, faq, offer, event, work, skills, report, contact, cta_title, cta_sub.
 - Every content_key you list MUST be rendered by exactly one section (copy must not be dropped).`;
 
@@ -101,9 +102,12 @@ function defaultPlan(kind, content) {
 
 const hasValue = (v) => (Array.isArray(v) ? v.length > 0 : v && typeof v === 'object' ? Object.values(v).some((x) => x !== null && x !== undefined && String(x).trim() !== '') : v !== null && v !== undefined && String(v).trim() !== '');
 
-export async function planSections(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, team = null }) {
+export async function planSections(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, understanding = null, team = null }) {
   const vocabNote = `Available copy groups for THIS page: ${Object.keys(content).filter((k) => hasValue(content[k])).join(', ') || 'headline, sub'}`;
   const cap = Math.min(MAX_SECTIONS, Number(lead?.sections_target) || MAX_SECTIONS);
+  const uxFlow = Array.isArray(thought?.design?.ux_flow) && thought.design.ux_flow.length
+    ? `UX FLOW the visitor travels (map every section to its beat): ${thought.design.ux_flow.join(' | ')}`
+    : '';
   try {
     const j = await runAgent(
       env,
@@ -118,7 +122,9 @@ export async function planSections(env, { kind, brief, brand, thought, content, 
             `PAGE KIND: ${kind}`,
             `BUSINESS: ${brand.name}`,
             `BRIEF: ${String(brief).slice(0, 900)}`,
-            `DESIGN DIRECTION: theme ${thought.design.themeLabel}, voice "${thought.design.voice || 'clear, confident'}", audience "${thought.design.audience || 'general'}", hero style ${thought.design.hero}`,
+            understandingBlock(understanding),
+            `DESIGN DIRECTION: theme ${thought.design.themeLabel}, voice "${thought.design.voice || 'clear, confident'}", audience "${thought.design.audience || 'general'}", hero style ${thought.design.hero}${thought.design.motion_intensity ? `, motion ${thought.design.motion_intensity}` : ''}${thought.design.type_scale ? `, type scale ${thought.design.type_scale}` : ''}`,
+            uxFlow,
             thought.mustHave.length ? `MUST INCLUDE: ${thought.mustHave.join('; ')}` : '',
             lead?.risks?.length ? `THE LEAD FLAGGED THESE RISKS — design against them: ${lead.risks.join('; ')}` : '',
             lead?.emphasis?.length ? `THE LEAD WANTS EXTRA CRAFT ON: ${lead.emphasis.join('; ')}` : '',
@@ -141,6 +147,7 @@ export async function planSections(env, { kind, brief, brand, thought, content, 
         id,
         name: String(sec?.name || id).slice(0, 24),
         goal: String(sec?.goal || '').slice(0, 160),
+        journey: String(sec?.journey || '').slice(0, 60),
         layout: String(sec?.layout || '').slice(0, 320),
         content_keys: Array.isArray(sec?.content_keys) ? sec.content_keys.map((k) => String(k).slice(0, 20)).filter((k) => k in content).slice(0, 6) : [],
         motion: String(sec?.motion || '').slice(0, 120),
@@ -191,16 +198,24 @@ HARD RULES
 
 function sectionUserPrompt({ design, section, content, brand, kind, brief }) {
   const v = designVars(design);
+  const motionLine = design.motion_intensity === 'bold'
+    ? 'MOTION INTENSITY: bold — confident choreographed entrances and visible ambient motion are wanted.'
+    : design.motion_intensity === 'calm'
+      ? 'MOTION INTENSITY: calm — restrained fades and small translations only; no dramatic movement.'
+      : 'MOTION INTENSITY: balanced — clear reveals plus one subtle ambient motif.';
   return [
     `BUSINESS: ${brand.name} — ${String(brief).slice(0, 200)}`,
     `VOICE: "${design.voice || 'clear, confident'}" · AUDIENCE: ${design.audience || 'general'} · KIND: ${kind}`,
-    `PAGE VARIABLES: --bg:${v.bg} --surface:${v.surface} --ink:${v.ink} --muted:${v.muted} --accent:${v.accent} (text on accent: ${v.onAccent}) --accent2:${v.accent2} --border:${v.border} --r:${design.radius}px --font:${DISPLAY_OF_FONT[design.font] || "'Inter', sans-serif"} / body ${FONT_STACKS[design.font]?.css || FONT_STACKS.modern.css}`,
+    `PAGE VARIABLES: --bg:${v.bg} --surface:${v.surface} --ink:${v.ink} --muted:${v.muted} --accent:${v.accent} (text on accent: ${v.onAccent}) --accent2:${v.accent2} --accent-soft (translucent accent tint) --border:${v.border} --r:${design.radius}px --font:${DISPLAY_OF_FONT[design.font] || "'Inter', sans-serif"} / body ${FONT_STACKS[design.font]?.css || FONT_STACKS.modern.css}`,
+    `TYPE SCALE: ${design.type_scale || 'classic'} — dramatic sizes must JUMP between levels; keep the rhythm intentional.`,
+    motionLine,
     `SECTION: "${section.name}" — goal: ${section.goal || 'serve the visitor'}`,
+    section.journey ? `JOURNEY STAGE (serve exactly this beat): ${section.journey}` : '',
     `COMPOSITION YOU DECIDED (make it real): ${section.layout || 'your best judgment'}`,
     `MOTION INTENT: ${section.motion || 'subtle reveal'}`,
     `COPY (use these words — do not invent facts): ${copyFragment(content, section.content_keys)}`,
     `NOW hand-code section "sec-${section.id}".`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function sanitizeSectionHtml(html, id) {
@@ -409,10 +424,27 @@ export function globalCss(design) {
   const display = DISPLAY_OF_FONT[design.font] || "'Inter', sans-serif";
   const google = FONT_STACKS[design.font]?.google || FONT_STACKS.modern.google;
   const r = design.radius || 16;
+  // v10 design-system tokens: motion intensity scales the reveal system,
+  // type scale sets the fluid steps, texture picks the page treatment.
+  const motion = design.motion_intensity || 'balanced';
+  const revShift = motion === 'bold' ? '34px' : motion === 'calm' ? '16px' : '26px';
+  const revBlur = motion === 'bold' ? '9px' : motion === 'calm' ? '4px' : '6px';
+  const revDur = motion === 'bold' ? '.8s' : motion === 'calm' ? '.55s' : '.7s';
+  const steps = design.type_scale === 'dramatic'
+    ? '--step-0:clamp(.95rem,.92rem + .3vw,1.05rem);--step-1:clamp(1.15rem,1.05rem + .6vw,1.4rem);--step-2:clamp(1.45rem,1.2rem + 1.4vw,2.1rem);--step-3:clamp(1.9rem,1.4rem + 2.6vw,3.4rem);--step-4:clamp(2.4rem,1.5rem + 4.6vw,5.2rem);--step-5:clamp(3rem,1.6rem + 7.2vw,7.6rem)'
+    : design.type_scale === 'compact'
+      ? '--step-0:clamp(.9rem,.88rem + .2vw,1rem);--step-1:clamp(1.05rem,1rem + .35vw,1.25rem);--step-2:clamp(1.25rem,1.15rem + .7vw,1.7rem);--step-3:clamp(1.5rem,1.35rem + 1.2vw,2.2rem);--step-4:clamp(1.8rem,1.5rem + 2vw,2.9rem);--step-5:clamp(2.2rem,1.7rem + 3vw,3.8rem)'
+      : '--step-0:clamp(.95rem,.9rem + .25vw,1.05rem);--step-1:clamp(1.1rem,1.02rem + .5vw,1.35rem);--step-2:clamp(1.35rem,1.18rem + 1vw,1.9rem);--step-3:clamp(1.7rem,1.4rem + 2vw,2.8rem);--step-4:clamp(2.1rem,1.55rem + 3.4vw,4rem);--step-5:clamp(2.6rem,1.7rem + 5.4vw,5.6rem)';
+  const texture = design.texture === 'grid'
+    ? `body::before{content:"";position:fixed;inset:0;z-index:1990;pointer-events:none;opacity:.05;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse at 50% 0%,black 30%,transparent 75%)}`
+    : design.texture === 'clean'
+      ? ''
+      : `body::after{content:"";position:fixed;inset:-50%;z-index:2000;pointer-events:none;opacity:.05;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}`;
   return {
     google,
     css: `
-:root{--bg:${v.bg};--surface:${v.surface};--card:${v.card};--ink:${v.ink};--muted:${v.muted};--accent:${v.accent};--accent2:${v.accent2};--on-accent:${v.onAccent};--border:${v.border};--r:${r}px;--maxw:1120px;--font:${body};--display:${display};--sp1:6px;--sp2:12px;--sp3:20px;--sp4:32px;--sp5:52px;--sp6:84px}
+:root{--bg:${v.bg};--surface:${v.surface};--card:${v.card};--ink:${v.ink};--muted:${v.muted};--accent:${v.accent};--accent2:${v.accent2};--on-accent:${v.onAccent};--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent);--border:${v.border};--r:${r}px;--maxw:1120px;--font:${body};--display:${display};--sp1:6px;--sp2:12px;--sp3:20px;--sp4:32px;--sp5:52px;--sp6:84px;--dur-1:.25s;--dur-2:${revDur};--ease-out:cubic-bezier(.2,.7,.2,1);--shadow-rest:0 10px 30px -18px color-mix(in srgb,var(--accent) 55%,transparent);--shadow-lift:0 18px 44px -18px color-mix(in srgb,var(--accent) 70%,transparent);${steps}
+}
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
@@ -428,8 +460,8 @@ a{color:inherit;text-decoration:none}
 .btn-ghost{border-color:var(--border);color:var(--ink);background:transparent}
 .btn-ghost:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
 .kicker{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
-/* scroll-reveal contract */
-[data-rev]{opacity:0;transform:translateY(26px);filter:blur(6px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1),filter .7s ease}
+/* scroll-reveal contract — intensity-scaled by the design system */
+[data-rev]{opacity:0;transform:translateY(${revShift});filter:blur(${revBlur});transition:opacity ${revDur} var(--ease-out),transform ${revDur} var(--ease-out),filter ${revDur} ease}
 [data-rev][data-rev-delay="1"]{transition-delay:.09s}[data-rev][data-rev-delay="2"]{transition-delay:.18s}[data-rev][data-rev-delay="3"]{transition-delay:.27s}[data-rev][data-rev-delay="4"]{transition-delay:.36s}
 .rev-in[data-rev]{opacity:1;transform:none;filter:none}
 /* nav + footer chrome */
@@ -450,8 +482,7 @@ a{color:inherit;text-decoration:none}
 .foot-note{color:var(--muted);font-size:12.5px}
 /* scroll progress */
 #rev-progress{position:fixed;top:0;left:0;height:2.5px;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));z-index:1000;transition:width .1s linear}
-/* film grain — flat blacks read printed, not rendered */
-body::after{content:"";position:fixed;inset:-50%;z-index:2000;pointer-events:none;opacity:.05;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+${texture === '' ? '/* clean texture — flat, no overlay */' : texture}
 @media (prefers-reduced-motion:reduce){[data-rev]{opacity:1;transform:none;filter:none;transition:none}*{animation-duration:.001s !important;animation-iteration-count:1 !important;transition-duration:.001s !important}html{scroll-behavior:auto}}`,
   };
 }
@@ -545,14 +576,14 @@ ${footerHtml(brand, content)}
  *        the PLAN call and keeps the page architecture stable.
  * @param onStage optional (stage, ok, ai, detail) => void trace callback
  */
-export async function codegenSite(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, preplanned = null, onStage = () => {}, team = null }) {
+export async function codegenSite(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, understanding = null, preplanned = null, onStage = () => {}, team = null }) {
   const trace = (stage, ok, ai, detail) => {
     onStage({ stage, ok, ai, detail });
     if (team) team.stage(stage, ok, ai, detail);
   };
 
   // 1. PLAN — information architecture (or reuse the stored plan).
-  const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock, lead, team }));
+  const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock, lead, understanding, team }));
   trace('plan', true, plan.ai, `${plan.sections.length} sections planned${plan.ai ? '' : ' · classic plan'}`);
 
   // 2. CODE — hand-write every section, IN PARALLEL (sections are

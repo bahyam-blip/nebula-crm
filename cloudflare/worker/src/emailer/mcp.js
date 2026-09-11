@@ -35,7 +35,7 @@ export { serveAgentSite } from './builder.js';
 const GRANT_TTL_SECONDS = 60 * 60 * 24; // pairing grants live 24h
 const GRANT_PREFIX = 'agent:mcp:grant:';
 const MCP_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18'];
-const SERVER_VERSION = '4.1.0';
+export const SERVER_VERSION = '5.0.0';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -100,6 +100,7 @@ export const TOOL_SCHEMAS = {
   plan_task: { type: 'object', properties: { goal: { ...STR, description: 'what you are trying to accomplish, one line' }, steps: { type: 'array', items: STR, description: 'ordered steps (2-10), each one concrete' }, risk: { ...STR, description: 'main risk / dependency, one line (optional)' } }, required: ['goal', 'steps'] },
   list_skills: { type: 'object', properties: { domain: { ...STR, description: 'filter: design|layout|motion|copy|ux|engineering|marketing (optional)' } } },
   learn_skill: { type: 'object', properties: { title: { ...STR, description: 'skill name, e.g. "Restaurant hero patterns that convert"' }, domain: { ...STR, description: 'design|layout|motion|copy|ux|engineering|marketing' }, body: { ...STR, description: 'the distilled RULES (<=80 words) — what you learned and how to apply it' } }, required: ['title', 'body'] },
+  research_skill: { type: 'object', properties: { topic: { ...STR, description: 'a SPECIFIC best-practices question to research, e.g. "restaurant website hero patterns that convert"' }, brief: { ...STR, description: 'optional context — what the skill should serve' } }, required: ['topic'] },
   connector_status: { type: 'object', properties: {} },
   connect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger|supabase' }, label: STR, token: STR, key: STR, secret: STR, service_account_json: STR, access_token: { ...STR, description: 'Supabase personal access token' }, project_ref: { ...STR, description: 'Supabase project ref (the abcdefg part of abcdefg.supabase.co)' } }, required: ['connector'] },
   disconnect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger' } }, required: ['connector'] },
@@ -131,12 +132,13 @@ const MCP_DESCRIPTIONS = {
   distribute_leads: 'Share leads evenly (round robin) across named teammates',
   save_business_profile: 'Update brand fields (name, tagline, industry, tone, colors…)',
   teach_memory: 'Remember a lasting fact or preference about the business',
-  build_website: 'BUILD AND HOST a complete website or mini web app from a brief — a multi-agent team (Lead, Researcher, Art Director, Copywriter, Architect, Engineers, QA, Reflector) hand-codes it, then a Reflector distills the build into a learned skill so the next one is smarter. Returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
+  build_website: 'BUILD AND HOST a complete website or mini web app from a brief — a deep-thinking multi-agent team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified design tokens and UX flow, Copywriter, Copy Chief, Architect, Engineers, QA Director, Builder, Reflector, Skill Researcher) hand-codes it, then grows the skill library from the build. Returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
   refine_site: 'Apply a change request to an already-built site and re-host it at the same URL as a new version. Pass sections (e.g. ["hero"]) for a fast surgical re-code of just those sections',
   save_note: 'Save a note / research summary / report as a shareable artifact',
   plan_task: 'Think in the open: turn a goal into an ordered execution plan before executing it step by step',
-  list_skills: 'List the skill library (seeded expert skills + everything learned live) that improves every site build',
+  list_skills: 'List the skill library (seeded expert skills + everything learned live + web-researched skills) that improves every site build',
   learn_skill: 'Distill a lasting capability into the skill library — learned skills are injected into all future site builds',
+  research_skill: 'RESEARCH a new skill from the live web on a topic and store the distilled rules as a sourced library skill — the agent genuinely studies its craft',
   connector_status: 'Which platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger, Supabase) are connected',
   connect_platform: 'Connect a platform once — credentials are encrypted server-side; publishing and SQL afterwards need no tokens. Prefer pointing the owner at the Studio → Hosting screen',
   disconnect_platform: 'Remove a platform connection and destroy its stored credentials',
@@ -282,14 +284,14 @@ export function mcpServerInfo(request, _env) {
     transport: 'JSON-RPC 2.0 (initialize, tools/list, tools/call, ping)',
     tools: Object.keys(TOOLS).length,
     capabilities: [
-      'multi-agent build team (Lead, Researcher, Art Director, Copywriter, Copy Chief, Architect, Engineers, QA Director, Builder, Reflector) with live run streaming',
+      'deep-thinking multi-agent build team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified tokens + UX flow, Copywriter, Copy Chief, Architect, Engineers, QA Director, Builder, Reflector, Skill Researcher) with live run streaming',
       'surgical refine: re-code named sections only (e.g. just the hero) via refine_site.sections',
       'live CRM reads/writes (role-enforced)',
       'AI email campaign engine with HITL approval',
       'website & mini web-app builder with public hosting (/sites/<id>)',
       'publish to GitHub Pages / Vercel / Firebase Hosting + domain pointing',
       'live-web research (search + fetch)',
-      'business memory + live self-improving skill library',
+      'business memory + live self-improving skill library (learned + web-researched skills)',
     ],
     auth: {
       mode: 'short-lived pairing grants (no static API tokens)',

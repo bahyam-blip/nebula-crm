@@ -9,12 +9,14 @@ import '../services/studio_api_service.dart';
 final studioApiProvider = Provider<StudioApiService>((ref) => StudioApiService());
 
 /// One visible step of the agent build pipeline. Mirrors the REAL
-/// server-side team (Agent v9): a Lead orchestrator plans the run, then
-/// named specialists — Researcher, Art Director, Copywriter, Copy Chief,
-/// Architect, Engineers, QA Director, Reflector — build the page section
-/// by section with a QA rework loop, and every build ends with a lesson
-/// stored back into the skill library. No templates anywhere in the
-/// primary path.
+/// server-side team (Agent v10 · DEEPTHINK): a Lead orchestrator plans
+/// the run and then DEEP-THINKS it (self-critique + revision), an
+/// Analyst builds the project understanding, the Researcher runs two
+/// research rounds, the Art Director ships WCAG-verified design tokens
+/// + a UX flow, the Architect journey-maps the sections, Engineers
+/// hand-code every section, QA reworks flagged code, the Reflector
+/// distills a lesson, and a Skill Researcher grows the library from
+/// live research. No templates anywhere in the primary path.
 class BuildStage {
   const BuildStage(this.label, this.icon);
   final String label;
@@ -22,19 +24,23 @@ class BuildStage {
 }
 
 const kBuildStages = <BuildStage>[
-  BuildStage('Lead · forming your build team', '🧠'),
-  BuildStage('Researcher · scanning your market', '🔍'),
+  BuildStage('Lead · planning the build', '🧠'),
+  BuildStage('Lead · deep-thinking the plan', '🧠'),
+  BuildStage('Analyst · understanding your project', '🧭'),
   BuildStage('Art Director · designing the system', '🎨'),
+  BuildStage('Researcher · studying your market', '🔍'),
   BuildStage('Copywriter · writing your words', '✍️'),
   BuildStage('Copy Chief · tightening every line', '🧐'),
-  BuildStage('Architect · planning your sections', '📐'),
+  BuildStage('Architect · journey-mapping your page', '📐'),
   BuildStage('Engineers · hand-coding the page', '🛠️'),
   BuildStage('QA Director · reviewing the code', '🔎'),
   BuildStage('Builder · wiring & hosting it live', '🚀'),
+  BuildStage('Reflector · learning from this build', '🪞'),
+  BuildStage('Skill Researcher · studying the craft', '📚'),
 ];
 
 /// Studio state: built sites + hosting platform connections + build/refine
-/// progress + the LIVE agent-team trace (Agent v9).
+/// progress + the LIVE agent-team trace (Agent v10).
 class StudioState {
   const StudioState({
     this.sites = const [],
@@ -119,7 +125,7 @@ class StudioController extends StateNotifier<StudioState> {
     // Fallback pacer: while the live run doc has not appeared (old Worker)
     // or before its first row lands, the ticker keeps progress honest about
     // ORDER. Real agent rows replace it the moment they stream in.
-    _stageTimer = Timer.periodic(const Duration(milliseconds: 4600), (t) {
+    _stageTimer = Timer.periodic(const Duration(milliseconds: 3900), (t) {
       if (!state.building) {
         t.cancel();
         return;

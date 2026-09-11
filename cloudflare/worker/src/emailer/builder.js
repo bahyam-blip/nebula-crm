@@ -30,7 +30,7 @@
  */
 
 import { sarvamChat } from './sarvam.js';
-import { createTeamRun, leadPlan, runAgent, reflectOnBuild } from './agents.js';
+import { createTeamRun, leadPlan, leadDeepThink, applyDeepThink, projectUnderstanding, runAgent, reflectOnBuild, researchAndLearnSkill } from './agents.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
 import { designBrief, researchIntelligence, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
@@ -261,18 +261,28 @@ async function polishCopy(env, { kind, content, brand, skillsBlock, team = null 
 }
 
 /**
- * MARKETING-KIND PIPELINE (Agent v8) — a MULTI-AGENT TEAM, GLM-class
- * agentic engineering on Nebula's runtime:
+ * MARKETING-KIND PIPELINE (Agent v10 · DEEPTHINK) — a MULTI-AGENT TEAM,
+ * GLM-class agentic engineering on Nebula's runtime:
  *
  *   LEAD (orchestrator) forms the adaptive team plan from the brief
- *   → RESEARCHER scans the live web for real market facts
- *   → ART DIRECTOR designs the design system
+ *   → LEAD DEEP-THINK critiques its own plan and revises it (v10:
+ *     planning is a reasoning loop, not a one-shot)
+ *   → ANALYST builds the PROJECT UNDERSTANDING every specialist reads
+ *     (business model, audience psyche, objections, success metric)
+ *   → RESEARCHER scans the live web — and runs a SECOND round when the
+ *     synthesis names a concrete gap (v10 two-round research)
+ *   → ART DIRECTOR designs the full system (tokens, UX flow, type scale,
+ *     motion intensity) — WCAG contrast enforced mathematically
  *   → COPYWRITER writes the words → COPY CHIEF reviews every line
- *   → ARCHITECT plans the information architecture
+ *   → ARCHITECT plans the information architecture journey-mapped to the
+ *     design director's UX flow
  *   → ENGINEERS (parallel) hand-code each section's HTML+CSS+motion
  *   → QA DIRECTOR reviews the code → flagged sections re-coded WITH
  *     the critique attached (rework loop)
  *   → BUILDER wires + hosts deterministically
+ *   → REFLECTOR distills the build into a learned skill (self-evolution)
+ *   → SKILL RESEARCHER studies the craft on the live web and grows the
+ *     skill library with a researched, sourced skill (v10)
  *
  * Every agent runs in an ISOLATED context (role prompt + artifacts only)
  * and every invocation lands in the team trace the app shows the user.
@@ -285,9 +295,19 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   const team = createTeamRun({ kind, title }, sink);
 
   // 0. LEAD — the orchestrator reads the brief and plans the run (the
-  //    AI call + its fallback both land in the team trace).
-  const lead = await leadPlan(env, { kind, brief, brand, style, team });
-  team.stage('lead', true, lead.ai, lead.ai ? `team plan: ${lead.sections_target} sections · ${String(lead.audience || '').slice(0, 50)}` : 'classic plan');
+  //    AI call + its fallback both land in the team trace)...
+  let lead = await leadPlan(env, { kind, brief, brand, style, team });
+  // 0b. LEAD DEEP-THINK — ...then critiques and sharpens its own plan
+  //     (v10: think → self-critique → revise). One bounded pass.
+  const rev = await leadDeepThink(env, { kind, brief, brand, plan: lead, team });
+  lead = applyDeepThink(lead, rev);
+  team.stage('lead', true, lead.ai, lead.ai ? `deep-thought plan: ${lead.sections_target} sections · ${String(lead.audience || '').slice(0, 50)}` : 'classic plan');
+
+  // 0c. ANALYST — the Project Understanding artifact every specialist
+  //     reads (v10: the team shares ONE model of the business). Never
+  //     throws; on failure everyone proceeds on the brief.
+  const understanding = await projectUnderstanding(env, { kind, brief, brand, team });
+  team.stage('understand', true, Boolean(understanding), understanding ? `mapped: ${String(understanding.success_metric || understanding.business_model || 'project').slice(0, 70)}` : 'brief-only understanding');
 
   // 1. SKILLS — load the expert skill pack (seeded + everything the agent
   //    has learned live, INCLUDING lessons the Reflector stored after
@@ -296,14 +316,15 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   const copySkills = await skillsForDomain(store, uid, 'copy', { maxChars: 700 });
 
   // 2. THINK — the Art Director's design system + research queries.
-  const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block, lead, team });
-  team.stage('think', true, thought.ai, `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero`);
+  const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block, lead, understanding, team });
+  team.stage('think', true, thought.ai, `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero${thought.design.motion_intensity ? ` · ${thought.design.motion_intensity} motion` : ''}`);
 
   // 3. RESEARCH — the Researcher gathers live facts and SYNTHESIZES them
-  //    into market intelligence (v9: an agent that thinks, not a fetch).
-  //    Lead queries merge with the director's (deduped, capped). Never
-  //    fails the build: web down or synthesis down → raw facts → brief.
-  const queries = [...new Set([...(lead.queries || []), ...thought.queries])].slice(0, 2);
+  //    into market intelligence (v10: up to 4 queries and a SECOND round
+  //    when the synthesis names a concrete gap). Lead queries + deep-think
+  //    queries + director queries merge (deduped, capped). Never fails
+  //    the build: web down or synthesis down → raw facts → brief.
+  const queries = [...new Set([...(lead.queries || []), ...thought.queries])].slice(0, 4);
   let facts = '';
   let researchAi = false;
   if (RESEARCH_KINDS.has(kind) && queries.length) {
@@ -323,7 +344,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
 
   // 4. WRITE — the Copywriter drafts (falls back to brief-derived copy).
   const base = defaultCopy({ kind, title, brief, brand });
-  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts, skillsBlock: copySkills.block, lead, team });
+  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts, skillsBlock: copySkills.block, lead, understanding, team });
   let content = mergeCopy(aiCopy, base);
   content = applyCtaOverrides(content, ctaArgs);
   if (!content.headline) content.headline = title;
@@ -350,13 +371,14 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       content,
       skillsBlock: designSkills.block,
       lead,
+      understanding,
       team,
     });
 
     // 10. REFLECT — the Reflector distills this finished build into a
-    //     learned skill so the NEXT build starts smarter (v9
-    //     self-evolution; skipped on fallback renders — nothing bespoke
-    //     to learn from there). Never throws, never blocks the return.
+    //     learned skill so the NEXT build starts smarter (self-evolution;
+    //     skipped on fallback renders — nothing bespoke to learn from
+    //     there). Never throws, never blocks the return.
     let reflected = '';
     if (store) {
       reflected = await reflectOnBuild(env, store, uid, {
@@ -367,6 +389,18 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
         team,
       });
       team.stage('reflect', true, Boolean(reflected), reflected || 'reflection skipped');
+
+      // 11. SKILL RESEARCHER — the team studies its craft: one live web
+      //     search on the most relevant topic from THIS brief, distilled
+      //     into a sourced skill the library keeps (v10). Genuinely
+      //     research-built skills, not name-sake entries. Never throws.
+      let skillNote = '';
+      try {
+        const topic = pickSkillTopic({ kind, brand, lead, understanding, design: thought.design });
+        skillNote = await researchAndLearnSkill(env, store, uid, { topic, brief, brand, team });
+        if (skillNote) team.record('skill_researcher', 'studying the craft', { ok: true, ai: false, detail: skillNote.slice(0, 120) });
+      } catch { /* growth is a bonus */ }
+      team.stage('skill', true, Boolean(skillNote), skillNote || 'skill research skipped');
     }
 
     return {
@@ -383,6 +417,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       nav: cg.plan.nav,
       coded: cg.coded,
       reflected,
+      understanding,
+      deep: lead.deep === true,
     };
   } catch (e) {
     console.warn('[builder] codegen → engine fallback:', e?.message || e);
@@ -401,8 +437,30 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       engine: 'template',
       sections: null,
       nav: null,
+      understanding,
+      deep: lead.deep === true,
     };
   }
+}
+
+/**
+ * The Skill Researcher's topic for THIS build: the most valuable craft
+ * question this specific brief raises, derived deterministically (no
+ * extra AI call). Uses the business industry when known so the library
+ * grows along the domains this user actually builds in.
+ */
+function pickSkillTopic({ kind, brand, lead, understanding, design }) {
+  const industry = String(brand?.profile?.industry || '').trim().slice(0, 60);
+  const focus = String(lead?.research_focus || '').trim().slice(0, 80);
+  const kindTopic = {
+    landing: 'landing page design best practices that convert visitors',
+    promo: 'promo page design patterns that drive urgency honestly',
+    event: 'event page design best practices that drive registrations',
+    portfolio: 'portfolio website design patterns that win clients',
+    report: 'report page design best practices for credibility and readability',
+    webapp: 'single page web app ux best practices',
+  }[kind] || 'landing page design best practices';
+  return industry ? `${industry} website design best practices` : (focus || kindTopic);
 }
 
 /* ── The build_website tool / Studio build endpoint ─────────────────── */
@@ -452,7 +510,7 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     return { ok: false, rateLimited: true, error: rl.error };
   }
 
-  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '';
+  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '', deep = false, understanding = null;
   try {
     if (kind === 'webapp') {
       const r = await buildWebapp(env, { title: effTitle, brief, style, brand });
@@ -477,6 +535,8 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
       teamTrace = r.team || [];
       teamSummary = r.teamSummary || null;
       reflected = r.reflected || '';
+      deep = r.deep === true;
+      understanding = r.understanding || null;
       plan = {
         kind, title: effTitle, brief: brief.slice(0, 4000), style,
         design: r.design, content: r.content,
@@ -534,6 +594,8 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
         team: teamTrace,
         team_summary: teamSummary,
         reflected,
+        deep,
+        understanding,
         note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
       },
     });
@@ -553,6 +615,8 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     team: teamTrace,
     team_summary: teamSummary,
     reflected,
+    deep,
+    understanding,
     note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
   };
 }

@@ -390,7 +390,7 @@ let siteId = '';
   ok(/^https:\/\/worker\.test\/sites\//.test(built.json.url || ''), 'build returns public URL', built.json.url);
   siteId = built.json.artifact_id;
   // think + polish + write + plan + 3 section codes + review + reflect = 10 AI calls (v9)
-  ok(captured.sarvam.length === 10, 'Sarvam called 10× for a full codegen build (lead/think/polish/write/plan/3×code/review/reflect)', String(captured.sarvam.length));
+  ok(captured.sarvam.length === 12, 'Sarvam called 12× for a full v10 codegen build (lead+deep-think/analyst/think/polish/write/plan/3×code/review/reflect)', String(captured.sarvam.length));
   ok(Array.isArray(built.json.stages) && built.json.stages.length >= 8, 'build response carries the full stage trace (plan + code:* + review + wire)', JSON.stringify(built.json.stages));
   ok(built.json.builder === 'ai', 'builder=ai — the agent hand-coded the page', built.json.builder);
 
@@ -514,7 +514,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   for (const t of ['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site']) {
     ok(names.includes(t) && !!TOOL_SCHEMAS[t], `MCP schema present: ${t}`);
   }
-  ok(names.length === 33, 'tool registry is 33 tools (30 + plan_task + list_skills + learn_skill)', String(names.length));
+  ok(names.length === 34, 'tool registry is 34 tools (30 + plan_task + list_skills + learn_skill + research_skill)', String(names.length));
 
   // Pair a grant and call connector_status + publish over MCP.
   const pairReq = new Request('https://worker.test/v1/assistant/mcp/pair', {
@@ -538,7 +538,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   const listed = list.json.result.tools.map((t) => t.name);
   ok(['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site'].every((t) => listed.includes(t)),
     'tools/list shows all 5 hosting tools');
-  ok(listed.length === 33, 'tools/list count is 33', String(listed.length));
+  ok(listed.length === 34, 'tools/list count is 34', String(listed.length));
 
   const stCall = await rpc('tools/call', { name: 'connector_status', arguments: {} });
   const stPayload = JSON.parse(stCall.json.result.content[0].text);

@@ -259,7 +259,7 @@ ok(build1.stages.some((s) => s.stage === 'polish' && s.ai === true), 'polish sta
 ok(build1.stages.some((s) => s.stage === 'wire'), `wire stage assembles the hand-coded sections (${build1.stages.at(-1)?.detail})`);
 ok(build1.stages.filter((s) => String(s.stage).startsWith('code:')).length === 3, 'three sections hand-coded');
 ok(/^[0-9a-f]{64}$/.test(build1.sha256 || ''), 'build returns sha256 digest');
-ok(build1.stages.length === 12, `stage trace: lead/think/research/write/polish/plan/code×3/review/wire/reflect (${build1.stages.length})`);
+ok(build1.stages.length === 14, `stage trace: lead/understand/think/research/write/polish/plan/code×3/review/wire/reflect/skill (${build1.stages.length})`);
 ok(build1.stages.some((s) => s.stage === 'reflect'), 'the Reflector closes the run (v9)');
 ok(Array.isArray(build1.team) && build1.team.some((r) => r.agent === 'Lead' && r.ok) && build1.team_summary?.ai_calls >= 8, 'multi-agent team trace rides the build (v8)', JSON.stringify(build1.team_summary));
 
@@ -313,7 +313,7 @@ ok(buildBlocked.ok === false && buildBlocked.rateLimited === true, 'build_websit
 
 /* ══ 5. TOOLS — registry, roles, plan ════════════════════════════ */
 section('TOOLS — 33 registry, role gates, plan_task');
-ok(Object.keys(TOOLS).length === 33, `registry has 33 tools (${Object.keys(TOOLS).length})`);
+ok(Object.keys(TOOLS).length === 34, `registry has 34 tools (${Object.keys(TOOLS).length})`);
 ok(TOOLS.plan_task?.tier === 'read' && TOOLS.list_skills?.tier === 'read', 'plan_task + list_skills are read-tier');
 ok(Array.isArray(TOOLS.learn_skill?.roles) && TOOLS.learn_skill.roles.includes('salesRep') && !TOOLS.learn_skill.roles.includes('viewer'), 'learn_skill is write-gated (viewer denied)');
 

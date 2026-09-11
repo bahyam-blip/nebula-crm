@@ -427,7 +427,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
           const SizedBox(height: 4),
           Text(
             live.isEmpty
-                ? 'Nine specialists — Lead, Researcher, Art Director, Copywriter, Copy Chief, Architect, Engineers, QA — hand-build your page together. This takes about a minute.'
+                ? 'Twelve specialists — Lead (with a deep-think pass), Analyst, Researcher, Art Director, Copywriter, Copy Chief, Architect, Engineers, QA, Reflector, Skill Researcher — think, research and hand-build your page together. This takes about a minute.'
                 : 'Streaming each agent as it works — this is the real team, not an animation. One moment more.',
             style: TextStyle(fontSize: 12, height: 1.45, color: AppColors.textTertiary),
           ),

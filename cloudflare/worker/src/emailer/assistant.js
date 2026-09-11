@@ -43,6 +43,7 @@ import { listTasks, newTask, putTask, progressOf, addEvent } from './tasks.js';
 import { getDoc, putDoc, canWrite, isManagerUp, loadUser } from '../data.js';
 import { buildWebsite, refineSite, saveNote, listArtifacts } from './builder.js';
 import { listSkills, learnSkill, forgetSkill } from './skills.js';
+import { researchAndLearnSkill } from './agents.js';
 import { rateLimit } from './guard.js';
 import { webSearch, webFetch } from './research.js';
 import {
@@ -100,6 +101,7 @@ export const TOOLS = {
   plan_task: { tier: 'read', spec: 'THINK in the open: turn a goal into an ordered execution plan {goal, steps: ["step 1", ...], risk?: "one-line main risk"} — the plan is shown to the user and remembered; then execute it step by step with other tools. Use BEFORE complex multi-step requests (research + build + email)' },
   list_skills: { tier: 'read', spec: 'list the agent\'s skill library {domain?}: seeded expert skills + everything learned live from research — these skills actively improve every site build' },
   learn_skill: { tier: 'write', roles: WRITE_ROLES, spec: 'DISTILL a lasting capability into the skill library {title, domain: design|layout|motion|copy|ux|engineering|marketing, body: "the actual RULES, <=80 words"} — after research reveals a pattern worth keeping, or when the user teaches a preference. Learned skills are injected into every future site build. Improving an existing skill (same title) sharpens it' },
+  research_skill: { tier: 'write', roles: WRITE_ROLES, spec: 'RESEARCH A NEW SKILL FROM THE LIVE WEB {topic, brief?} — searches the web for real expert knowledge on the topic (e.g. "restaurant website hero patterns"), distills the transferable RULES into a sourced skill and stores it in the library where every future build applies it. Use when you notice a craft gap or the owner wants the agent stronger in a domain' },
   connector_status: { tier: 'read', spec: 'which platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger, Supabase) are connected and what they do' },
   connect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'connect a platform once {connector: github|vercel|firebase|godaddy|hostinger|supabase, ...credentials} — credentials are encrypted server-side; afterwards publishing and SQL need NO tokens. Only report that connecting is possible; the app Studio screen collects the credentials' },
   disconnect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'remove a stored platform connection and destroy its stored credentials {connector}' },
@@ -120,7 +122,7 @@ You SEE the current CRM snapshot below (contacts, pipeline, team, campaigns, ana
 
 You can also BUILD: with build_website you produce a complete, branded, hosted website or mini web app (landing page, promo, event invite, portfolio, webapp, report) and return its public URL — the design director + research + copy pipeline does the quality work, so write rich briefs. With refine_site you apply change requests to an existing build ("make the headline bolder") without rebuilding from scratch. With save_note you file research summaries and plans the owner keeps. With web_search + web_fetch you research the live web before advising or building.
 
-You IMPROVE YOURSELF: your work is guided by a SKILL LIBRARY (seeded expert rules + everything you have learned). When research or a build teaches you a lasting pattern, distill it with learn_skill (title, domain, body = the actual RULES in <=80 words) — every future site build then applies it. Check or show the library with list_skills. For multi-step requests, first lay the plan out with plan_task, then execute it step by step and report progress.
+You IMPROVE YOURSELF: your work is guided by a SKILL LIBRARY (seeded expert rules + everything you have learned). When research or a build teaches you a lasting pattern, distill it with learn_skill (title, domain, body = the actual RULES in <=80 words) — every future site build then applies it. When you notice a craft gap (or the owner wants you stronger at a kind of site), use research_skill: it searches the live web for real expert knowledge on a topic and distills it into a sourced library skill. Check or show the library with list_skills. For multi-step requests, first lay the plan out with plan_task, then execute it step by step and report progress.
 
 Reply with ONE JSON object and nothing else. Two shapes:
 
@@ -141,6 +143,7 @@ RULES:
 - save_note: after a meaningful research or planning session, offer to save (or save) a short summary artifact.
 - plan_task: for anything with 3+ moving parts (research → build → publish → email), call it FIRST so the user sees the plan, then execute the steps in order.
 - learn_skill: after web research that surfaces a transferable design/copy/engineering pattern, or when the user states a durable preference, distill it into a skill. Do not save trivia; save RULES.
+- research_skill: when a build or question exposes a craft gap, research that topic on the live web and grow the library (topic should be a specific best-practices question, not a broad field).
 - The snapshot's "me" block is the CALLER. Respect their role: if a tool is outside their role, do not attempt it — explain in one line what they should ask a manager for. If a tool result says not-permitted, say it plainly.
 - create_task / assign / distribute: match people against the snapshot team roster (or list_team). Never invent a teammate. If the user's request names no assignee and it is ambiguous, ask ONE short clarifying question.
 - create_email_task: quote the user's intent faithfully, add the recipient target (segment or explicit emails). If the request is vague about WHAT to send, ask ONE short clarifying question instead of guessing. If the result is a pending approval, tell the user to confirm it with the Approve button.
@@ -489,6 +492,18 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
       const r = await learnSkill(store, user?.uid || '', args, { source: 'agent' });
       if (r.ok) await teach(env, store, { note: `Skill learned: ${r.title} (${r.domain})`, origin: 'agent' }).catch(() => {});
       return r;
+    }
+
+    case 'research_skill': {
+      const rl = await rateLimit(store, user?.uid || '', 'learn_skill'); // shares the self-improvement budget
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
+      const topic = String(args?.topic || '').trim();
+      if (topic.length < 6) return { ok: false, error: 'topic is required — a specific best-practices question (>=6 chars)' };
+      const note = await researchAndLearnSkill(env, store, user?.uid || '', { topic, brief: String(args?.brief || '') });
+      if (note) await teach(env, store, { note: `Skill researched from the web: ${note}`, origin: 'agent' }).catch(() => {});
+      return note
+        ? { ok: true, topic, note }
+        : { ok: false, error: 'the web was unreachable or the results had nothing transferable — try a more specific topic' };
     }
 
     case 'build_website':

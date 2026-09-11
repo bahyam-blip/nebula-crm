@@ -1,5 +1,5 @@
 /**
- * AGENTS — the multi-agent runtime (Agent v9).
+ * AGENTS — the multi-agent runtime (Agent v10 · DEEPTHINK).
  *
  * The user asked for the open GLM-class agentic engineering pattern,
  * re-engineered into this app: not one prompt doing everything, but a
@@ -25,10 +25,25 @@
  *     a reusable skill (learn_skill), so the team measurably improves
  *     with every job it ships.
  *
+ * v10 DEEPTHINK — the team got measurably smarter, not just bigger:
+ *   • DEEP-THINK (Lead, 2nd pass) — the Lead critiques its own plan and
+ *     returns concrete revisions (extra emphasis, extra risks, one extra
+ *     research angle). Planning is now think → self-critique → revise,
+ *     not one-shot.
+ *   • ANALYST (🧭) — builds the PROJECT UNDERSTANDING artifact (business
+ *     model, audience psyche, competitive context, voice spec, success
+ *     metric) BEFORE design/copy/architecture. Every specialist reads it
+ *     — this is "understands the project better", as an artifact.
+ *   • SKILL RESEARCHER (📚) — genuinely researches the web for expert
+ *     domain knowledge relevant to the brief and distills a NEW skill
+ *     into the library (with its source), so the team studies its craft
+ *     the way a real studio does. Also exposed as the research_skill
+ *     tool (MCP + chat).
+ *
  * This module is the runtime; builder.js/codegen.js/designer.js are the
  * team's job description. Agent keys: lead | researcher | director |
  * copywriter | copy_chief | architect | engineer | qa | builder |
- * reflector.
+ * reflector | analyst | skill_researcher.
  */
 
 import { sarvamChat } from './sarvam.js';
@@ -36,16 +51,18 @@ import { sarvamChat } from './sarvam.js';
 /* ══ The team roster ═════════════════════════════════════════════════ */
 
 export const AGENT_TEAM = {
-  lead: { name: 'Lead', emoji: '🧠', role: 'orchestrator — plans how the team runs' },
+  lead: { name: 'Lead', emoji: '🧠', role: 'orchestrator — plans, deep-thinks and revises' },
+  analyst: { name: 'Analyst', emoji: '🧭', role: 'project understanding: market, audience, voice' },
   researcher: { name: 'Researcher', emoji: '🔍', role: 'live market research' },
-  director: { name: 'Art Director', emoji: '🎨', role: 'design system & art direction' },
+  director: { name: 'Art Director', emoji: '🎨', role: 'design system, colour & UX flow' },
   copywriter: { name: 'Copywriter', emoji: '✍️', role: 'conversion copy' },
   copy_chief: { name: 'Copy Chief', emoji: '🧐', role: 'copy review & tightening' },
-  architect: { name: 'Architect', emoji: '📐', role: 'information architecture' },
+  architect: { name: 'Architect', emoji: '📐', role: 'information architecture & journey' },
   engineer: { name: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections' },
   qa: { name: 'QA Director', emoji: '🔎', role: 'code review & rework' },
   builder: { name: 'Builder', emoji: '🚀', role: 'assembly, hosting & integrity' },
   reflector: { name: 'Reflector', emoji: '🪞', role: 'turns every build into a lesson' },
+  skill_researcher: { name: 'Skill Researcher', emoji: '📚', role: 'researches the craft, grows the skill library' },
 };
 
 /* ══ Team run — the trace bus ════════════════════════════════════════ */
@@ -241,6 +258,212 @@ export function leadBlock(lead) {
   return lines.filter(Boolean).join('\n');
 }
 
+/* ══ The Lead, pass 2 — DEEP-THINK (self-critique & revision) ═════════ */
+
+const DEEPTHINK_SYSTEM = `You are the same Lead, one breath later — now you DEEP-THINK. Re-read your own plan for the build with fresh, adversarial eyes: where would a top-tier studio push harder? Respond with ONLY JSON:
+
+{"verdict":"sharp"|"sharpen","extra_emphasis":["0-3 SPECIFIC craft targets the plan under-weights, each naming the section or moment"],"extra_risks":["0-3 ways this page could still feel generic or miss THIS audience"],"angle":"a sharper narrative angle for the whole page in one line (the idea that makes it memorable), or '' to keep the current one","extra_query":"0-1 additional web search that would materially ground the copy, or ''","depth":"standard"|"deep"}
+
+Rules:
+- Critique the PLAN against the BRIEF, not taste: missing proof, missing local truth, missing objection-handling, wrong emphasis.
+- extra_emphasis must be actionable ("the booking section needs real-time scarcity, not 'contact us'").
+- When the plan is genuinely sharp for a small page, say sharp and keep additions near-empty — do not invent work.
+- depth "deep" only when the brief is rich enough to spend one more research round on it.`;
+
+/**
+ * LEAD DEEP-THINK — the second planning pass. Takes the Lead's plan and
+ * returns REVISIONS (never throws; on any failure the original plan runs
+ * unchanged). This is the think → self-critique → revise loop that makes
+ * planning an actual reasoning process instead of a single shot.
+ */
+export async function leadDeepThink(env, { kind, brief, brand, plan, team = null }) {
+  const empty = { sharp: true, extra_emphasis: [], extra_risks: [], angle: '', extra_query: '', depth: 'standard', ai: false };
+  try {
+    const j = await runAgent(
+      env,
+      team,
+      'lead',
+      'deep-thinking the plan',
+      [
+        { role: 'system', content: DEEPTHINK_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            `BUSINESS: ${brand.name}${brand.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
+            `PAGE KIND: ${kind}`,
+            `BRIEF: ${String(brief).slice(0, 1200)}`,
+            `MY PLAN SO FAR:\n${JSON.stringify({ audience: plan.audience, page_goal: plan.page_goal, research_focus: plan.research_focus, queries: plan.queries, emphasis: plan.emphasis, risks: plan.risks, tone_note: plan.tone_note }).slice(0, 1100)}`,
+          ].filter(Boolean).join('\n'),
+        },
+      ],
+      { json: true, maxTokens: 500, temperature: 0.5 },
+      (out) => (out?.verdict === 'sharpen' ? `plan sharpened: ${String(out.angle || 'revision applied').slice(0, 60)}` : 'plan held up under critique')
+    );
+    const rev = {
+      sharp: j?.verdict !== 'sharpen',
+      extra_emphasis: Array.isArray(j?.extra_emphasis) ? j.extra_emphasis.map((e) => String(e).slice(0, 160)).filter(Boolean).slice(0, 3) : [],
+      extra_risks: Array.isArray(j?.extra_risks) ? j.extra_risks.map((r) => String(r).slice(0, 140)).filter(Boolean).slice(0, 3) : [],
+      angle: String(j?.angle || '').slice(0, 160),
+      extra_query: String(j?.extra_query || '').slice(0, 120),
+      depth: j?.depth === 'deep' ? 'deep' : 'standard',
+      ai: true,
+    };
+    if (!rev.extra_emphasis.length && !rev.extra_risks.length && !rev.angle && !rev.extra_query) rev.sharp = true;
+    return rev;
+  } catch {
+    return empty;
+  }
+}
+
+/** Apply a Deep-Think revision to the Lead plan (pure, nothrow). */
+export function applyDeepThink(plan, rev) {
+  if (!rev || rev.ai !== true) return plan;
+  return {
+    ...plan,
+    emphasis: [...(plan.emphasis || []), ...rev.extra_emphasis].slice(0, 6),
+    risks: [...(plan.risks || []), ...rev.extra_risks].slice(0, 5),
+    angle: rev.angle || plan.angle || '',
+    queries: rev.extra_query && !(plan.queries || []).includes(rev.extra_query)
+      ? [...(plan.queries || []), rev.extra_query].slice(0, 3)
+      : (plan.queries || []).slice(0, 3),
+    depth: rev.depth || plan.depth || 'standard',
+    deep: true,
+  };
+}
+
+/* ══ The Analyst — the PROJECT UNDERSTANDING artifact ════════════════ */
+
+const ANALYST_SYSTEM = `You are the Project Analyst of an elite multi-agent web studio. Before anyone designs or writes a line, YOU produce the PROJECT UNDERSTANDING every specialist will work from. Read the brief like a strategist who has done a thousand of these. Respond with ONLY JSON:
+
+{"business_model":"how this business makes money, one line","audience_psyche":"what this audience already believes, fears and wants — 1-2 sentences, be specific","competitive_context":"what alternatives they'd compare it against and what wins there, one line","voice_spec":"how the brand should sound: 3-5 traits with a do/don't example pair","success_metric":"the ONE behavior that defines this page worked, 3-8 words","objections":["2-4 real reasons a visitor would hesitate to act"]}
+
+Rules:
+- Infer from the brief; never invent facts (no fake numbers, no fake history).
+- audience_psyche is about THIS audience's real life, not demographics.
+- objections must be the kind copy can answer (price, time, trust, effort).`;
+
+/**
+ * ANALYST — builds the shared PROJECT UNDERSTANDING artifact. Runs right
+ * after the Lead so design, copy and architecture all work from the same
+ * model of the business instead of re-inferring it three times. Never
+ * throws: on failure the team simply proceeds on the brief (returns '').
+ */
+export async function projectUnderstanding(env, { kind, brief, brand, team = null }) {
+  try {
+    const j = await runAgent(
+      env,
+      team,
+      'analyst',
+      'building the project understanding',
+      [
+        { role: 'system', content: ANALYST_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            `BUSINESS: ${brand.name}${brand.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
+            brand.profile?.audience ? `STATED AUDIENCE: ${brand.profile.audience}` : '',
+            brand.profile?.about ? `ABOUT: ${String(brand.profile.about).slice(0, 300)}` : '',
+            `PAGE KIND: ${kind}`,
+            `BRIEF: ${String(brief).slice(0, 1400)}`,
+          ].filter(Boolean).join('\n'),
+        },
+      ],
+      { json: true, maxTokens: 550, temperature: 0.5 },
+      (out) => `understood: ${String(out?.success_metric || 'project mapped').slice(0, 60)}`
+    );
+    const u = {
+      business_model: String(j?.business_model || '').slice(0, 160),
+      audience_psyche: String(j?.audience_psyche || '').slice(0, 260),
+      competitive_context: String(j?.competitive_context || '').slice(0, 200),
+      voice_spec: String(j?.voice_spec || '').slice(0, 200),
+      success_metric: String(j?.success_metric || '').slice(0, 90),
+      objections: Array.isArray(j?.objections) ? j.objections.map((o) => String(o).slice(0, 120)).filter(Boolean).slice(0, 4) : [],
+      ai: true,
+    };
+    // A model that returned nothing usable is treated as a skip.
+    if (!u.business_model && !u.audience_psyche && !u.objections.length) return '';
+    return u;
+  } catch {
+    return '';
+  }
+}
+
+/** Compact block the understanding artifact becomes inside prompts. */
+export function understandingBlock(u) {
+  if (!u) return '';
+  return [
+    u.business_model ? `BUSINESS MODEL: ${u.business_model}` : '',
+    u.audience_psyche ? `AUDIENCE PSYCHE: ${u.audience_psyche}` : '',
+    u.competitive_context ? `COMPETITIVE CONTEXT: ${u.competitive_context}` : '',
+    u.voice_spec ? `VOICE SPEC: ${u.voice_spec}` : '',
+    u.objections.length ? `OBJECTIONS TO ANSWER: ${u.objections.join('; ')}` : '',
+    u.success_metric ? `THIS PAGE WINS IF: ${u.success_metric}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+/* ══ The Skill Researcher — studies the craft, grows the library ═════ */
+
+const SKILL_RESEARCH_SYSTEM = `You are the Skill Researcher of an elite multi-agent web studio. You research the web to make the team genuinely better at its craft, and distill what you find into DURABLE SKILLS the whole library applies. Respond with ONLY JSON:
+
+{"title":"skill title, 5-12 words, states the RULE not the topic","domain":"design|layout|motion|copy|ux|engineering|marketing","body":"2-4 sentences of concrete RULES distilled from these search results — what to always do, what to avoid, with the specific numbers/patterns found. Max 400 chars.","source":"the most credible source domain from the results, or 'synthesis'"}
+
+Rules:
+- Distill ONLY what the results actually support — never invent a statistic or claim.
+- A skill is a RULE the team can apply on the next build, not a summary of a page.
+- If the results are junk/SEO noise with nothing transferable, respond with {"skip":true}.`;
+
+/**
+ * SKILL RESEARCHER — genuinely researches a craft topic on the live web
+ * and distills the findings into a new library skill (with source). This
+ * is the "research skills and build them" capability, for real: web
+ * search → synthesis → learn_skill, deduped and capped by the library.
+ * Never throws. Returns the trace note, or '' when skipped.
+ */
+export async function researchAndLearnSkill(env, store, uid, { topic, brief = '', brand = null, team = null, source = 'skill-research' }) {
+  try {
+    if (!store || !uid || !topic || String(topic).trim().length < 6) return '';
+    const { webSearch } = await import('./research.js');
+    const res = await webSearch({ query: String(topic).slice(0, 220) });
+    const items = Array.isArray(res?.results) ? res.results.slice(0, 5) : [];
+    if (!items.length) return '';
+    const raw = items
+      .map((r, i) => `${i + 1}. ${r.title}${r.snippet ? ` — ${r.snippet}` : ''} [${String(r.url || '').slice(0, 80)}]`)
+      .join('\n')
+      .slice(0, 1400);
+    const j = await runAgent(
+      env,
+      team,
+      'skill_researcher',
+      'researching a new skill',
+      [
+        { role: 'system', content: SKILL_RESEARCH_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            `TOPIC: ${String(topic).slice(0, 200)}`,
+            brand?.name ? `THIS SKILL WILL SERVE: ${brand.name}` : '',
+            brief ? `CONTEXT: ${String(brief).slice(0, 240)}` : '',
+            `SEARCH RESULTS:\n${raw}`,
+          ].filter(Boolean).join('\n'),
+        },
+      ],
+      { json: true, maxTokens: 480, temperature: 0.4 },
+      (out) => (out?.skip ? 'nothing transferable in the results' : `studied: ${String(out?.title || '').slice(0, 60)}`)
+    );
+    if (j?.skip || !j?.title || !j?.body) return '';
+    const { learnSkill } = await import('./skills.js');
+    const out = await learnSkill(store, uid, {
+      title: j.title,
+      domain: j.domain,
+      body: j.body,
+      slug: j.title,
+    }, { source });
+    return out?.ok ? `skill "${out.title}" ${out.updated ? 'sharpened' : 'learned'} from live research` : '';
+  } catch {
+    return '';
+  }
+}
+
 /* ══ The Reflector — the self-evolution loop ═════════════════════════ */
 
 const REFLECTOR_SYSTEM = `You are the Reflector of an elite multi-agent web studio. After every finished build you extract ONE reusable, durable lesson from what the team just made, so future builds start smarter. Respond with ONLY JSON:
@@ -265,6 +488,7 @@ export async function reflectOnBuild(env, store, uid, { lead, plan, brand, verdi
       lead?.page_goal ? `PAGE GOAL: ${lead.page_goal}` : '',
       lead?.audience ? `AUDIENCE: ${lead.audience}` : '',
       lead?.tone_note ? `TONE: ${lead.tone_note}` : '',
+      lead?.angle ? `NARRATIVE ANGLE: ${lead.angle}` : '',
       `SECTIONS: ${(plan?.sections || []).map((s) => `${s.id} (${s.name}: ${s.motion || 'reveal'})`).join(', ')}`,
       Object.keys(verdicts).length ? `QA VERDICTS: ${Object.entries(verdicts).map(([id, v]) => `${id}=${v}`).join(', ')}` : '',
     ].filter(Boolean).join('\n');

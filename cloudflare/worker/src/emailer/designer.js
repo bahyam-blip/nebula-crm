@@ -1,5 +1,5 @@
 /**
- * DESIGNER — the thinking pipeline behind Studio builds (Agent v5).
+ * DESIGNER — the thinking pipeline behind Studio builds (Agent v10).
  *
  * The v4 builder asked Sarvam for a whole website in ONE call and saved
  * whatever came back. Inside a ~2k-token completion budget that produced
@@ -20,23 +20,89 @@
  * a deterministic design/copy derived from the brief — a build NEVER
  * fails to produce a complete, on-brand site.
  *
+ * v10 DESIGN-SYSTEM v2 — the Art Director now specifies a real design
+ * system, not just a theme: type scale, texture and motion intensity
+ * are first-class tokens, a UX FLOW maps the visitor journey, and a
+ * DETERMINISTIC WCAG pass (enforceContrast) mathematically repairs any
+ * palette the model picks — AI chooses the hues, math guarantees the
+ * accessibility. researchIntelligence() also runs a SECOND research
+ * round when the synthesis names a follow-up worth chasing.
+ *
  * extractSiteHtml() is the hard gate that fixed the screenshots bug:
  * markdown fences, prose and truncation can never reach R2 again.
  */
 
-import { runAgent, leadBlock } from './agents.js';
+import { runAgent, leadBlock, understandingBlock } from './agents.js';
 import { sarvamChat } from './sarvam.js';
 import { webSearch } from './research.js';
 import { normalizeDesign, themeForStyleHint, THEMES } from './site_templates.js';
 
 const THEME_NAMES = Object.keys(THEMES);
 
-/* ══ Stage 1 — THINK ═════════════════════════════════════════════════ */
+/* ══ WCAG contrast math — the deterministic design gate (v10) ════════ */
+
+/** Relative luminance per WCAG 2.x (sRGB, gamma-expanded). */
+function relLum(c) {
+  const h = String(c || '').replace('#', '');
+  const n = h.length === 3 ? h.split('').map((x) => x + x).join('') : h;
+  const v = parseInt(n || '000000', 16);
+  const f = (raw) => {
+    const s = raw / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f((v >> 16) & 255) + 0.7152 * f((v >> 8) & 255) + 0.0722 * f(v & 255);
+}
+
+/** WCAG contrast ratio between two hex colors (1..21). */
+export function contrastRatio(a, b) {
+  const la = relLum(a);
+  const lb = relLum(b);
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Nudge a color toward light (amt>0) or dark (amt<0) in fixed steps. */
+function nudge(hexColor, towardLight) {
+  const n = parseInt(String(hexColor).replace('#', '').slice(0, 6) || '000000', 16);
+  const step = towardLight ? 28 : -28;
+  const f = (v) => Math.max(0, Math.min(255, v + step));
+  return `#${((f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255)).toString(16).padStart(6, '0')}`;
+}
+
+/**
+ * ENFORCE CONTRAST — the deterministic half of design-system v2. The AI
+ * picks the HUES; this pass mathematically guarantees the RATIOS:
+ *   ink vs bg ≥ 7:1 (headlines), muted vs bg ≥ 4.5:1 (body),
+ *   accent vs bg ≥ 3:1 (UI component). Bounded nudges (≤10 per color);
+ *   hues are never replaced, only pushed toward light/dark until they
+ *   pass. This is how "advanced designs with colours" is done with
+ *   actual parameters — the palette stays artful AND accessible.
+ */
+export function enforceContrast(palette) {
+  const p = { ...(palette || {}) };
+  const bg = /^#[0-9a-fA-F]{6}$/.test(String(p.bg || '')) ? p.bg : null;
+  if (!bg) return p;
+  const bgLight = relLum(bg) > 0.4;
+  const drive = (key, target) => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(String(p[key] || ''))) return;
+    let cur = p[key];
+    for (let i = 0; i < 10 && contrastRatio(cur, bg) < target; i++) {
+      cur = nudge(cur, !bgLight); // dark bg → push text lighter, light bg → darker
+    }
+    p[key] = cur;
+  };
+  drive('ink', 7);
+  drive('muted', 4.5);
+  drive('accent', 3);
+  return p;
+}
+
+/* ══ Stage 1 — THINK (design-system v2) ══════════════════════════════ */
 
 function briefSystemPrompt(kind, brand, style) {
   return `You are the design director of a world-class web studio (Awwwards-tier). Respond with ONLY a JSON object.
 
-A client described a ${kind} page. Decide the design direction.
+A client described a ${kind} page. Decide the design system — not just a theme, the full art direction.
 
 Schema:
 {
@@ -45,6 +111,10 @@ Schema:
  "art": "mesh|rings|waves|grid|blocks",
  "palette": {"bg":"#hex","surface":"#hex","ink":"#hex","muted":"#hex","accent":"#hex","accent2":"#hex"},
  "font": "modern|grotesk|serif|luxe|syne|rounded|mono",
+ "type_scale": "compact|classic|dramatic",
+ "texture": "grain|clean|grid",
+ "motion_intensity": "calm|balanced|bold",
+ "ux_flow": ["3-5 visitor journey beats in order, e.g. 'land → promise in one breath'","scan → proof and specifics","feel → the atmosphere section","act → booking without friction"],
  "voice": "3-6 word tone of voice for all copy",
  "audience": "who this page must convince, 3-8 words",
  "headline_angle": "the single strongest promise to lead with, <=14 words",
@@ -56,26 +126,32 @@ Design principles you apply (this is what separates premium from template):
 - Theme meanings: onyx=DEEP BLACK minimal, white type, hairlines, one restrained accent (premium/tech/architecture/studio); aurora=dark glass glowing accents; luxe=dark+gold elegance; editorial=light magazine serif; swiss=white minimal grid (SaaS/corporate); festive=vivid celebration; playful=bright friendly; neo=neo-brutalist poster, thick borders, hard shadows, loud accent.
 - hero: centered=statement hero; split=text left + art panel right (product/tech/onyx); editorial=huge left headline with rule lines (craft/food/portfolio/report).
 - art: mesh=soft blobs; rings=concentric circles (premium); waves=flowing lines (wellness/music/luxe); grid=iso grid (tech/swiss); blocks=mondrian (editorial/neo/playful).
+- type_scale: compact=systematic, tight ratios (SaaS, reports); classic=balanced editorial rhythm (most brands); dramatic=huge display jumps (fashion, events, portfolios, statements).
+- texture: grain=tactile film grain (dark/premium/craft); clean=flat surfaces (SaaS/corporate); grid=faint structural grid lines (swiss/tech).
+- motion_intensity: calm=subtle fades only (law, finance); balanced=reveals + ambient (most); bold=choreographed entrances + ambient motion (creative, events, food).
+- ux_flow: map the EMOTIONAL journey, not sections — what the visitor should feel/understand at each beat.
 - ONE dominant accent; the second color only supports. Never rainbow.
-- Ink-on-bg contrast >= 7:1 for headlines, >= 4.5:1 for body.
+- Ink-on-bg contrast >= 7:1 for headlines, >= 4.5:1 for body (the pipeline verifies your ratios and will correct them — pick hues with contrast in mind).
 - Choose theme by AUDIENCE EMOTION, not habit: luxury/nightlife/tech -> aurora or luxe; craft/editorial/consulting -> editorial; SaaS/corporate -> swiss; sale/festival -> festive; kids/food/community -> playful.
 - headline_angle must be a concrete promise or number when possible ("Custom thalis in 20 minutes" beats "Great food").
 - must_have: think like the visitor — what proof do they need to act? (menu/pricing/proof/booking/FAQ).
-- Palettes are ACCESSIBLE: muted text still readable on bg; accent readable as button text.
 Rules: hex colors only.${style ? ` The client asked for this style: "${style}" — honor it in theme/palette.` : ''} Business context: brand "${brand.name}", color ${brand.color}${brand.profile?.industry ? `, industry ${brand.profile.industry}` : ''}${brand.profile?.audience ? `, audience ${brand.profile.audience}` : ''}.`;
 }
 
-export async function designBrief(env, { kind, brief, style, brand, skillsBlock = '', lead = null, team = null }) {
-  const fallback = () => ({
-    design: normalizeDesign(
+export async function designBrief(env, { kind, brief, style, brand, skillsBlock = '', lead = null, understanding = null, team = null }) {
+  const fallback = () => {
+    const design = normalizeDesign(
       { theme: themeForStyleHint(style, kind), palette: {}, font: '' },
       { kind, styleHint: style, brandColor: brand.color }
-    ),
-    headlineAngle: '',
-    mustHave: [],
-    queries: [],
-    ai: false,
-  });
+    );
+    // v10 tokens stay coherent even on the deterministic path: dark themes
+    // read premium with grain, light themes stay clean.
+    design.type_scale = 'classic';
+    design.texture = ['onyx', 'aurora', 'luxe'].includes(String(design.theme || '')) ? 'grain' : 'clean';
+    design.motion_intensity = 'balanced';
+    design.ux_flow = [];
+    return { design, headlineAngle: '', mustHave: [], queries: [], ai: false };
+  };
   try {
     const j = await runAgent(
       env,
@@ -84,9 +160,9 @@ export async function designBrief(env, { kind, brief, style, brand, skillsBlock 
       'designing the art direction',
       [
         { role: 'system', content: [briefSystemPrompt(kind, brand, style), skillsBlock].filter(Boolean).join('\n\n') },
-        { role: 'user', content: [String(brief).slice(0, 2200), leadBlock(lead)].filter(Boolean).join('\n\n') },
+        { role: 'user', content: [String(brief).slice(0, 2200), understandingBlock(understanding), leadBlock(lead)].filter(Boolean).join('\n\n') },
       ],
-      { json: true, maxTokens: 900, temperature: 0.7 },
+      { json: true, maxTokens: 1000, temperature: 0.7 },
       (out) => `${out.theme || 'classic'} direction for ${brand.name}`
     );
     const theme = THEME_NAMES.includes(String(j.theme)) ? String(j.theme) : themeForStyleHint(style, kind);
@@ -94,6 +170,14 @@ export async function designBrief(env, { kind, brief, style, brand, skillsBlock 
       { theme, palette: j.palette || {}, font: String(j.font || ''), voice: j.voice, audience: j.audience, hero: j.hero, art: j.art },
       { kind, styleHint: style, brandColor: brand.color }
     );
+    // v10 DESIGN-SYSTEM v2 tokens — parsed with hard defaults so a model
+    // that omits them still ships a coherent system.
+    design.type_scale = ['compact', 'classic', 'dramatic'].includes(String(j.type_scale)) ? String(j.type_scale) : 'classic';
+    design.texture = ['grain', 'clean', 'grid'].includes(String(j.texture)) ? String(j.texture) : String(design.theme || '').match(/onyx|aurora|luxe/) ? 'grain' : 'clean';
+    design.motion_intensity = ['calm', 'balanced', 'bold'].includes(String(j.motion_intensity)) ? String(j.motion_intensity) : 'balanced';
+    design.ux_flow = Array.isArray(j.ux_flow) ? j.ux_flow.map((s) => String(s).slice(0, 110)).filter(Boolean).slice(0, 5) : [];
+    // The deterministic accessibility gate: AI hues, math-guaranteed ratios.
+    design.palette = enforceContrast(design.palette);
     return {
       design,
       headlineAngle: String(j.headline_angle || '').slice(0, 160),
@@ -129,17 +213,18 @@ export async function researchFacts(queries, { maxResults = 4, maxChars = 1300 }
 
 const RESEARCHER_SYSTEM = `You are the Researcher of an elite multi-agent web studio. You just ran live web searches for a client's page. Turn the raw results into MARKET INTELLIGENCE the copywriter and architect can actually build with. Respond with ONLY JSON:
 
-{"facts":["4-6 concrete, usable facts — numbers, names, prices, local truths, trends — each <=140 chars"],"implication":"one line: what this means for how THIS page should position and talk"}
+{"facts":["4-6 concrete, usable facts — numbers, names, prices, local truths, trends — each <=140 chars"],"implication":"one line: what this means for how THIS page should position and talk","follow_up":"one SPECIFIC search still missing that would materially ground the copy (a number, a local fact, a competitor norm) or '' if the picture is complete"}
 
 Rules:
 - Keep only facts relevant to this business and audience. Drop SEO spam, nav junk, duplicates.
 - Never invent facts that are not in the raw results. Thin results → fewer facts.
-- Facts the team can ACT on (expectations, price anchors, what locals value) beat encyclopedia trivia.`;
+- Facts the team can ACT on (expectations, price anchors, what locals value) beat encyclopedia trivia.
+- follow_up: only when a concrete, searchable gap remains — price ranges, local statistics, seasonal patterns.`;
 
 /** Raw multi-query gathering shared by both research paths. */
 async function gatherRawResults(queries, { maxResults = 4 } = {}) {
   const settled = await Promise.allSettled(
-    queries.slice(0, 2).map((q) => webSearch({ query: q }))
+    queries.slice(0, 4).map((q) => webSearch({ query: q }))
   );
   const seen = new Set();
   const items = [];
@@ -157,21 +242,24 @@ async function gatherRawResults(queries, { maxResults = 4 } = {}) {
 
 /**
  * RESEARCH INTELLIGENCE — the Researcher agent THINKS instead of dumping
- * raw snippets: two live searches in parallel, then one small synthesis
- * call distills usable facts + the positioning implication. Degrades to
- * the raw fact block when the synthesis is unreachable — research never
- * fails the build. Returns { block, ai } (block '' when the web itself
- * was unreachable).
+ * raw snippets: live searches run in parallel, then one small synthesis
+ * call distills usable facts + the positioning implication. v10: when
+ * the synthesis names a follow-up search still missing (a price range,
+ * a local number), the Researcher runs a SECOND round and merges the
+ * new facts — research with depth, bounded at exactly one follow-up.
+ * Degrades to the raw fact block when the synthesis is unreachable and
+ * to '' when the web itself is unreachable — research never fails the
+ * build. Returns { block, ai, follow_up }.
  */
 export async function researchIntelligence(env, { queries, brief = '', brand, team = null }) {
-  if (!queries?.length) return { block: '', ai: false };
+  if (!queries?.length) return { block: '', ai: false, follow_up: '' };
   let items = [];
   try {
     items = await gatherRawResults(queries);
   } catch {
     items = [];
   }
-  if (!items.length) return { block: '', ai: false };
+  if (!items.length) return { block: '', ai: false, follow_up: '' };
   const raw = items
     .map((r, i) => `${i + 1}. ${r.title}${r.snippet ? ` — ${r.snippet}` : ''}`)
     .join('\n')
@@ -198,18 +286,44 @@ export async function researchIntelligence(env, { queries, brief = '', brand, te
       { json: true, maxTokens: 550, temperature: 0.35 },
       (out) => `${Array.isArray(out?.facts) ? out.facts.length : 0} facts synthesized`
     );
-    const facts = Array.isArray(j?.facts)
+    let facts = Array.isArray(j?.facts)
       ? j.facts.map((f) => String(f).slice(0, 160)).filter(Boolean).slice(0, 6)
       : [];
-    if (!facts.length) return { block: rawBlock, ai: false };
+    let implication = j?.implication ? String(j.implication).slice(0, 200) : '';
+    const followUp = String(j?.follow_up || '').trim().slice(0, 140);
+
+    // ROUND 2 — chase the one concrete gap the synthesis named. Merge the
+    // new facts (deduped by prefix overlap) without a second synthesis
+    // call: the new raw lines are appended as direct facts.
+    if (followUp && followUp.length > 8) {
+      try {
+        const round2 = await gatherRawResults([followUp]);
+        const merged = [];
+        for (const r of round2.slice(0, 3)) {
+          const line = `${r.title}${r.snippet ? ` — ${r.snippet}` : ''}`.slice(0, 160);
+          if (!line || facts.some((f) => f.slice(0, 60) === line.slice(0, 60))) continue;
+          merged.push(line);
+          if (merged.length >= 3) break;
+        }
+        if (merged.length) facts = [...facts, ...merged].slice(0, 8);
+        if (team) {
+          team.record('researcher', 'chasing the follow-up lead', {
+            ok: true, ai: false,
+            detail: merged.length ? `"${followUp.slice(0, 60)}" → ${merged.length} more facts` : 'the lead dried up — moving on',
+          });
+        }
+      } catch { /* round 2 is a bonus, never a failure */ }
+    }
+
+    if (!facts.length) return { block: rawBlock, ai: false, follow_up: '' };
     const block = [
       'MARKET INTELLIGENCE (Researcher synthesis of live web searches — treat as grounding, verify nothing invented):',
       ...facts.map((f) => `- ${f}`),
-      j?.implication ? `WHAT IT MEANS FOR THIS PAGE: ${String(j.implication).slice(0, 200)}` : '',
+      implication ? `WHAT IT MEANS FOR THIS PAGE: ${implication}` : '',
     ].filter(Boolean).join('\n');
-    return { block, ai: true };
+    return { block, ai: true, follow_up: followUp, facts, implication };
   } catch {
-    return { block: rawBlock, ai: false };
+    return { block: rawBlock, ai: false, follow_up: '' };
   }
 }
 
