@@ -103,7 +103,6 @@ async function searchOpenverse(query, { limit = 8 } = {}) {
   const url = 'https://api.openverse.org/v1/images/?' + new URLSearchParams({
     q: String(query).slice(0, 180),
     page_size: String(Math.min(12, Math.max(4, limit))),
-    aspect_ratio: 'wide',
   }).toString();
   try {
     const res = await fetch(url, {
@@ -130,11 +129,52 @@ async function searchOpenverse(query, { limit = 8 } = {}) {
   }
 }
 
-/** One image sourcing round: provider chain (Commons → Openverse). */
+/** Salient words of the brief, for the deterministic relevance gate. */
+function salientBriefWords(brief) {
+  const STOP = new Set(['a', 'an', 'the', 'for', 'my', 'our', 'with', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'website', 'web', 'site', 'page', 'build', 'create', 'make', 'need', 'want', 'small', 'business', 'kind', 'app', 'landing', 'promo', 'portfolio', 'event', 'report', 'webapp', 'please', 'should', 'have', 'this', 'that', 'button', 'section', 'online']);
+  return new Set(String(brief || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w)));
+}
+
+/**
+ * Relevance gate for DETERMINISTIC assignment (the AI path judges fit
+ * itself): a candidate is relevant enough when its title or its query
+ * shares a salient word with the brief. Keeps a random stock photo from
+ * ever landing on a hero just because the pool was thin.
+ */
+function relevantPool(pool, brief) {
+  const briefWords = salientBriefWords(brief);
+  if (!briefWords.size) return pool;
+  const scored = pool.filter((c) => {
+    const words = String(`${c.title} ${c.query}`).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/);
+    return words.some((w) => briefWords.has(w));
+  });
+  return scored;
+}
+/**
+ * Progressively simpler variants of a query — stock APIs are keyword
+ * engines: "steaming metal kettle pouring dark filter coffee" finds
+ * nothing, "kettle coffee" finds plenty. The AI assignment pass handles
+ * relevance, so the SEARCH should stay broad.
+ */
+const SEARCH_STOP = new Set(['a', 'an', 'the', 'with', 'and', 'of', 'for', 'in', 'on', 'at', 'pouring', 'steaming', 'freshly', 'dark', 'warm', 'fresh', 'closeup', 'close-up', 'view', 'photo', 'picture', 'image', 'hot', 'cold', 'delicious', 'tasty', 'beautiful', 'modern', 'cozy', 'busy', 'evening', 'morning', 'night']);
+function simplifyQuery(q) {
+  const words = String(q || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !SEARCH_STOP.has(w));
+  return { two: words.slice(0, 2).join(' '), one: words.slice(0, 1).join(' '), last: words[words.length - 1] || '' };
+}
+
+/** One image sourcing round: provider chain × simplifying cascade. */
 async function searchImages(query, opts = {}) {
-  const first = await searchCommons(query, opts);
-  if (first.length) return first;
-  return searchOpenverse(query, opts);
+  const { two, one, last } = simplifyQuery(query);
+  // The subject noun usually sits LAST ("…dark filter coffee") — the
+  // last-word attempt is what finally lands a real, relevant pool.
+  const attempts = [...new Set([String(query).trim(), two, one, last].filter((q) => q && q.length > 2))];
+  for (const q of attempts) {
+    const first = await searchCommons(q, opts);
+    if (first.length) return first;
+    const ov = await searchOpenverse(q, opts);
+    if (ov.length) return ov;
+  }
+  return [];
 }
 
 /**
@@ -221,14 +261,14 @@ export async function findSiteImages(env, { queries = [], sections = [], team = 
       if (images.length >= 4) break;
     }
     if (!images.length) {
-      // The AI skipped every section ("nothing fits") — but a real
-      // verified hero photo beats clean typography for feel. Assign the
-      // best candidate to the hero deterministically (honest trace: not
-      // AI-cast, still verified).
+      // The AI skipped every section ("nothing fits") — assign a hero
+      // photo only when one is genuinely RELEVANT to the brief (title/
+      // query overlap). A random pretty picture is worse than clean type.
       const hero = sections.find((s) => s.id === 'hero');
-      if (hero && pool[0]) {
+      const relevant = relevantPool(pool, brief);
+      if (hero && relevant[0]) {
         return {
-          images: [{ section: 'hero', url: pool[0].url, alt: pool[0].title }],
+          images: [{ section: 'hero', url: relevant[0].url, alt: relevant[0].title }],
           vibe: '', ai: true,
         };
       }
@@ -236,13 +276,15 @@ export async function findSiteImages(env, { queries = [], sections = [], team = 
     }
     return { images, vibe: String(j?.vibe || '').slice(0, 140), ai: true };
   } catch {
-    // AI down → deterministic assignment: best candidate to the hero,
-    // the rest to the next sections in order.
+    // AI down → deterministic assignment with the same relevance gate:
+    // best relevant candidate to the hero, the rest to the next sections.
+    const relevant = relevantPool(pool, brief);
+    const source = relevant.length ? relevant : [];
     const order = sections.slice(0, 4).map((s) => s.id);
     const heroFirst = [...order.filter((id) => id === 'hero'), ...order.filter((id) => id !== 'hero')];
     const images = heroFirst
       .slice(0, 4)
-      .map((section, i) => (pool[i] ? { section, url: pool[i].url, alt: pool[i].title } : null))
+      .map((section, i) => (source[i] ? { section, url: source[i].url, alt: source[i].title } : null))
       .filter(Boolean);
     return { images, vibe: '', ai: false };
   }
