@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
@@ -10,6 +11,12 @@ import 'core/services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Typography ──────────────────────────────────────────────
+  // Sora / Inter / JetBrains Mono ship inside assets/fonts/. Serving
+  // them locally removes the runtime Google-Fonts fetch: no first-frame
+  // font swap, no network dependency at startup, faster cold boot.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   // ── Firebase ────────────────────────────────────────────────
   // Failures are recorded rather than swallowed, so a broken init shows a

@@ -6,6 +6,8 @@
 /// with credentials pulled from the server-side encrypted vault.
 library;
 
+import 'package:flutter/material.dart';
+
 /// One live row from the agent team's trace, streamed by the Worker while
 /// a build runs (Agent v9 live runs). The Studio shows these AS they land —
 /// the user watches the real team work, not a paced ticker.
@@ -135,6 +137,29 @@ class StudioSite {
         return '📝';
       default:
         return '🌐';
+    }
+  }
+
+  /// Grok-grade UI icon per artifact kind — monochrome Material glyphs
+  /// instead of emoji (emoji in chrome reads as toy-grade).
+  IconData get kindGlyph {
+    switch (kind) {
+      case 'landing':
+        return Icons.rocket_launch_outlined;
+      case 'promo':
+        return Icons.local_offer_outlined;
+      case 'event':
+        return Icons.event_outlined;
+      case 'portfolio':
+        return Icons.palette_outlined;
+      case 'webapp':
+        return Icons.bolt_outlined;
+      case 'report':
+        return Icons.insert_chart_outlined;
+      case 'note':
+        return Icons.sticky_note_2_outlined;
+      default:
+        return Icons.public_outlined;
     }
   }
 

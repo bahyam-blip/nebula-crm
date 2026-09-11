@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/services/storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/widgets/common_widgets.dart';
 import '../../providers/mail_provider.dart';
@@ -461,7 +462,8 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                     color: AppColors.primary,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.edit, size: 12, color: Colors.white),
+                  // White circle → black ink (the old white icon vanished).
+                  child: const Icon(Icons.edit, size: 12, color: AppTheme.onWhite),
                 ),
               ),
             ],

@@ -269,8 +269,7 @@ class _DealFormScreenState extends ConsumerState<DealFormScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : Text(_editingId != null ? 'Update Deal' : 'Create Deal'),
             ),

@@ -33,13 +33,13 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   String? _style;
   bool _moreOptions = false;
 
-  static const _kinds = <(String, String, String)>[
-    ('landing', '🚀', 'Landing'),
-    ('promo', '🎉', 'Offer'),
-    ('event', '📅', 'Event'),
-    ('portfolio', '🎨', 'Portfolio'),
-    ('webapp', '⚡', 'Web app'),
-    ('report', '📊', 'Report'),
+  static const _kinds = <(String, IconData, String)>[
+    ('landing', Icons.rocket_launch_outlined, 'Landing'),
+    ('promo', Icons.local_offer_outlined, 'Offer'),
+    ('event', Icons.event_outlined, 'Event'),
+    ('portfolio', Icons.palette_outlined, 'Portfolio'),
+    ('webapp', Icons.bolt_outlined, 'Web app'),
+    ('report', Icons.insert_chart_outlined, 'Report'),
   ];
 
   static const _styles = <(String, String)>[
@@ -291,6 +291,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             children: _kinds
                 .map((k) => NebulaChip(
                       label: k.$3,
+                      icon: k.$2,
                       selected: _kind == k.$1,
                       onSelected: () => setState(() => _kind = k.$1),
                     ))
@@ -300,7 +301,17 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
           _styleRow(),
           const SizedBox(height: 4),
           Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            data: Theme.of(context).copyWith(
+              dividerColor: Colors.transparent,
+              // The global expansion-tile theme draws a bordered card; inside
+              // the composer that reads as a box-in-a-box. Stay flat here.
+              expansionTileTheme: const ExpansionTileThemeData(
+                backgroundColor: Colors.transparent,
+                collapsedBackgroundColor: Colors.transparent,
+                shape: RoundedRectangleBorder(),
+                collapsedShape: RoundedRectangleBorder(),
+              ),
+            ),
             child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
@@ -491,7 +502,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                 children: [
                   Flexible(
                     child: Text(
-                      '${row.emoji}  ${row.agent} · ${row.action}',
+                      '${row.agent} · ${row.action}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
@@ -556,7 +567,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
               fontWeight: current ? FontWeight.w700 : FontWeight.w500,
               color: done || current ? AppColors.textPrimary : AppColors.textTertiary,
             ),
-            child: Text('${kBuildStages[i].icon}  ${kBuildStages[i].label}'),
+            child: Text(kBuildStages[i].label),
           ),
         ),
       ],
@@ -610,7 +621,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: Text(site.kindIcon, style: const TextStyle(fontSize: 20)),
+                  child: Icon(site.kindGlyph,
+                      size: 20, color: AppColors.textSecondary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(

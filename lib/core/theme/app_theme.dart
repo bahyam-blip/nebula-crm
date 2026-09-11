@@ -9,12 +9,23 @@ import './app_typography.dart';
 /// is "dark premium" and supporting a light theme would dilute the
 /// aesthetic and roughly double the QA surface.
 class AppTheme {
+  /// Foreground for any WHITE surface (buttons, FAB, badges, switch
+  /// thumbs, checkbox ticks). Black ink on white — the mono system's
+  /// most basic law. A past regression shipped white-on-white labels
+  /// on every Material button; this token is the single source of truth
+  /// so that can never regress silently again.
+  static const Color onWhite = Color(0xFF0A0A0A);
+
   static const ColorScheme _colorScheme = ColorScheme.dark(
     brightness: Brightness.dark,
     primary: AppColors.primary,
-    onPrimary: Colors.white,
+    onPrimary: onWhite,
     secondary: AppColors.accent,
-    onSecondary: Colors.black,
+    onSecondary: onWhite,
+    secondaryContainer: AppColors.surfaceHigh,
+    onSecondaryContainer: AppColors.textPrimary,
+    primaryContainer: AppColors.primary,
+    onPrimaryContainer: onWhite,
     error: AppColors.danger,
     onError: Colors.white,
     surface: AppColors.surface,
@@ -114,28 +125,34 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          // WHITE surface → BLACK ink. Never white-on-white.
+          foregroundColor: onWhite,
+          disabledForegroundColor: onWhite.withValues(alpha: 0.45),
+          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.45),
           minimumSize: const Size.fromHeight(52),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
           textStyle: AppTypography.textTheme.labelLarge
-              ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+              ?.copyWith(color: onWhite, fontWeight: FontWeight.w600),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          // WHITE surface → BLACK ink (icon, label, spinner).
+          foregroundColor: onWhite,
+          disabledForegroundColor: onWhite.withValues(alpha: 0.45),
+          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.45),
           minimumSize: const Size.fromHeight(52),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
           textStyle: AppTypography.textTheme.labelLarge
-              ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+              ?.copyWith(color: onWhite, fontWeight: FontWeight.w600),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
@@ -178,7 +195,8 @@ class AppTheme {
       // ── Navigation bar (M3) ──────────────────────────────────
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.primary.withValues(alpha: 0.15),
+        // Flat Grok-style bar: no M3 pill behind the active icon.
+        indicatorColor: Colors.transparent,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return AppTypography.textTheme.labelSmall?.copyWith(
@@ -202,14 +220,14 @@ class AppTheme {
       // ── Floating action button ───────────────────────────────
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: onWhite,
         elevation: 4,
         highlightElevation: 8,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
         extendedTextStyle: AppTypography.textTheme.labelLarge
-            ?.copyWith(color: Colors.white),
+            ?.copyWith(color: onWhite),
       ),
 
       // ── Chips ────────────────────────────────────────────────
@@ -355,7 +373,8 @@ class AppTheme {
           }
           return Colors.transparent;
         }),
-        checkColor: WidgetStateProperty.all(Colors.white),
+        // White fill → black tick (a white tick was invisible).
+        checkColor: WidgetStateProperty.all(onWhite),
         side: const BorderSide(color: AppColors.textTertiary, width: 1.5),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(5),
@@ -396,7 +415,7 @@ class AppTheme {
       // ── Badges ───────────────────────────────────────────────
       badgeTheme: BadgeThemeData(
         backgroundColor: AppColors.primary,
-        textColor: const Color(0xFF0A0A0A),
+        textColor: onWhite,
         textStyle: AppTypography.textTheme.labelSmall
             ?.copyWith(fontSize: 10, fontWeight: FontWeight.w700),
       ),
@@ -430,7 +449,8 @@ class AppTheme {
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return Colors.white;
+            // White track → black thumb (a white thumb vanished).
+            return onWhite;
           }
           return AppColors.textTertiary;
         }),

@@ -491,8 +491,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                     ? const SizedBox(
                         height: 13,
                         width: 13,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.check, size: 15),
                 label: const Text('Approve & send'),
                 style: FilledButton.styleFrom(
@@ -711,8 +710,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                       ? const SizedBox(
                           height: 14,
                           width: 14,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
+                          child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.add_link, size: 16),
                   label: const Text('Create 24h connection'),
                 )

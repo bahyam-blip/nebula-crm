@@ -12,6 +12,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../models/app_user.dart';
@@ -88,8 +89,9 @@ class ProfileScreen extends ConsumerWidget {
                                 color: AppColors.primary,
                                 shape: BoxShape.circle,
                               ),
+                              // White circle → black ink.
                               child: const Icon(Icons.camera_alt,
-                                  size: 16, color: Colors.white),
+                                  size: 16, color: AppTheme.onWhite),
                             ),
                           ],
                         ),

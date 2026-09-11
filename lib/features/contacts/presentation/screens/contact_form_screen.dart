@@ -280,8 +280,7 @@ class _ContactFormScreenState extends ConsumerState<ContactFormScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : Text(_editingId != null ? 'Update Contact' : 'Create Contact'),
             ),

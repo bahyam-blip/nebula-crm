@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_colors.dart';
-import '../../core/utils/extensions.dart';
+import '../../core/widgets/nebula_ui.dart';
 
 /// Index of the currently selected bottom-nav tab.
 final selectedTabProvider = StateProvider<int>((ref) => 0);
@@ -17,38 +17,38 @@ class MainScaffold extends ConsumerWidget {
 
   static const _destinations = [
     _NavDestination(
-      icon: Icons.dashboard,
-      selectedIcon: Icons.dashboard,
-      label: 'Dashboard',
+      icon: Icons.dashboard_outlined,
+      activeIcon: Icons.dashboard,
+      label: 'Home',
       route: '/dashboard',
     ),
     _NavDestination(
-      icon: Icons.group,
-      selectedIcon: Icons.group,
+      icon: Icons.group_outlined,
+      activeIcon: Icons.group,
       label: 'Contacts',
       route: '/contacts',
     ),
     _NavDestination(
-      icon: Icons.view_kanban,
-      selectedIcon: Icons.view_kanban,
+      icon: Icons.view_kanban_outlined,
+      activeIcon: Icons.view_kanban,
       label: 'Pipeline',
       route: '/pipeline',
     ),
     _NavDestination(
-      icon: Icons.mark_email_unread_outlined,
-      selectedIcon: Icons.mark_email_read_outlined,
+      icon: Icons.mail_outline_rounded,
+      activeIcon: Icons.mail_rounded,
       label: 'Email',
       route: '/ai-emailer',
     ),
     _NavDestination(
-      icon: Icons.auto_awesome,
-      selectedIcon: Icons.auto_awesome,
+      icon: Icons.auto_awesome_outlined,
+      activeIcon: Icons.auto_awesome,
       label: 'Assistant',
       route: '/assistant',
     ),
     _NavDestination(
-      icon: Icons.more_horiz,
-      selectedIcon: Icons.more_horiz,
+      icon: Icons.apps_outlined,
+      activeIcon: Icons.apps,
       label: 'More',
       route: '/more',
     ),
@@ -61,24 +61,66 @@ class MainScaffold extends ConsumerWidget {
 
     return Scaffold(
       body: child,
+      // Grok-grade nav: flat true black, one hairline, icon + micro
+      // label, white active / graphite inactive. No M3 pill, no ripple
+      // blobs — the inversion IS the selection.
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
+          color: AppColors.background,
           border: Border(
-            top: BorderSide(color: AppColors.border, width: 0.5),
+            top: BorderSide(color: AppColors.border, width: 0.6),
           ),
         ),
-        child: NavigationBar(
-          selectedIndex: selectedIndex,
-          onDestinationSelected: (i) {
-            context.go(_destinations[i].route);
-          },
-          destinations: [
-            for (final d in _destinations)
-              NavigationDestination(
-                icon: Icon(d.icon),
-                selectedIcon: Icon(d.selectedIcon),
-                label: d.label,
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 60,
+            child: Row(
+              children: [
+                for (final entry in _destinations.asMap().entries)
+                  Expanded(child: _navItem(context, entry.key, entry.value, entry.key == selectedIndex)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(BuildContext context, int index, _NavDestination d, bool selected) {
+    return PressableScale(
+      pressedScale: 0.92,
+      onTap: () {
+        if (!selected) context.go(d.route);
+      },
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutCubic,
+        opacity: selected ? 1.0 : 0.62,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              height: 24,
+              child: Icon(
+                selected ? d.activeIcon : d.icon,
+                size: 22,
+                color: selected ? AppColors.primary : AppColors.textTertiary,
               ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              d.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                height: 1.0,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                letterSpacing: 0.15,
+                color: selected ? AppColors.primary : AppColors.textTertiary,
+              ),
+            ),
           ],
         ),
       ),
@@ -96,12 +138,12 @@ class MainScaffold extends ConsumerWidget {
 class _NavDestination {
   const _NavDestination({
     required this.icon,
-    required this.selectedIcon,
+    required this.activeIcon,
     required this.label,
     required this.route,
   });
   final IconData icon;
-  final IconData selectedIcon;
+  final IconData activeIcon;
   final String label;
   final String route;
 }

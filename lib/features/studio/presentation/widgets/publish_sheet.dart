@@ -319,7 +319,7 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
         onPressed: _busy || !_credsValid(p) ? null : () => _doConnect(p),
         child: _busy
-            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
             : const Text('Verify & connect'),
       ),
       TextButton(
@@ -352,7 +352,7 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
         onPressed: _busy ? null : () => _doPublish(p),
         child: _busy
-            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
             : const Text('Deploy now'),
       ),
       TextButton(
@@ -393,7 +393,7 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         children: [
           Row(
             children: [
-              Text(_logoEmoji(p.connector), style: const TextStyle(fontSize: 20)),
+              _platformMark(p),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -586,22 +586,36 @@ class _PublishSheetState extends ConsumerState<PublishSheet> {
         ),
       );
 
-  String _logoEmoji(String connector) {
-    switch (connector) {
-      case 'github':
-        return '🐙';
-      case 'vercel':
-        return '▲';
-      case 'firebase':
-        return '🔥';
-      case 'godaddy':
-        return '🌐';
-      case 'hostinger':
-        return '🟣';
-      case 'supabase':
-        return '⚡';
-      default:
-        return '☁️';
-    }
+  /// Brand mark for a hosting platform — a clean two-letter monogram on
+  /// a quiet slab (emoji logos read as toy-grade).
+  Widget _platformMark(HostingConnector p) {
+    final label = switch (p.connector) {
+      'github' => 'GH',
+      'vercel' => 'V',
+      'firebase' => 'FB',
+      'godaddy' => 'GD',
+      'hostinger' => 'H',
+      'supabase' => 'SB',
+      _ => p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+    };
+    return Container(
+      width: 38,
+      height: 38,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceHigh,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.4,
+          color: AppColors.textPrimary,
+        ),
+      ),
+    );
   }
 }
