@@ -709,11 +709,11 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
 
   // 2b. IMAGE REWORK (v11) — a section that was cast a photo but shipped
   //     without <img> gets ONE engineer re-code with the omission named.
-  //     Bounded (≤2 re-codes): a missing photo degrades to CSS art, it
+  //     Bounded (≤3 re-codes): a missing photo degrades to CSS art, it
   //     never blocks the build.
   let imageRetries = 0;
   for (const c of coded) {
-    if (imageRetries >= 2) break;
+    if (imageRetries >= 3) break;
     const assigned = imagesBySection.find((im) => im.section === c.id);
     if (!assigned || /<img[\s>]/i.test(c.html)) continue;
     const section = plan.sections.find((s) => s.id === c.id);

@@ -220,7 +220,20 @@ export async function findSiteImages(env, { queries = [], sections = [], team = 
       images.push({ section, url, alt: String(a?.alt || valid.get(url).title).slice(0, 90) });
       if (images.length >= 4) break;
     }
-    if (!images.length) return { images: [], vibe: '', ai: true };
+    if (!images.length) {
+      // The AI skipped every section ("nothing fits") — but a real
+      // verified hero photo beats clean typography for feel. Assign the
+      // best candidate to the hero deterministically (honest trace: not
+      // AI-cast, still verified).
+      const hero = sections.find((s) => s.id === 'hero');
+      if (hero && pool[0]) {
+        return {
+          images: [{ section: 'hero', url: pool[0].url, alt: pool[0].title }],
+          vibe: '', ai: true,
+        };
+      }
+      return { images: [], vibe: '', ai: true };
+    }
     return { images, vibe: String(j?.vibe || '').slice(0, 140), ai: true };
   } catch {
     // AI down → deterministic assignment: best candidate to the hero,
