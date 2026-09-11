@@ -284,7 +284,7 @@ export function mcpServerInfo(request, _env) {
     transport: 'JSON-RPC 2.0 (initialize, tools/list, tools/call, ping)',
     tools: Object.keys(TOOLS).length,
     capabilities: [
-      'deep-thinking multi-agent build team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified tokens + UX flow, Copywriter, Copy Chief, Architect, Engineers, QA Director, Builder, Reflector, Skill Researcher) with live run streaming',
+      'deep-thinking multi-agent build team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified tokens + UX flow + per-brief design-DNA palettes, Copywriter, Copy Chief, Architect, Photographer sourcing verified real images, Engineers with an advanced motion system, QA Director, Builder with an identity firewall — every site carries ONLY the client brand, Reflector, Skill Researcher) with live run streaming',
       'surgical refine: re-code named sections only (e.g. just the hero) via refine_site.sections',
       'live CRM reads/writes (role-enforced)',
       'AI email campaign engine with HITL approval',
