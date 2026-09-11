@@ -259,7 +259,7 @@ ok(build1.stages.some((s) => s.stage === 'polish' && s.ai === true), 'polish sta
 ok(build1.stages.some((s) => s.stage === 'wire'), `wire stage assembles the hand-coded sections (${build1.stages.at(-1)?.detail})`);
 ok(build1.stages.filter((s) => String(s.stage).startsWith('code:')).length === 3, 'three sections hand-coded');
 ok(/^[0-9a-f]{64}$/.test(build1.sha256 || ''), 'build returns sha256 digest');
-ok(build1.stages.length === 14, `stage trace: lead/understand/think/research/write/polish/plan/code×3/review/wire/reflect/skill (${build1.stages.length})`);
+ok(build1.stages.length === 15, `stage trace: lead/understand/think/research/write/polish/plan/images/code×3/review/wire/reflect/skill (${build1.stages.length})`);
 ok(build1.stages.some((s) => s.stage === 'reflect'), 'the Reflector closes the run (v9)');
 ok(Array.isArray(build1.team) && build1.team.some((r) => r.agent === 'Lead' && r.ok) && build1.team_summary?.ai_calls >= 8, 'multi-agent team trace rides the build (v8)', JSON.stringify(build1.team_summary));
 
@@ -359,7 +359,7 @@ const content = {
   contact: { email: 'hi@vega.test' },
 };
 {
-  const d = normalizeDesign({ theme: 'onyx', palette: {}, font: '', hero: 'split', art: 'rings' }, { kind: 'landing', styleHint: '', brandColor: brand.color });
+  const d = normalizeDesign({ theme: 'onyx', palette: {}, font: '', hero: 'split', art: 'rings' }, { kind: 'landing', styleHint: '', seedAccent: brand.color });
   const html = renderSite({ kind: 'landing', design: d, content, brand });
   ok(html.includes('family=Space+Grotesk'), 'onyx loads Space Grotesk');
   ok(html.includes('class="hero split"'), 'onyx split hero renders');
@@ -367,13 +367,13 @@ const content = {
   ok(html.includes('bento'), 'features render as bento');
   ok(html.includes('wordmark'), 'giant footer wordmark renders');
   ok(html.includes('--accent:#ffffff'), 'onyx stays monochrome (white accent)');
-  const dNeo = normalizeDesign({ theme: 'neo', palette: {} }, { kind: 'landing', styleHint: '', brandColor: brand.color });
+  const dNeo = normalizeDesign({ theme: 'neo', palette: {} }, { kind: 'landing', styleHint: '', seedAccent: brand.color });
   const hNeo = renderSite({ kind: 'landing', design: dNeo, content, brand });
   ok(dNeo.font === 'syne' && hNeo.includes('family=Syne'), 'neo loads Syne and allows the brand accent');
   ok(dNeo.palette.accent === brand.color, 'neo keeps the brand accent');
-  const dOld = normalizeDesign({ theme: 'editorial', palette: {}, font: '' }, { kind: 'landing', styleHint: '', brandColor: brand.color });
+  const dOld = normalizeDesign({ theme: 'editorial', palette: {}, font: '' }, { kind: 'landing', styleHint: '', seedAccent: brand.color });
   ok(dOld.font === 'serif' && dOld.hero === 'editorial', 'editorial defaults: serif + editorial hero');
-  const dLuxe = normalizeDesign({ theme: 'luxe', palette: {}, font: '' }, { kind: 'landing', styleHint: '', brandColor: brand.color });
+  const dLuxe = normalizeDesign({ theme: 'luxe', palette: {}, font: '' }, { kind: 'landing', styleHint: '', seedAccent: brand.color });
   ok(dLuxe.font === 'luxe' && dLuxe.art === 'waves', 'luxe defaults: Cormorant + waves art');
   const keys = Object.keys(THEMES);
   ok(keys.length === 8 && keys.includes('onyx') && keys.includes('neo'), `8 design systems (${keys.join(',')})`);

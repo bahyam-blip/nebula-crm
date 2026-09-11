@@ -1,5 +1,16 @@
 /**
- * CODEGEN — the bespoke code-writing engine (Agent v7).
+ * CODEGEN — the bespoke code-writing engine (Agent v7 → v11).
+ *
+ * v11 AURA — pages finally LOOK alive and REAL:
+ *   • IMAGES  — the Photographer (imager.js) sources and verifies real
+ *     photography per section; engineers may reference ONLY those exact
+ *     URLs; the sanitizer strips anything else. No invented URLs, no
+ *     broken images — and no more image-less pages.
+ *   • MOTION  — a marquee band component, count-up stat animation, nav
+ *     condense-on-scroll, image treatment (.ph), ambient float and a
+ *     sheen accent surface join the intensity-scaled reveal system.
+ *   • IDENTITY — nav, footer and favicon render THE CLIENT's name from
+ *     sitebrand.js; the owner's brand can no longer leak in.
  *
  * THE HONEST DIAGNOSIS: through v6 the final HTML of every marketing site
  * came from renderSite() — a deterministic template engine. The AI picked
@@ -37,6 +48,7 @@
 import { runAgent, understandingBlock } from './agents.js';
 import { hex, lum, mix, FONT_STACKS, DISPLAY_OF_FONT } from './site_templates.js';
 import { esc, safeHref } from './htmlutil.js';
+import { isAllowedImageSrc } from './imager.js';
 
 const SECTION_AI_TOKENS = 1900;
 const PLAN_AI_TOKENS = 900;
@@ -102,7 +114,7 @@ function defaultPlan(kind, content) {
 
 const hasValue = (v) => (Array.isArray(v) ? v.length > 0 : v && typeof v === 'object' ? Object.values(v).some((x) => x !== null && x !== undefined && String(x).trim() !== '') : v !== null && v !== undefined && String(v).trim() !== '');
 
-export async function planSections(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, understanding = null, team = null }) {
+export async function planSections(env, { kind, brief, brand, site = null, thought, content, skillsBlock = '', lead = null, understanding = null, team = null }) {
   const vocabNote = `Available copy groups for THIS page: ${Object.keys(content).filter((k) => hasValue(content[k])).join(', ') || 'headline, sub'}`;
   const cap = Math.min(MAX_SECTIONS, Number(lead?.sections_target) || MAX_SECTIONS);
   const uxFlow = Array.isArray(thought?.design?.ux_flow) && thought.design.ux_flow.length
@@ -120,7 +132,7 @@ export async function planSections(env, { kind, brief, brand, thought, content, 
           role: 'user',
           content: [
             `PAGE KIND: ${kind}`,
-            `BUSINESS: ${brand.name}`,
+            `BUSINESS: ${site?.name || brand?.name || 'the client'}`,
             `BRIEF: ${String(brief).slice(0, 900)}`,
             understandingBlock(understanding),
             `DESIGN DIRECTION: theme ${thought.design.themeLabel}, voice "${thought.design.voice || 'clear, confident'}", audience "${thought.design.audience || 'general'}", hero style ${thought.design.hero}${thought.design.motion_intensity ? `, motion ${thought.design.motion_intensity}` : ''}${thought.design.type_scale ? `, type scale ${thought.design.type_scale}` : ''}`,
@@ -173,7 +185,7 @@ export async function planSections(env, { kind, brief, brand, thought, content, 
 
 /* ══ Stage 5 — CODE (per section) ════════════════════════════════════ */
 
-function sectionSystemPrompt({ id, kind, brand }) {
+function sectionSystemPrompt({ id, kind, brand, hasImages }) {
   return `You are a senior front-end engineer at an award-winning web studio. You are HAND-CODING one section of a bespoke ${kind} page for ${brand.name}. There is no template — every line is written for this business.
 
 Respond with ONLY this format (no markdown fences, no commentary):
@@ -187,22 +199,32 @@ Respond with ONLY this format (no markdown fences, no commentary):
 </style>
 
 HARD RULES
-- Exactly one <section id="sec-${id}"> root element. No <script>, no <html>/<head>/<body>, no <iframe>, no <img> with remote src, no inline on* handlers, no style="" attributes.
+- Exactly one <section id="sec-${id}"> root element. No <script>, no <html>/<head>/<body>, no <iframe>, no inline on* handlers, no style="" attributes.
+- IMAGES: only when an IMAGES list is provided below. <img> is allowed ONLY with those EXACT URLs (never invent, shorten or edit a URL); loading="lazy", honest alt text, class="ph" for the built-in treatment. No IMAGES list → NO <img> at all; build the atmosphere with pure CSS (gradients, layered shapes, the page art variables).
 - Every CSS selector starts with #sec-${id}. Mobile-first: phone layout first, then ONE @media (min-width:768px) block.
 - Use the page variables (given in the brief): colors, --r radius, --font body / --display display font, spacing scale --sp1..--sp6. Content sits inside .wrap (already centered, max-width var(--maxw)) — do NOT redefine .wrap.
 - Typography: clamp() font sizes; headings use var(--display).
-- MOTION IS REQUIRED: mark animatable children with data-rev (stagger with style-free data-rev-delay="1..4" attributes), add one :hover transition on interactive elements, and define at least one unique @keyframes (name it ${id}-*) — ambient or entrance.
+- MOTION IS REQUIRED (the page must feel alive):
+  · mark animatable children with data-rev (stagger with data-rev-delay="1..4"),
+  · one :hover transition on interactive elements (lift/scale/glow),
+  · at least one unique @keyframes named ${id}-* (entrance or ambient — e.g. slow drift, sheen, float),
+  · when your copy includes "marquee": render <div class="marquee"><div class="marquee-track"><span>word</span>…</div></div> with the words TWICE inside .marquee-track for a seamless loop (the page provides the animation),
+  · when your copy includes "stats": render the value element as <span data-count="40">0</span> (keep the suffix like % or + OUTSIDE the span) — the page counts up on reveal.${hasImages ? '\n  · your IMAGES list is below — wire the photo into the composition with craft (mask, frame, overlay, parallax depth).' : ''}
 - Accessibility: text contrast >= 4.5:1, :focus-visible outline on links/buttons, buttons are <a class="btn btn-accent"> (page provides .btn styles) or real <button>.
 - Keep the whole answer under 100 lines. Every element earns its place; density and craft beat bloat.`;
 }
 
-function sectionUserPrompt({ design, section, content, brand, kind, brief }) {
+function sectionUserPrompt({ design, section, content, brand, kind, brief, images = null }) {
   const v = designVars(design);
   const motionLine = design.motion_intensity === 'bold'
     ? 'MOTION INTENSITY: bold — confident choreographed entrances and visible ambient motion are wanted.'
     : design.motion_intensity === 'calm'
       ? 'MOTION INTENSITY: calm — restrained fades and small translations only; no dramatic movement.'
       : 'MOTION INTENSITY: balanced — clear reveals plus one subtle ambient motif.';
+  const myImage = images?.find((im) => im.section === section.id) || null;
+  const imageLines = myImage
+    ? `IMAGES (verified for THIS section — the only <img> URLs you may use):\n${myImage.url}\nalt: "${myImage.alt}"`
+    : '';
   return [
     `BUSINESS: ${brand.name} — ${String(brief).slice(0, 200)}`,
     `VOICE: "${design.voice || 'clear, confident'}" · AUDIENCE: ${design.audience || 'general'} · KIND: ${kind}`,
@@ -213,12 +235,13 @@ function sectionUserPrompt({ design, section, content, brand, kind, brief }) {
     section.journey ? `JOURNEY STAGE (serve exactly this beat): ${section.journey}` : '',
     `COMPOSITION YOU DECIDED (make it real): ${section.layout || 'your best judgment'}`,
     `MOTION INTENT: ${section.motion || 'subtle reveal'}`,
+    imageLines,
     `COPY (use these words — do not invent facts): ${copyFragment(content, section.content_keys)}`,
     `NOW hand-code section "sec-${section.id}".`,
   ].filter(Boolean).join('\n');
 }
 
-function sanitizeSectionHtml(html, id) {
+function sanitizeSectionHtml(html, id, allowedImages = null) {
   let h = String(html || '');
   // Strip scripts/iframes whole, kill inline handlers and remote srcs.
   h = h
@@ -226,9 +249,12 @@ function sanitizeSectionHtml(html, id) {
     .replace(/<script[^>]*>/gi, '')
     .replace(/<iframe[\s\S]*?(<\/iframe\s*>|>)/gi, '')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\ssrc\s*=\s*(['"]?)\s*(https?:)?\/\/[^'">\s]*\1/gi, '')
-    // srcset/source src with remote URLs: strip the attribute (models try
-    // to hotlink stock photos; hallucinated URLs render as broken images).
+    // Remote srcs: ONLY the Photographer's verified URLs survive (v11).
+    // Everything else — hotlinked stock, hallucinated URLs — is stripped
+    // so a broken image can never be served.
+    .replace(/\ssrc\s*=\s*(['"]?)\s*((https?:)?\/\/[^'">\s]*)\1/gi, (m, q, url) =>
+      isAllowedImageSrc(url, allowedImages) ? m : '')
+    // srcset/source src with remote URLs: strip the attribute.
     .replace(/\ssrcset\s*=\s*("[^"]*"|'[^']*')/gi, '')
     .replace(/<source[^>]*>/gi, '');
   // Guarantee the section id on the root element.
@@ -239,7 +265,7 @@ function sanitizeSectionHtml(html, id) {
 }
 
 /** Validate + extract { html, css } from a model answer. Throws on garbage. */
-export function parseSection(raw, id) {
+export function parseSection(raw, id, allowedImages = null) {
   let text = String(raw || '').trim();
 
   // 0. Prefer a fenced block containing the section — sarvam-105b loves
@@ -274,7 +300,7 @@ export function parseSection(raw, id) {
     css = rawCss.slice(0, lastBrace + 1).trim();
   }
 
-  html = sanitizeSectionHtml(html, id);
+  html = sanitizeSectionHtml(html, id, allowedImages);
 
   if (html.length < HTML_MIN) throw new Error('section HTML too small');
   if (html.length > HTML_MAX) throw new Error('section HTML too large');
@@ -292,8 +318,9 @@ export function parseSection(raw, id) {
 
 async function codeSectionOnce(env, ctx, attempt, lastError) {
   const critique = String(ctx.critique || '').slice(0, 200);
+  const allowed = ctx.allowedImages || null;
   const messages = [
-    { role: 'system', content: sectionSystemPrompt({ id: ctx.section.id, kind: ctx.kind, brand: ctx.brand }) },
+    { role: 'system', content: sectionSystemPrompt({ id: ctx.section.id, kind: ctx.kind, brand: ctx.brand, hasImages: Boolean(ctx.images?.some((im) => im.section === ctx.section.id)) }) },
     { role: 'user', content: attempt === 1 && !critique
       ? sectionUserPrompt(ctx)
       : [
@@ -313,7 +340,7 @@ async function codeSectionOnce(env, ctx, attempt, lastError) {
     { maxTokens: SECTION_AI_TOKENS, temperature: attempt === 1 && !critique ? 0.7 : 0.5 },
     () => `sec-${ctx.section.id} written for ${ctx.brand.name}`
   );
-  return parseSection(raw, ctx.section.id);
+  return parseSection(raw, ctx.section.id, allowed);
 }
 
 /** Code one section with the retry + rework policy. Returns null on failure. */
@@ -364,7 +391,7 @@ export function engineFallbackSection(section, content, design) {
 export async function reviewSections(env, { kind, brand, sections, team = null }) {
   try {
     const digest = sections
-      .map((s) => `#${s.id} (${s.name}) — goal: ${s.goal}\nCSS head: ${s.css.slice(0, 180)}`)
+      .map((s) => `#${s.id} (${s.name}) — goal: ${s.goal}\nCSS head: ${s.css.slice(0, 180)}${s.image ? `\nImage used: ${s.image}` : ''}`)
       .join('\n\n')
       .slice(0, 2600);
     const j = await runAgent(
@@ -375,7 +402,7 @@ export async function reviewSections(env, { kind, brand, sections, team = null }
       [
         {
           role: 'system',
-          content: `You are the design director reviewing hand-coded sections of a ${kind} page for ${brand.name} before it ships. A section is "fix" ONLY if it is broken for a live page: unstyled, contradicts the design direction, empty shell, or unusable on mobile. Stylistic taste is NOT a fix reason. Respond with ONLY JSON: {"verdicts":[{"id":"...","verdict":"good"|"fix","note":"<=10 words"}]}`,
+          content: `You are the design director reviewing hand-coded sections of a ${kind} page for ${brand.name} before it ships. A section is "fix" ONLY if it is broken for a live page: unstyled, contradicts the design direction, empty shell, unusable on mobile, shows a foreign brand name, or references an image not in its verified list. Stylistic taste is NOT a fix reason. Respond with ONLY JSON: {"verdicts":[{"id":"...","verdict":"good"|"fix","note":"<=10 words"}]}`,
         },
         { role: 'user', content: digest },
       ],
@@ -464,9 +491,28 @@ a{color:inherit;text-decoration:none}
 [data-rev]{opacity:0;transform:translateY(${revShift});filter:blur(${revBlur});transition:opacity ${revDur} var(--ease-out),transform ${revDur} var(--ease-out),filter ${revDur} ease}
 [data-rev][data-rev-delay="1"]{transition-delay:.09s}[data-rev][data-rev-delay="2"]{transition-delay:.18s}[data-rev][data-rev-delay="3"]{transition-delay:.27s}[data-rev][data-rev-delay="4"]{transition-delay:.36s}
 .rev-in[data-rev]{opacity:1;transform:none;filter:none}
+/* v11 AURA — the advanced motion system */
+.marquee{overflow:hidden;position:relative;border-block:1px solid var(--border);padding:var(--sp3) 0;mask-image:linear-gradient(90deg,transparent,black 8%,black 92%,transparent)}
+.marquee-track{display:flex;gap:var(--sp5);width:max-content;animation:marquee-x var(--marquee-dur,22s) linear infinite}
+.marquee-track span{font-family:var(--display);font-size:clamp(1.1rem,1rem + 1.6vw,1.9rem);font-weight:800;letter-spacing:.02em;color:var(--muted);white-space:nowrap}
+.marquee-track span:nth-child(even){color:var(--accent);-webkit-text-stroke:1px var(--accent);-webkit-text-fill-color:transparent}
+.marquee:hover .marquee-track{animation-play-state:paused}
+@keyframes marquee-x{to{transform:translateX(-50%)}}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes sheen-x{0%{transform:translateX(-120%) skewX(-18deg)}100%{transform:translateX(240%) skewX(-18deg)}}
+.float-slow{animation:floaty 7s ease-in-out infinite}
+.float-slower{animation:floaty 11s ease-in-out infinite}
+.sheen{position:relative;overflow:hidden}
+.sheen::after{content:'';position:absolute;top:0;bottom:0;width:34%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);animation:sheen-x 6s ease-in-out infinite;pointer-events:none}
+.ph{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);filter:saturate(.94) contrast(1.03);transition:transform .5s var(--ease-out),filter .5s var(--ease-out),box-shadow .5s var(--ease-out);box-shadow:var(--shadow-rest)}
+.ph:hover{transform:scale(1.02) translateY(-3px);filter:saturate(1.05) contrast(1.05);box-shadow:var(--shadow-lift)}
+.lift{transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)}
+.lift:hover{transform:translateY(-4px);box-shadow:var(--shadow-lift)}
 /* nav + footer chrome */
-.site-nav{position:sticky;top:0;z-index:900;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 78%,transparent);border-bottom:1px solid var(--border)}
-.site-nav .wrap{display:flex;align-items:center;gap:var(--sp3);height:62px}
+.site-nav{position:sticky;top:0;z-index:900;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 78%,transparent);border-bottom:1px solid var(--border);transition:box-shadow .3s ease}
+.site-nav .wrap{display:flex;align-items:center;gap:var(--sp3);height:62px;transition:height .3s var(--ease-out)}
+.site-nav.condensed{box-shadow:0 12px 30px -18px rgba(0,0,0,.55)}
+.site-nav.condensed .wrap{height:50px}
 .brand-mark{font-family:var(--display);font-weight:800;font-size:17px;letter-spacing:-.01em}
 .nav-links{display:flex;gap:var(--sp3);margin-left:auto;font-size:13.5px;font-weight:600;color:var(--muted);overflow-x:auto;scrollbar-width:none}
 .nav-links::-webkit-scrollbar{display:none}
@@ -483,7 +529,7 @@ a{color:inherit;text-decoration:none}
 /* scroll progress */
 #rev-progress{position:fixed;top:0;left:0;height:2.5px;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));z-index:1000;transition:width .1s linear}
 ${texture === '' ? '/* clean texture — flat, no overlay */' : texture}
-@media (prefers-reduced-motion:reduce){[data-rev]{opacity:1;transform:none;filter:none;transition:none}*{animation-duration:.001s !important;animation-iteration-count:1 !important;transition-duration:.001s !important}html{scroll-behavior:auto}}`,
+@media (prefers-reduced-motion:reduce){[data-rev]{opacity:1;transform:none;filter:none;transition:none}.marquee-track,.float-slow,.float-slower,.sheen::after{animation:none !important}*{animation-duration:.001s !important;animation-iteration-count:1 !important;transition-duration:.001s !important}html{scroll-behavior:auto}}`,
   };
 }
 
@@ -513,7 +559,7 @@ function footerHtml(brand, content) {
 </div></footer>`;
 }
 
-function revealJs() {
+export function revealJs() {
   return `(function(){
 var m=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 var els=[].slice.call(document.querySelectorAll('[data-rev]'));
@@ -521,7 +567,18 @@ if(m||!('IntersectionObserver' in window)){els.forEach(function(e){e.setAttribut
 var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add('rev-in');io.unobserve(en.target)}})},{threshold:.14,rootMargin:'0px 0px -6% 0px'});
 els.forEach(function(e){io.observe(e)});
 var bar=document.getElementById('rev-progress');
-addEventListener('scroll',function(){var h=document.documentElement;var p=h.scrollTop/(h.scrollHeight-h.clientHeight||1);if(bar)bar.style.width=(p*100).toFixed(2)+'%'},{passive:true});
+var nav=document.querySelector('.site-nav');
+addEventListener('scroll',function(){var h=document.documentElement;var p=h.scrollTop/(h.scrollHeight-h.clientHeight||1);if(bar)bar.style.width=(p*100).toFixed(2)+'%';if(nav)nav.classList.toggle('condensed',h.scrollTop>120)},{passive:true});
+var cio=new IntersectionObserver(function(es){es.forEach(function(en){
+if(!en.isIntersecting)return;cio.unobserve(en.target);
+var el=en.target,target=parseFloat(el.getAttribute('data-count')||'0');
+if(m){el.textContent=target;return}
+var dec=(String(target).split('.')[1]||'').length,t0=null,dur=1300;
+function tick(ts){if(!t0)t0=ts;var p=Math.min(1,(ts-t0)/dur),e=1-Math.pow(1-p,3);
+el.textContent=(target*e).toFixed(dec);if(p<1)requestAnimationFrame(tick)}
+requestAnimationFrame(tick);
+})},{threshold:.5});
+[].slice.call(document.querySelectorAll('[data-count]')).forEach(function(e){cio.observe(e)});
 })();`;
 }
 
@@ -568,23 +625,51 @@ ${footerHtml(brand, content)}
 /* ══ Orchestration ═══════════════════════════════════════════════════ */
 
 /**
- * The full codegen pipeline. Throws only when the CODE stage cannot
- * produce a viable page — the caller then falls back to the template
- * engine (site_templates.js) so a build never fails.
+ * The full codegen pipeline (v11: + Photographer stage). Throws only when
+ * the CODE stage cannot produce a viable page — the caller then falls
+ * back to the template engine (site_templates.js) so a build never fails.
  *
  * @param preplanned optional stored section plan (refine path) — skips
  *        the PLAN call and keeps the page architecture stable.
  * @param onStage optional (stage, ok, ai, detail) => void trace callback
  */
-export async function codegenSite(env, { kind, brief, brand, thought, content, skillsBlock = '', lead = null, understanding = null, preplanned = null, onStage = () => {}, team = null }) {
+export async function codegenSite(env, { kind, brief, brand, site = null, thought, content, skillsBlock = '', lead = null, understanding = null, preplanned = null, onStage = () => {}, team = null }) {
   const trace = (stage, ok, ai, detail) => {
     onStage({ stage, ok, ai, detail });
     if (team) team.stage(stage, ok, ai, detail);
   };
+  const identity = site || brand; // what nav/footer/favicon render
 
   // 1. PLAN — information architecture (or reuse the stored plan).
-  const plan = preplanned || (await planSections(env, { kind, brief, brand, thought, content, skillsBlock, lead, understanding, team }));
+  const plan = preplanned || (await planSections(env, { kind, brief, brand: identity, site, thought, content, skillsBlock, lead, understanding, team }));
   trace('plan', true, plan.ai, `${plan.sections.length} sections planned${plan.ai ? '' : ' · classic plan'}`);
+
+  // 1b. PHOTOGRAPHY (v11) — the Photographer sources and verifies real
+  //     imagery for the sections that need it. Deterministic queries from
+  //     the brief + the Lead's image_ideas; one AI assignment call when
+  //     candidates exist; degrades to CSS art when the web is down.
+  let photography = { images: [], vibe: '', ai: false };
+  if (kind !== 'webapp') {
+    try {
+      const { deriveImageQueries, findSiteImages } = await import('./imager.js');
+      const queries = deriveImageQueries({ brief, kind, lead });
+      if (queries.length) {
+        if (team) team.record('photographer', 'scouting real photography', { ok: true, ai: false, detail: `searching: ${queries.slice(0, 2).join(' · ').slice(0, 90)}` });
+        photography = await findSiteImages(env, { queries, sections: plan.sections, team, brief });
+      }
+    } catch { /* photography is a bonus */ }
+  }
+  const imageCount = photography.images.length;
+  if (imageCount || photography.ai) {
+    if (team) team.record('photographer', 'casting the photography', { ok: true, ai: photography.ai, detail: imageCount ? `${imageCount} verified image(s) placed${photography.vibe ? ` · ${photography.vibe.slice(0, 60)}` : ''}` : 'nothing fit — clean typography wins' });
+  } else if (team) {
+    team.record('photographer', 'scouting real photography', { ok: true, ai: false, detail: 'no verified imagery — pure CSS art direction' });
+  }
+  trace('images', true, photography.ai, imageCount ? `${imageCount} verified image(s) cast` : 'CSS art only');
+
+  // Verified image URLs — the ONLY remote srcs the sanitizer will keep.
+  const verifiedImages = new Set(photography.images.map((im) => im.url));
+  const imagesBySection = photography.images;
 
   // 2. CODE — hand-write every section, IN PARALLEL (sections are
   //    independent: each gets the full design contract + its own copy).
@@ -592,7 +677,7 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   //    section that fails twice degrades to a clean engine block rather
   //    than discarding the bespoke page. One simpler-redo per failed
   //    section; wall time ≈ one section, not the sum of all sections.
-  const ctxBase = { kind, brief, brand, thought, content, design: thought.design, team };
+  const ctxBase = { kind, brief, brand: identity, thought, content, design: thought.design, team, images: imagesBySection, allowedImages: verifiedImages };
   const results = await Promise.all(
     plan.sections.map(async (section) => {
       const ctx = { ...ctxBase, section };
@@ -628,7 +713,7 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   let reviewed = 0;
   let qaVerdicts = {};
   if (coded.length >= 2) {
-    const review = await reviewSections(env, { kind, brand, sections: coded.map((c) => ({ ...c, ...plan.sections.find((s) => s.id === c.id) })), team });
+    const review = await reviewSections(env, { kind, brand: identity, sections: coded.map((c) => ({ ...c, image: c.html.match(/src="([^"]+)"/i)?.[1] || '', ...plan.sections.find((s) => s.id === c.id) })), team });
     qaVerdicts = review.verdicts || {};
     trace('review', true, review.ai, review.ai ? 'director reviewed the code' : 'review skipped');
     for (const c of coded) {
@@ -650,9 +735,9 @@ export async function codegenSite(env, { kind, brief, brand, thought, content, s
   }
 
   // 4. WIRE — deterministic assembly (cannot produce a malformed page).
-  const html = assembleSite({ design: thought.design, brand, content, coded, plan, kind });
-  trace('wire', true, false, `${coded.length} sections wired · fonts + reveal + nav`);
+  const html = assembleSite({ design: thought.design, brand: identity, content, coded, plan, kind });
+  trace('wire', true, false, `${coded.length} sections wired · fonts + motion + identity`);
   if (team) team.record('builder', 'wiring & hosting the page', { ok: true, ai: false, detail: `${coded.length} sections assembled with fonts + motion` });
 
-  return { html, plan, coded, stages: { reviewed, verdicts: qaVerdicts } };
+  return { html, plan, coded, images: photography.images, stages: { reviewed, verdicts: qaVerdicts } };
 }

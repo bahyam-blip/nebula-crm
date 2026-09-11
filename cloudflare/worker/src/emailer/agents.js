@@ -1,5 +1,5 @@
 /**
- * AGENTS — the multi-agent runtime (Agent v10 · DEEPTHINK).
+ * AGENTS — the multi-agent runtime (Agent v11 · IDENTITY).
  *
  * The user asked for the open GLM-class agentic engineering pattern,
  * re-engineered into this app: not one prompt doing everything, but a
@@ -58,6 +58,7 @@ export const AGENT_TEAM = {
   copywriter: { name: 'Copywriter', emoji: '✍️', role: 'conversion copy' },
   copy_chief: { name: 'Copy Chief', emoji: '🧐', role: 'copy review & tightening' },
   architect: { name: 'Architect', emoji: '📐', role: 'information architecture & journey' },
+  photographer: { name: 'Photographer', emoji: '📷', role: 'sources real photography for the page' },
   engineer: { name: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections' },
   qa: { name: 'QA Director', emoji: '🔎', role: 'code review & rework' },
   builder: { name: 'Builder', emoji: '🚀', role: 'assembly, hosting & integrity' },
@@ -157,13 +158,15 @@ export async function runAgent(env, team, key, action, messages, opts = {}, deta
 
 /* ══ The Lead — adaptive team plan (the orchestrator agent) ══════════ */
 
-const LEAD_SYSTEM = `You are the Lead of an elite multi-agent web studio. Your team (researcher, art director, copywriter, architect, engineers, QA) is about to build a bespoke page. Read the brief and write the EXECUTION PLAN that makes every specialist sharp. Respond with ONLY JSON:
+const LEAD_SYSTEM = `You are the Lead of an elite multi-agent web studio. Your team (researcher, art director, photographer, copywriter, architect, engineers, QA) is about to build a bespoke page. Read the brief and write the EXECUTION PLAN that makes every specialist sharp. Respond with ONLY JSON:
 
-{"audience":"who this page must convince, 5-10 words","page_goal":"the ONE thing this page must achieve, 3-8 words (book tables, sell the course, win trust)","research_focus":"the single most valuable thing to learn from the live web for THIS business, one line","queries":["0-2 short, specific web searches"],"sections_target":4,"emphasis":["2-4 parts of this page that deserve the most craft, e.g. 'the menu section must feel tactile'"],"risks":["1-3 ways this build could feel generic or wrong for this audience"],"tone_note":"one line of direction every writer on the team follows"}
+{"brand_name":"THE CLIENT's business or brand name EXACTLY as the brief states it (a quoted name beats everything) — '' only if the brief names none","audience":"who this page must convince, 5-10 words","page_goal":"the ONE thing this page must achieve, 3-8 words (book tables, sell the course, win trust)","research_focus":"the single most valuable thing to learn from the live web for THIS business, one line","queries":["0-2 short, specific web searches"],"image_ideas":["0-3 photo subjects that would make THIS page feel real and specific (e.g. 'barista pouring latte art'), NOT stock clichés"],"sections_target":4,"emphasis":["2-4 parts of this page that deserve the most craft, e.g. 'the menu section must feel tactile'"],"risks":["1-3 ways this build could feel generic or wrong for this audience"],"tone_note":"one line of direction every writer on the team follows"}
 
 Rules:
 - Decide from the BRIEF, not habit: a tiffin service and a law firm need different teams' energy.
+- brand_name: quote the client's name EXACTLY — every specialist will brand the page with it.
 - queries must be things a search engine can actually answer (markets, prices, local facts, trends) — not the business's own name.
+- image_ideas must be photographable scenes of THIS business's world (place, product, people, craft) — never abstract 'teamwork' stock.
 - sections_target: 4 for a tight page, 5 only when the brief is rich (event agenda, portfolio, report).
 - tone_note is ONE sentence, concrete enough to act on ("warm and specific — name the dishes, the neighbourhoods, the people").`;
 
@@ -186,10 +189,12 @@ export function defaultLeadPlan({ kind, brief, brand }) {
     webapp: 'make the core action effortless',
   };
   return {
+    brand_name: '',
     audience: `${kind === 'webapp' ? 'people who need this tool daily' : "the business's real customers"}`,
     page_goal: kindGoal[kind] || kindGoal.landing,
     research_focus: `what customers in this market expect from a ${kind === 'webapp' ? 'tool like this' : 'business like this'}`,
     queries: [],
+    image_ideas: [],
     sections_target: 4,
     emphasis: kindEmphasis[kind] || kindEmphasis.landing,
     risks: ['generic stock phrasing', 'sections that could belong to any business'],
@@ -204,9 +209,10 @@ export function defaultLeadPlan({ kind, brief, brand }) {
  * team adapts to the brief; the pipeline is not hardwired). Never
  * throws — a failed Lead degrades to the deterministic plan.
  */
-export async function leadPlan(env, { kind, brief, brand, style, team = null }) {
+export async function leadPlan(env, { kind, brief, brand, site, style, team = null }) {
   const fallback = () => defaultLeadPlan({ kind, brief, brand });
   try {
+    const { siteIdentityBlock } = await import('./sitebrand.js');
     const j = await runAgent(
       env,
       team,
@@ -217,21 +223,23 @@ export async function leadPlan(env, { kind, brief, brand, style, team = null }) 
         {
           role: 'user',
           content: [
-            `BUSINESS: ${brand.name}${brand.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
+            site ? siteIdentityBlock(site) : (brand?.name ? `BUSINESS CONTEXT (may or may not be the client): ${brand.name}` : ''),
             `PAGE KIND: ${kind}`,
             style ? `STYLE REQUEST: ${style}` : '',
             `BRIEF: ${String(brief).slice(0, 1500)}`,
           ].filter(Boolean).join('\n'),
         },
       ],
-      { json: true, maxTokens: 700, temperature: 0.55 },
+      { json: true, maxTokens: 800, temperature: 0.55 },
       (out) => `${out.sections_target || 4} sections · ${String(out.audience || '').slice(0, 60)}`
     );
     const plan = {
+      brand_name: String(j.brand_name || '').slice(0, 80),
       audience: String(j.audience || '').slice(0, 140),
       page_goal: String(j.page_goal || '').slice(0, 90),
       research_focus: String(j.research_focus || '').slice(0, 200),
       queries: Array.isArray(j.queries) ? j.queries.map((q) => String(q).slice(0, 120)).filter(Boolean).slice(0, 2) : [],
+      image_ideas: Array.isArray(j.image_ideas) ? j.image_ideas.map((q) => String(q).slice(0, 90)).filter(Boolean).slice(0, 3) : [],
       sections_target: [4, 5].includes(Number(j.sections_target)) ? Number(j.sections_target) : 4,
       emphasis: Array.isArray(j.emphasis) ? j.emphasis.map((e) => String(e).slice(0, 160)).filter(Boolean).slice(0, 4) : [],
       risks: Array.isArray(j.risks) ? j.risks.map((r) => String(r).slice(0, 140)).filter(Boolean).slice(0, 3) : [],
@@ -249,11 +257,13 @@ export async function leadPlan(env, { kind, brief, brand, style, team = null }) 
 export function leadBlock(lead) {
   if (!lead) return '';
   const lines = [
+    lead.brand_name ? `THE CLIENT IS: "${lead.brand_name}" — brand every name and mention with exactly this` : '',
     lead.audience ? `AUDIENCE: ${lead.audience}` : '',
     lead.page_goal ? `THE PAGE MUST: ${lead.page_goal}` : '',
     lead.tone_note ? `TONE: ${lead.tone_note}` : '',
     lead.emphasis.length ? `CRAFT EMPHASIS: ${lead.emphasis.join('; ')}` : '',
     lead.risks.length ? `AVOID: ${lead.risks.join('; ')}` : '',
+    lead.image_ideas?.length ? `PHOTO DIRECTION: ${lead.image_ideas.join('; ')}` : '',
   ];
   return lines.filter(Boolean).join('\n');
 }
@@ -339,7 +349,7 @@ const ANALYST_SYSTEM = `You are the Project Analyst of an elite multi-agent web 
 
 Rules:
 - Infer from the brief; never invent facts (no fake numbers, no fake history).
-- audience_psyche is about THIS audience's real life, not demographics.
+- audience_psyche is about THIS audience's real life, not demographics — anchor it in the ACTUAL nouns of the brief (the products, the place, the people it names), never in a generic persona.
 - objections must be the kind copy can answer (price, time, trust, effort).`;
 
 /**
@@ -348,8 +358,9 @@ Rules:
  * model of the business instead of re-inferring it three times. Never
  * throws: on failure the team simply proceeds on the brief (returns '').
  */
-export async function projectUnderstanding(env, { kind, brief, brand, team = null }) {
+export async function projectUnderstanding(env, { kind, brief, brand, site, team = null }) {
   try {
+    const { siteIdentityBlock } = await import('./sitebrand.js');
     const j = await runAgent(
       env,
       team,
@@ -360,9 +371,8 @@ export async function projectUnderstanding(env, { kind, brief, brand, team = nul
         {
           role: 'user',
           content: [
-            `BUSINESS: ${brand.name}${brand.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
-            brand.profile?.audience ? `STATED AUDIENCE: ${brand.profile.audience}` : '',
-            brand.profile?.about ? `ABOUT: ${String(brand.profile.about).slice(0, 300)}` : '',
+            site ? siteIdentityBlock(site) : '',
+            !site && brand?.profile?.audience ? `STATED AUDIENCE: ${brand.profile.audience}` : '',
             `PAGE KIND: ${kind}`,
             `BRIEF: ${String(brief).slice(0, 1400)}`,
           ].filter(Boolean).join('\n'),

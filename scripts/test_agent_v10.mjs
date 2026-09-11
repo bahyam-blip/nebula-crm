@@ -182,7 +182,7 @@ function memStore() {
 section('ROSTER — twelve specialists');
 {
   const keys = Object.keys(AGENT_TEAM);
-  ok(keys.length === 12, `12 specialists (${keys.join(', ')})`, String(keys.length));
+  ok(keys.length === 13, `13 specialists (${keys.join(', ')})`, String(keys.length));
   ok(AGENT_TEAM.analyst && AGENT_TEAM.analyst.emoji === '🧭' && /understanding/.test(AGENT_TEAM.analyst.role), 'the Analyst is on the roster (🧭, project understanding)');
   ok(AGENT_TEAM.skill_researcher && AGENT_TEAM.skill_researcher.emoji === '📚' && /skill/.test(AGENT_TEAM.skill_researcher.role), 'the Skill Researcher is on the roster (📚)');
   ok(AGENT_TEAM.lead.role.includes('deep-thinks'), 'Lead role mentions deep-think');
@@ -455,7 +455,7 @@ section('research_skill TOOL — the capability is exposed');
   ok(TOOLS.research_skill && TOOLS.research_skill.tier === 'write', 'research_skill registered as a write tool');
   ok(Array.isArray(TOOLS.research_skill.roles) && TOOLS.research_skill.roles.includes('admin'), 'role-gated (admin can call)');
   ok(M.TOOL_SCHEMAS.research_skill && M.TOOL_SCHEMAS.research_skill.required.includes('topic'), 'MCP schema requires topic');
-  ok(M.SERVER_VERSION === '5.0.0', 'MCP server bumped to v5.0.0', M.SERVER_VERSION);
+  ok(M.SERVER_VERSION === '6.0.0', 'MCP server bumped to v6.0.0', M.SERVER_VERSION);
 
   // runTool happy path
   primeFullBuild();

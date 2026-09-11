@@ -235,7 +235,7 @@ const THEME_ART = {
 };
 
 /** Normalize a design spec: valid theme, safe palette, sane fonts. */
-export function normalizeDesign(design, { kind, styleHint, brandColor } = {}) {
+export function normalizeDesign(design, { kind, styleHint, seedAccent } = {}) {
   const fallbackTheme = themeForStyleHint(styleHint, kind);
   const theme = resolveTheme(design?.theme, fallbackTheme);
   const preset = THEMES[theme];
@@ -254,11 +254,11 @@ export function normalizeDesign(design, { kind, styleHint, brandColor } = {}) {
       surface: hex(design?.palette?.surface, ''),
       ink: hex(design?.palette?.ink, ''),
       muted: hex(design?.palette?.muted, ''),
-      // Brand color wins for the accent only when the caller supplied one
-      // AND the theme is not onyx (onyx stays strictly monochrome).
+      // v11: the accent anchor is the build's DESIGN-DNA seed (or a color
+      // the brief itself named) — NEVER the CRM owner's brand color.
       accent: theme === 'onyx' && !design?.palette?.accent
         ? dp.accent
-        : hex(design?.palette?.accent, brandColor && HEX_RE.test(brandColor) ? brandColor : dp.accent),
+        : hex(design?.palette?.accent, seedAccent && HEX_RE.test(seedAccent) ? seedAccent : dp.accent),
       accent2: hex(design?.palette?.accent2, dp.accent2),
     },
     font: FONT_STACKS[design?.font] ? String(design.font)

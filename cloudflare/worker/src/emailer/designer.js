@@ -1,32 +1,14 @@
 /**
- * DESIGNER — the thinking pipeline behind Studio builds (Agent v10).
+ * DESIGNER — the thinking pipeline behind Studio builds (Agent v11).
  *
- * The v4 builder asked Sarvam for a whole website in ONE call and saved
- * whatever came back. Inside a ~2k-token completion budget that produced
- * markdown fences, truncated pages and model chatter served as "the
- * website" (the exact bug in the user's screenshots). v5 flips the split:
- *
- *   1. THINK    designBrief()  — one small JSON call picks the design
- *                system, palette, font pairing, voice and a section
- *                plan (+ up to 2 research queries).
- *   2. RESEARCH researchFacts() — live web facts via the DDG chain so
- *                copy is grounded in the business's real market.
- *   3. WRITE    writeCopy()    — one small JSON call writes the words
- *                (headline, features, FAQ…) against a strict schema.
- *   4. RENDER   renderSite()   — site_templates.js assembles premium
- *                HTML deterministically. CANNOT truncate or leak fences.
- *
- * Every stage degrades gracefully: AI failure at any point falls back to
- * a deterministic design/copy derived from the brief — a build NEVER
- * fails to produce a complete, on-brand site.
- *
- * v10 DESIGN-SYSTEM v2 — the Art Director now specifies a real design
- * system, not just a theme: type scale, texture and motion intensity
- * are first-class tokens, a UX FLOW maps the visitor journey, and a
- * DETERMINISTIC WCAG pass (enforceContrast) mathematically repairs any
- * palette the model picks — AI chooses the hues, math guarantees the
- * accessibility. researchIntelligence() also runs a SECOND research
- * round when the synthesis names a follow-up worth chasing.
+ * v11 DESIGN DNA — the "every site is the same colour" bug, killed with
+ * parameters: the owner's brand color no longer anchors any palette.
+ * Instead every brief is hashed into one of TWELVE curated design-DNA
+ * families (hue family + theme candidates + font + texture), and the
+ * Art Director is REQUIRED to stay inside that family while refining
+ * freely within it. Two different briefs can no longer ship the same
+ * look — even when the model is lazy, even on the deterministic path.
+ * A colour word in the brief ("deep green") overrides the seeded hue.
  *
  * extractSiteHtml() is the hard gate that fixed the screenshots bug:
  * markdown fences, prose and truncation can never reach R2 again.
@@ -97,9 +79,61 @@ export function enforceContrast(palette) {
   return p;
 }
 
+/* ══ DESIGN DNA — per-brief palette variety, deterministic (v11) ═════ */
+
+/** Fast string hash → 32-bit seed. */
+export function hashSeed(str) {
+  const s = String(str || '');
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Twelve curated design-DNA families. Each pins the HUE family, theme
+ * candidates, font pairing and texture so two builds never repeat the
+ * same look, while the Art Director still refines artfully inside it.
+ */
+export const DESIGN_DNA = [
+  { name: 'Ember', hues: ['#c2410c', '#ea580c', '#b45309', '#9a3412'], themes: ['editorial', 'neo'], fonts: ['serif', 'syne'], texture: 'grain', mood: 'warm, artisanal, appetite' },
+  { name: 'Glacier', hues: ['#0369a1', '#0284c7', '#075985', '#0ea5e9'], themes: ['swiss', 'onyx'], fonts: ['modern', 'grotesk'], texture: 'clean', mood: 'precise, trustworthy, technical' },
+  { name: 'Forest', hues: ['#15803d', '#166534', '#3f6212', '#065f46'], themes: ['editorial', 'swiss'], fonts: ['serif', 'modern'], texture: 'grain', mood: 'grounded, natural, healthy' },
+  { name: 'Citrus', hues: ['#ca8a04', '#a16207', '#f59e0b', '#65a30d'], themes: ['playful', 'festive'], fonts: ['rounded', 'syne'], texture: 'clean', mood: 'bright, friendly, energetic' },
+  { name: 'Orchid', hues: ['#7c3aed', '#9333ea', '#a21caf', '#6d28d9'], themes: ['aurora', 'festive'], fonts: ['syne', 'modern'], texture: 'grain', mood: 'creative, expressive, modern' },
+  { name: 'Rosewood', hues: ['#be123c', '#9f1239', '#e11d48', '#881337'], themes: ['editorial', 'luxe'], fonts: ['serif', 'luxe'], texture: 'grain', mood: 'elegant, intimate, crafted' },
+  { name: 'Tide', hues: ['#0f766e', '#115e59', '#0891b2', '#14b8a6'], themes: ['aurora', 'swiss'], fonts: ['modern', 'grotesk'], texture: 'clean', mood: 'calm, clear, restorative' },
+  { name: 'Ink & Gold', hues: ['#d3aa5e', '#caa24a', '#b8860b', '#d4af37'], themes: ['luxe', 'onyx'], fonts: ['luxe', 'serif'], texture: 'grain', mood: 'premium, timeless, exclusive' },
+  { name: 'Sandstone', hues: ['#a16207', '#92400e', '#78350f', '#b45309'], themes: ['editorial', 'swiss'], fonts: ['serif', 'grotesk'], texture: 'clean', mood: 'earthy, honest, handmade' },
+  { name: 'Coral Pop', hues: ['#f43f5e', '#fb7185', '#ff6b6b', '#e11d48'], themes: ['playful', 'festive'], fonts: ['rounded', 'syne'], texture: 'clean', mood: 'playful, young, social' },
+  { name: 'Olive Market', hues: ['#4d7c0f', '#3f6212', '#556b2f', '#65a30d'], themes: ['editorial', 'playful'], fonts: ['grotesk', 'rounded'], texture: 'grain', mood: 'fresh, local, communal' },
+  { name: 'Midnight', hues: ['#3b82f6', '#2563eb', '#60a5fa', '#1d4ed8'], themes: ['aurora', 'onyx'], fonts: ['grotesk', 'modern'], texture: 'grain', mood: 'after-dark, premium tech' },
+];
+
+/**
+ * Pick THIS build's design DNA. Deterministic from brief+kind+title, so
+ * the same brief re-builds coherently while different briefs diverge —
+ * and a color word in the brief (“deep green”) overrides the family's
+ * hue while keeping its theme/font/texture direction.
+ */
+export function pickDesignDna({ brief = '', kind = '', title = '', style = '' } = {}) {
+  const seed = hashSeed(`${kind}::${title}::${String(brief).slice(0, 400)}`);
+  const dna = DESIGN_DNA[seed % DESIGN_DNA.length];
+  const themed = themeForStyleHint(style, kind);
+  // An explicit style hint picks the theme candidates instead.
+  const themes = themed && themed !== 'aurora'
+    ? [themed, ...dna.themes.filter((t) => t !== themed)]
+    : dna.themes;
+  return { ...dna, themes };
+}
+
 /* ══ Stage 1 — THINK (design-system v2) ══════════════════════════════ */
 
-function briefSystemPrompt(kind, brand, style) {
+function briefSystemPrompt(kind, site, style, dna) {
+  const client = site?.name || 'the client';
+  const seedHue = site?.color || dna.hues[0];
   return `You are the design director of a world-class web studio (Awwwards-tier). Respond with ONLY a JSON object.
 
 A client described a ${kind} page. Decide the design system — not just a theme, the full art direction.
@@ -135,22 +169,27 @@ Design principles you apply (this is what separates premium from template):
 - Choose theme by AUDIENCE EMOTION, not habit: luxury/nightlife/tech -> aurora or luxe; craft/editorial/consulting -> editorial; SaaS/corporate -> swiss; sale/festival -> festive; kids/food/community -> playful.
 - headline_angle must be a concrete promise or number when possible ("Custom thalis in 20 minutes" beats "Great food").
 - must_have: think like the visitor — what proof do they need to act? (menu/pricing/proof/booking/FAQ).
-Rules: hex colors only.${style ? ` The client asked for this style: "${style}" — honor it in theme/palette.` : ''} Business context: brand "${brand.name}", color ${brand.color}${brand.profile?.industry ? `, industry ${brand.profile.industry}` : ''}${brand.profile?.audience ? `, audience ${brand.profile.audience}` : ''}.`;
+Rules: hex colors only.
+DESIGN DNA — YOUR REQUIRED STARTING POINT (v11): family "${dna.name}" — mood ${dna.mood}. The accent MUST stay in the ${dna.name} hue family (seed ${seedHue}; adjust lightness/saturation freely, drift to a DIFFERENT hue family is forbidden${site?.color ? ' — the client named this color themselves' : ''}). Theme candidates: ${dna.themes.join(' or ')}. Font pairing: ${dna.fonts.join(' or ')}. Texture bias: ${dna.texture}. Refine artfully INSIDE this family.${style ? ` The client asked for this style: "${style}" — honor it within the family.` : ''}
+IDENTITY: the client is "${client}" — design for THEM and nobody else; never borrow another business's name, colors or logo.`;
 }
 
-export async function designBrief(env, { kind, brief, style, brand, skillsBlock = '', lead = null, understanding = null, team = null }) {
+export async function designBrief(env, { kind, brief, style, brand, site = null, skillsBlock = '', lead = null, understanding = null, team = null }) {
+  // v11 DESIGN DNA: this build's deterministic art-direction family.
+  const dna = pickDesignDna({ brief, kind, title: site?.name || '', style });
+  const seedAccent = site?.color || dna.hues[0];
   const fallback = () => {
     const design = normalizeDesign(
-      { theme: themeForStyleHint(style, kind), palette: {}, font: '' },
-      { kind, styleHint: style, brandColor: brand.color }
+      { theme: dna.themes[0] || themeForStyleHint(style, kind), palette: {}, font: '' },
+      { kind, styleHint: style, seedAccent }
     );
     // v10 tokens stay coherent even on the deterministic path: dark themes
     // read premium with grain, light themes stay clean.
     design.type_scale = 'classic';
-    design.texture = ['onyx', 'aurora', 'luxe'].includes(String(design.theme || '')) ? 'grain' : 'clean';
+    design.texture = ['onyx', 'aurora', 'luxe'].includes(String(design.theme || '')) ? 'grain' : (dna.texture === 'clean' ? 'clean' : 'grain');
     design.motion_intensity = 'balanced';
     design.ux_flow = [];
-    return { design, headlineAngle: '', mustHave: [], queries: [], ai: false };
+    return { design, headlineAngle: '', mustHave: [], queries: [], ai: false, dna };
   };
   try {
     const j = await runAgent(
@@ -159,16 +198,16 @@ export async function designBrief(env, { kind, brief, style, brand, skillsBlock 
       'director',
       'designing the art direction',
       [
-        { role: 'system', content: [briefSystemPrompt(kind, brand, style), skillsBlock].filter(Boolean).join('\n\n') },
+        { role: 'system', content: [briefSystemPrompt(kind, site, style, dna), skillsBlock].filter(Boolean).join('\n\n') },
         { role: 'user', content: [String(brief).slice(0, 2200), understandingBlock(understanding), leadBlock(lead)].filter(Boolean).join('\n\n') },
       ],
       { json: true, maxTokens: 1000, temperature: 0.7 },
-      (out) => `${out.theme || 'classic'} direction for ${brand.name}`
+      (out) => `${out.theme || 'classic'} direction for ${site?.name || 'the client'}`
     );
-    const theme = THEME_NAMES.includes(String(j.theme)) ? String(j.theme) : themeForStyleHint(style, kind);
+    const theme = THEME_NAMES.includes(String(j.theme)) ? String(j.theme) : dna.themes[0] || themeForStyleHint(style, kind);
     const design = normalizeDesign(
       { theme, palette: j.palette || {}, font: String(j.font || ''), voice: j.voice, audience: j.audience, hero: j.hero, art: j.art },
-      { kind, styleHint: style, brandColor: brand.color }
+      { kind, styleHint: style, seedAccent }
     );
     // v10 DESIGN-SYSTEM v2 tokens — parsed with hard defaults so a model
     // that omits them still ships a coherent system.
@@ -183,6 +222,7 @@ export async function designBrief(env, { kind, brief, style, brand, skillsBlock 
       headlineAngle: String(j.headline_angle || '').slice(0, 160),
       mustHave: Array.isArray(j.must_have) ? j.must_have.map((m) => String(m).slice(0, 140)).slice(0, 5) : [],
       queries: Array.isArray(j.research_queries) ? j.research_queries.map((q) => String(q).slice(0, 120)).filter(Boolean).slice(0, 2) : [],
+      dna,
       ai: true,
     };
   } catch {
@@ -251,7 +291,7 @@ async function gatherRawResults(queries, { maxResults = 4 } = {}) {
  * to '' when the web itself is unreachable — research never fails the
  * build. Returns { block, ai, follow_up }.
  */
-export async function researchIntelligence(env, { queries, brief = '', brand, team = null }) {
+export async function researchIntelligence(env, { queries, brief = '', brand, site = null, team = null }) {
   if (!queries?.length) return { block: '', ai: false, follow_up: '' };
   let items = [];
   try {
@@ -276,7 +316,7 @@ export async function researchIntelligence(env, { queries, brief = '', brand, te
         {
           role: 'user',
           content: [
-            `BUSINESS: ${brand?.name || 'the client'}${brand?.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
+            `BUSINESS: ${site?.name || brand?.name || 'the client'}${site?.isOwnerBusiness && brand?.profile?.industry ? ` (${brand.profile.industry})` : ''}`,
             `PAGE BRIEF: ${String(brief).slice(0, 300)}`,
             `SEARCH QUERIES: ${queries.join(' | ')}`,
             `RAW RESULTS:\n${raw}`,
@@ -352,21 +392,25 @@ const COPY_SCHEMA = `{
  "cta_title": "", "cta_sub": "", "footer_note": ""
 }`;
 
-function copyPromptContext({ kind, title, brief, brand, thought }) {
+function copyPromptContext({ kind, title, brief, site, thought }) {
+  // Owner facts reach the copy ONLY when the site IS the owner's own
+  // business — otherwise they leak another brand's world into the page.
+  const p = site?.profile && site.isOwnerBusiness ? site.profile : null;
   const facts = [];
-  if (brand.profile?.tagline) facts.push(`tagline: ${brand.profile.tagline}`);
-  if (brand.profile?.about) facts.push(`about: ${String(brand.profile.about).slice(0, 220)}`);
-  if (brand.profile?.industry) facts.push(`industry: ${brand.profile.industry}`);
-  if (brand.profile?.audience) facts.push(`audience: ${brand.profile.audience}`);
-  if (brand.profile?.tone) facts.push(`tone: ${brand.profile.tone}`);
-  if (brand.phone) facts.push(`phone: ${brand.phone}`);
-  if (brand.contactEmail) facts.push(`email: ${brand.contactEmail}`);
-  if (brand.address) facts.push(`address: ${brand.address}`);
-  if (brand.ctaUrl || brand.profile?.website) facts.push(`main link: ${brand.ctaUrl || brand.profile.website}`);
+  if (p?.tagline) facts.push(`tagline: ${p.tagline}`);
+  if (p?.about) facts.push(`about: ${String(p.about).slice(0, 220)}`);
+  if (p?.industry) facts.push(`industry: ${p.industry}`);
+  if (p?.audience) facts.push(`audience: ${p.audience}`);
+  if (p?.tone) facts.push(`tone: ${p.tone}`);
+  if (site?.phone) facts.push(`phone: ${site.phone}`);
+  if (site?.contactEmail) facts.push(`email: ${site.contactEmail}`);
+  if (site?.address) facts.push(`address: ${site.address}`);
+  if (site?.ctaUrl) facts.push(`main link: ${site.ctaUrl}`);
   return [
     `PAGE KIND: ${kind}`,
-    `BRAND: ${brand.name} (brand color ${brand.color})`,
-    facts.length ? `BUSINESS FACTS: ${facts.join(' | ')}` : '',
+    `THE CLIENT: ${site?.name || 'the client'} — every word speaks AS this client; never mention any other brand, business or tool`,
+    facts.length ? `CLIENT FACTS: ${facts.join(' | ')}` : '',
+    title ? `PAGE TITLE: ${title}` : '',
     `CLIENT BRIEF: ${String(brief).slice(0, 1600)}`,
     thought.headlineAngle ? `LEAD ANGLE: ${thought.headlineAngle}` : '',
     thought.mustHave.length ? `MUST INCLUDE: ${thought.mustHave.join('; ')}` : '',
@@ -375,19 +419,21 @@ function copyPromptContext({ kind, title, brief, brand, thought }) {
     .join('\n');
 }
 
-export async function writeCopy(env, { kind, title, brief, brand, thought, factsBlock, skillsBlock = '', lead = null, team = null }) {
+export async function writeCopy(env, { kind, title, brief, brand, site = null, thought, factsBlock, skillsBlock = '', lead = null, team = null }) {
+  const client = site?.name || 'the client';
   const sys = `You are a senior conversion copywriter (top 1%) writing for a ${kind} page. Respond with ONLY a JSON object matching this schema (omit groups that make no sense for this kind; never write "lorem" or placeholders; keep the WHOLE JSON compact — short strings, total under 220 words — truncation destroys the page):
 
 ${COPY_SCHEMA}
 
 Craft rules — this is what makes copy convert:
 - Specific to THIS business and brief. Concrete nouns, numbers, names. No clichés ("unleash", "revolutionize", "elevate").
+- IDENTITY: you write AS "${client}" and about nobody else — never mention any other brand, business, domain or the tool that built the page.
 - Headline: lead with the payoff. Plain words, strong verbs. 4-9 words is ideal.
 - Sub: answer "what exactly do I get and why you?" in one breath.
 - Features: each title = an outcome ("Fitted in 30 minutes"), text = proof/how.
 - FAQ: pre-empt the real objections (price, time, trust, availability).
 - Never invent facts you were not given — keep numbers generic ("50+", "since 2019") unless the brief or MARKET FACTS state them.
-- "primary_cta.href": use the business's main link if given, else mailto:${brand.contactEmail || 'hello@example.com'}.
+- "primary_cta.href": use the client's main link if given, else mailto:${site?.contactEmail || brand?.contactEmail || `hello@${slugifyClient(client)}`}.
 - If MARKET FACTS are provided, weave real specifics from them into copy and, for report kind, into report.findings/table/sources.
 - marquee: 3-6 punchy keywords for a scrolling band (cafes, studios, offers) — omit for reports.
 - Respect the design voice: "${thought.design.voice || 'clear, confident'}" for audience "${thought.design.audience || 'general'}".`;
@@ -401,15 +447,20 @@ Craft rules — this is what makes copy convert:
         { role: 'system', content: skillsBlock ? `${sys}
 
 ${skillsBlock}` : sys },
-        { role: 'user', content: [copyPromptContext({ kind, title, brief, brand, thought }), factsBlock, leadBlock(lead)].filter(Boolean).join('\n\n') },
+        { role: 'user', content: [copyPromptContext({ kind, title, brief, site: site || brand, thought }), factsBlock, leadBlock(lead)].filter(Boolean).join('\n\n') },
       ],
       { json: true, maxTokens: 2000, temperature: 0.75 },
       (out) => `"${String(out?.headline || '').slice(0, 60)}"`
     );
-    return { content: sanitizeCopy(j, { kind, brand }), ai: true };
+    return { content: sanitizeCopy(j, { kind, brand: site || brand }), ai: true };
   } catch {
-    return { content: defaultCopy({ kind, title, brief, brand }), ai: false };
+    return { content: defaultCopy({ kind, title, brief, brand: site || brand }), ai: false };
   }
+}
+
+/** Domain-ish slug from the client name for neutral mailto fallbacks. */
+function slugifyClient(name) {
+  return String(name || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || 'client';
 }
 
 /** Enforce shapes/limits on whatever the model produced. */
@@ -510,7 +561,7 @@ export function defaultCopy({ kind, title, brief, brand }) {
     title: head.slice(0, 60),
     kicker: brand.name,
     headline: head,
-    sub: sentences[1] || sentences[0] || `The ${kindLabel} for ${brand.name}, built and hosted by the Nebula agent.`,
+    sub: sentences[1] || sentences[0] || `The ${kindLabel} for ${brand.name} — live, shareable, ready today.`,
     primary_cta: { label: brand.ctaUrl ? 'Learn more' : brand.contactEmail ? 'Email us' : 'Get in touch', href: brand.ctaUrl || (brand.contactEmail ? `mailto:${brand.contactEmail}` : '#') },
     secondary_cta: null,
     hero_badges: [`${brand.name}`, 'Built & hosted by AI'],
@@ -529,7 +580,7 @@ export function defaultCopy({ kind, title, brief, brand }) {
     contact: { email: brand.contactEmail || '', phone: brand.phone || '', address: brand.address || '', hours: '' },
     cta_title: '',
     cta_sub: '',
-    footer_note: 'Made with Nebula Studio',
+    footer_note: '',
   };
   if (kind === 'report') {
     out.report = {
@@ -581,6 +632,7 @@ export function applyCtaOverrides(content, { cta_text, cta_url, contact_email } 
  * back to the unchanged plan when the call fails (caller still re-renders).
  */
 export async function applyRefinement(env, { instruction, kind, content, design, brand, team = null }) {
+  const client = brand?.name || 'the client';
   try {
     const j = await runAgent(
       env,
@@ -590,9 +642,9 @@ export async function applyRefinement(env, { instruction, kind, content, design,
       [
         {
           role: 'system',
-          content: `You are updating the content of a ${kind} page after client feedback. Respond with ONLY the UPDATED JSON content object (same schema you originally wrote — include unchanged groups unchanged). Current content JSON:\n${JSON.stringify(content).slice(0, 6000)}\n\nRules: apply EVERY instruction; keep everything else identical; hex colors only if a palette is included; never output markdown.`,
+          content: `You are updating the content of a ${kind} page after client feedback. The page belongs to "${client}" — never introduce any other brand, business or tool name. Respond with ONLY the UPDATED JSON content object (same schema you originally wrote — include unchanged groups unchanged). Current content JSON:\n${JSON.stringify(content).slice(0, 6000)}\n\nRules: apply EVERY instruction; keep everything else identical; hex colors only if a palette is included; never output markdown.`,
         },
-        { role: 'user', content: `INSTRUCTION: ${String(instruction).slice(0, 600)}\n\nBrand: ${brand.name}. Return the full updated content JSON now.` },
+        { role: 'user', content: `INSTRUCTION: ${String(instruction).slice(0, 600)}\n\nClient: ${client}. Return the full updated content JSON now.` },
       ],
       { json: true, maxTokens: 1600, temperature: 0.6 },
       () => 'content updated from the instruction'

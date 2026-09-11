@@ -326,7 +326,7 @@ let aiSiteId = '';
     ...codegenScript(),
     // Agent v8: the Lead orchestrator plans the run before the specialists
     { match: (t) => t.includes('elite multi-agent web studio'), reply: { audience: 'Mumbai foodies', research_focus: 'mumbai bakery market', queries: [], sections_target: 4, emphasis: ['menu highlights'], risks: ['generic bakery look'], tone_note: 'warm artisan specificity' } },
-    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'editorial', palette: { accent: '#b3402a' }, font: 'serif', voice: 'warm artisan', audience: 'Mumbai foodies', headline_angle: 'Fresh sourdough daily', must_have: ['menu highlights'], research_queries: [] } },
+    { match: (t) => t.includes('Decide the design system'), reply: { theme: 'editorial', palette: { accent: '#b3402a' }, font: 'serif', voice: 'warm artisan', audience: 'Mumbai foodies', headline_angle: 'Fresh sourdough daily', must_have: ['menu highlights'], research_queries: [] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Sunrise Bakehouse', kicker: 'Bakery', headline: 'Sunrise Bakehouse', sub: 'Fresh Mumbai sourdough daily.', primary_cta: { label: 'Order now', href: 'mailto:hello@sunrise.test' }, features: [{ icon: '🥐', title: 'Baked at dawn', text: 'Croissants out of the oven by 7am.' }], contact: { email: 'hello@sunrise.test' } } },
   );
 

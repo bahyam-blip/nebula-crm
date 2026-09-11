@@ -9,14 +9,17 @@ import '../services/studio_api_service.dart';
 final studioApiProvider = Provider<StudioApiService>((ref) => StudioApiService());
 
 /// One visible step of the agent build pipeline. Mirrors the REAL
-/// server-side team (Agent v10 · DEEPTHINK): a Lead orchestrator plans
+/// server-side team (Agent v11 · IDENTITY): a Lead orchestrator plans
 /// the run and then DEEP-THINKS it (self-critique + revision), an
 /// Analyst builds the project understanding, the Researcher runs two
 /// research rounds, the Art Director ships WCAG-verified design tokens
-/// + a UX flow, the Architect journey-maps the sections, Engineers
-/// hand-code every section, QA reworks flagged code, the Reflector
-/// distills a lesson, and a Skill Researcher grows the library from
-/// live research. No templates anywhere in the primary path.
+/// + a UX flow + a per-brief design-DNA palette, the Architect
+/// journey-maps the sections, the Photographer sources and verifies
+/// real imagery, Engineers hand-code every section with an advanced
+/// motion system, QA reworks flagged code, the Builder enforces the
+/// identity firewall, the Reflector distills a lesson, and a Skill
+/// Researcher grows the library from live research. No templates
+/// anywhere in the primary path.
 class BuildStage {
   const BuildStage(this.label, this.icon);
   final String label;
@@ -24,7 +27,7 @@ class BuildStage {
 }
 
 const kBuildStages = <BuildStage>[
-  BuildStage('Lead · planning the build', '🧠'),
+  BuildStage('Lead · locking your identity + planning', '🧠'),
   BuildStage('Lead · deep-thinking the plan', '🧠'),
   BuildStage('Analyst · understanding your project', '🧭'),
   BuildStage('Art Director · designing the system', '🎨'),
@@ -32,6 +35,7 @@ const kBuildStages = <BuildStage>[
   BuildStage('Copywriter · writing your words', '✍️'),
   BuildStage('Copy Chief · tightening every line', '🧐'),
   BuildStage('Architect · journey-mapping your page', '📐'),
+  BuildStage('Photographer · sourcing real imagery', '📷'),
   BuildStage('Engineers · hand-coding the page', '🛠️'),
   BuildStage('QA Director · reviewing the code', '🔎'),
   BuildStage('Builder · wiring & hosting it live', '🚀'),

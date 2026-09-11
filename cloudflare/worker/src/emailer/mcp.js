@@ -35,7 +35,7 @@ export { serveAgentSite } from './builder.js';
 const GRANT_TTL_SECONDS = 60 * 60 * 24; // pairing grants live 24h
 const GRANT_PREFIX = 'agent:mcp:grant:';
 const MCP_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18'];
-export const SERVER_VERSION = '5.0.0';
+export const SERVER_VERSION = '6.0.0';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -132,7 +132,7 @@ const MCP_DESCRIPTIONS = {
   distribute_leads: 'Share leads evenly (round robin) across named teammates',
   save_business_profile: 'Update brand fields (name, tagline, industry, tone, colors…)',
   teach_memory: 'Remember a lasting fact or preference about the business',
-  build_website: 'BUILD AND HOST a complete website or mini web app from a brief — a deep-thinking multi-agent team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified design tokens and UX flow, Copywriter, Copy Chief, Architect, Engineers, QA Director, Builder, Reflector, Skill Researcher) hand-codes it, then grows the skill library from the build. Returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
+  build_website: 'BUILD AND HOST a complete website or mini web app from a brief — a deep-thinking multi-agent team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified design tokens + UX flow + per-brief design-DNA palette, Copywriter, Copy Chief, Architect, Photographer sourcing verified real images, Engineers hand-coding with an advanced motion system — marquee, count-up stats, scroll choreography — QA Director, Builder with an identity firewall so the page carries ONLY the client’s brand, Reflector, Skill Researcher) builds it, then grows the skill library from the build. Returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
   refine_site: 'Apply a change request to an already-built site and re-host it at the same URL as a new version. Pass sections (e.g. ["hero"]) for a fast surgical re-code of just those sections',
   save_note: 'Save a note / research summary / report as a shareable artifact',
   plan_task: 'Think in the open: turn a goal into an ordered execution plan before executing it step by step',

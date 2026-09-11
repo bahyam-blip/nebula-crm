@@ -107,7 +107,7 @@ function primeFullBuild({ leadGoal = 'book tables for friday nights', headline =
   sarvamScript.push(
     { match: (t) => t.includes('EXECUTION PLAN'), reply: { audience: 'coffee lovers in mumbai', page_goal: leadGoal, research_focus: 'mumbai cafe market', queries: ['mumbai specialty coffee trend'], sections_target: 4, emphasis: ['menu tactile'], risks: ['generic cafe look'], tone_note: 'warm, specific, sensory' } },
     { match: (t) => t.includes('Turn the raw results into MARKET INTELLIGENCE'), reply: { facts: ['Specialty cafes in Mumbai grew ~15% in 2024', 'Cold brew sells at ₹280-350 in Bandra cafes', 'Weekend cupping workshops sell out 2 weeks ahead'], implication: 'lead with freshness, honest pricing and the weekend cupping ritual' } },
-    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'aurora', palette: { accent: '#7c8cff' }, font: 'grotesk', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee'] } },
+    { match: (t) => t.includes('Decide the design system'), reply: { theme: 'aurora', palette: { accent: '#7c8cff' }, font: 'grotesk', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee'] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { ...content, headline } },
     { match: (t) => t.includes('FINAL review'), reply: { verdict: 'good' } },
     { match: (t) => t.includes('Plan its information architecture'), reply: { sections: PLAN.sections, nav: PLAN.nav } },
@@ -379,7 +379,7 @@ section('DEGRADATION — sink + web + reflection all dead');
   sarvamScript.length = 0;
   sarvamScript.push(
     { match: (t) => t.includes('EXECUTION PLAN'), reply: { audience: 'x', page_goal: 'y', queries: ['mumbai coffee'], sections_target: 4 } },
-    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'onyx', palette: { accent: '#7c8cff' }, font: 'grotesk', voice: 'quiet', audience: 'readers', headline_angle: 'x', must_have: [], research_queries: [] } },
+    { match: (t) => t.includes('Decide the design system'), reply: { theme: 'onyx', palette: { accent: '#7c8cff' }, font: 'grotesk', voice: 'quiet', audience: 'readers', headline_angle: 'x', must_have: [], research_queries: [] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { ...content } },
     { match: (t) => t.includes('FINAL review'), reply: { verdict: 'good' } },
     { match: (t) => t.includes('Plan its information architecture'), reply: { sections: PLAN.sections, nav: PLAN.nav } },

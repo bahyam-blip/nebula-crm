@@ -106,7 +106,7 @@ function memStore() {
 section('AGENT ROSTER');
 {
   const keys = Object.keys(AGENT_TEAM);
-  ok(keys.length === 12, `twelve named specialists on the team (${keys.join(', ')})`);
+  ok(keys.length === 13, `thirteen named specialists on the team (${keys.join(', ')})`);
   ok(AGENT_TEAM.reflector?.role.toLowerCase().includes('lesson'), 'the Reflector turns builds into lessons');
   ok(keys.every((k) => AGENT_TEAM[k].name && AGENT_TEAM[k].emoji && AGENT_TEAM[k].role), 'every agent has name, emoji and role');
   ok(AGENT_TEAM.lead.role.includes('orchestrator'), 'the Lead is the orchestrator');
@@ -235,7 +235,7 @@ section('BUILD RESPONSE — team trace + summary');
   primeCodegen();
   sarvamScript.unshift(
     { match: (t) => t.includes('elite multi-agent web studio'), reply: { audience: 'coffee lovers in mumbai', research_focus: 'mumbai cafe market', queries: ['mumbai specialty coffee trend'], sections_target: 4, emphasis: ['menu tactile'], risks: ['generic cafe look'], tone_note: 'warm, specific, sensory' } },
-    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'aurora', palette: { accent: '#7c8cff' }, font: 'grotesk', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee'] } },
+    { match: (t) => t.includes('Decide the design system'), reply: { theme: 'aurora', palette: { accent: '#7c8cff' }, font: 'grotesk', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee'] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Musafir Coffee', kicker: 'Mumbai', headline: 'Coffee worth the trip', sub: 'Single-origin pours and weekend cuppings.', primary_cta: { label: 'Find us', href: 'mailto:hi@musafir.test' }, features: [{ icon: '☕', title: 'Single origin', text: 'Coorg beans, roasted weekly.' }], contact: { email: 'hi@musafir.test' } } },
     { match: (t) => t.includes('FINAL review'), reply: { verdict: 'good' } },
   );

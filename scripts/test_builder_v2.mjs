@@ -288,7 +288,7 @@ console.log('\n— 2. Designer: think → research → write → render —');
   let allValid = true;
   for (const kind of ['landing', 'promo', 'event', 'portfolio', 'report']) {
     for (const theme of Object.keys(THEMES)) {
-      const d = normalizeDesign({ theme }, { kind, styleHint: '', brandColor: '#8a5a2b' });
+      const d = normalizeDesign({ theme }, { kind, styleHint: '', seedAccent: '#8a5a2b' });
       const html = renderSite({ kind, design: d, content: base, brand: { name: 'Musafir Coffee', color: '#8a5a2b' } });
       if (!html.startsWith('<!DOCTYPE html>') || !html.includes('</html>') || !html.includes('<title>Musafir Coffee</title>')) allValid = false;
     }
@@ -306,7 +306,7 @@ let sig = { artifact_id: '' };
     ...codegenScript(),
     // Agent v8: the Lead orchestrator plans the run first
     { match: (t) => t.includes('elite multi-agent web studio'), reply: { audience: 'coffee lovers in mumbai', research_focus: 'mumbai cafe market', queries: ['mumbai specialty coffee trend'], sections_target: 4, emphasis: ['menu tactile'], risks: ['generic cafe look'], tone_note: 'warm, specific, sensory' } },
-    { match: (t) => t.includes('Decide the design direction'), reply: { theme: 'aurora', palette: { accent: '#c07a3d' }, font: 'modern', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee trend'] } },
+    { match: (t) => t.includes('Decide the design system'), reply: { theme: 'aurora', palette: { accent: '#c07a3d' }, font: 'modern', voice: 'cozy premium', audience: 'coffee lovers', headline_angle: 'Single-origin, slow-poured', must_have: [], research_queries: ['mumbai specialty coffee trend'] } },
     { match: (t) => t.includes('conversion copywriter'), reply: { title: 'Musafir Coffee', kicker: 'Mumbai', headline: 'Coffee worth the trip', sub: 'Single-origin pours and weekend cuppings at Musafir.', primary_cta: { label: 'Find us', href: 'mailto:hi@musafir.test' }, features: [{ icon: '☕', title: 'Single origin', text: 'Beans from Coorg estates, roasted weekly.' }, { icon: '🥐', title: 'Fresh bakes', text: 'Croissants at 8am sharp.' }], contact: { email: 'hi@musafir.test' } } },
   );
 
@@ -337,6 +337,8 @@ let sig = { artifact_id: '' };
   const planRaw = await st.get(`agent:siteplan:${siteId}`);
   const plan = JSON.parse(planRaw);
   ok(plan?.design?.theme === 'aurora' && Array.isArray(plan.content.features), 'site plan stored for refine', planRaw.slice(0, 80));
+  ok(plan?.site_name === 'Musafir Coffee', 'plan locks the client identity (v11 site_name)', String(plan?.site_name));
+  ok(String(plan?.design?.palette?.accent || '').toLowerCase() !== '#7c5cff', 'accent is NOT the owner brand color (v11 firewall)', String(plan?.design?.palette?.accent));
   ok(plan?.engine === 'codegen' && Array.isArray(plan.sections) && plan.sections.length === 3, 'plan records the codegen engine + section architecture');
 
   // CTA override path

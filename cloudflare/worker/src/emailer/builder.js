@@ -32,6 +32,7 @@
 import { sarvamChat } from './sarvam.js';
 import { createTeamRun, leadPlan, leadDeepThink, applyDeepThink, projectUnderstanding, runAgent, reflectOnBuild, researchAndLearnSkill } from './agents.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
+import { extractSiteBrand, siteIdentityBlock, scrubSiteHtml } from './sitebrand.js';
 import { designBrief, researchIntelligence, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
 import { codegenSite, codeSection, reviewSections, assembleSite } from './codegen.js';
@@ -138,7 +139,7 @@ function noteToHtml(doc) {
 
 /* ── Webapp path (AI-authored, bounded + gated) ─────────────────────── */
 
-function webappSystemPrompt(brand, factsLine) {
+function webappSystemPrompt(site, factsLine) {
   return `You are a senior product engineer. Build a SMALL INTERACTIVE single-file web app. Respond with ONE complete HTML document only — no markdown fences, no commentary.
 
 HARD RULES:
@@ -147,16 +148,16 @@ HARD RULES:
 - The app MUST work fully offline in one file. State persists in localStorage. No network calls, no iframes, no images. ONE allowed external resource: a Google Fonts stylesheet (fonts.googleapis.com) for typography.
 - Keep it SMALL: one core interaction done really well (tracker, checklist, calculator, quiz, notes, counter...). 2-3 screens max.
 - Premium visual standard: consistent spacing, accessible contrast, subtle transitions, on-brand.
-- Branding: color ${brand.color}, name "${brand.name}"${factsLine ? `; facts: ${factsLine}` : ''}.
+- IDENTITY LAW: the app belongs to "${site.name}" — its name, branding and footer are the client's ONLY. Never mention, credit or link any other business, brand, domain or the tool that built it.${factsLine ? ` Client facts: ${factsLine}.` : ''}
 - No lorem ipsum. Real labels. Copy in the user's language if their brief is not English.`;
 }
 
-function signatureApp({ title, brief, brand }) {
-  const color = /^#[0-9a-fA-F]{6}$/.test(brand.color || '') ? brand.color : '#6C8CFF';
-  const name = esc(brand.name);
+function signatureApp({ title, brief, site }) {
+  const color = /^#[0-9a-fA-F]{6}$/.test(site.color || '') ? site.color : '#6C8CFF';
+  const name = esc(site.name);
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="${color}"><title>${esc(title || `${brand.name} Tracker`)}</title>
+<meta name="theme-color" content="${color}"><title>${esc(title || `${site.name} Tracker`)}</title>
 <style>
 :root{--b:${color};--ink:#101223;--mut:#6a7086;--bg:#f5f6fa}
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
@@ -198,11 +199,13 @@ render();
 }
 
 /** AI-authored webapp with truncation retry + deterministic fallback. */
-async function buildWebapp(env, { title, brief, style, brand }) {
-  const facts = profileToFacts(brand.profile || {}).facts || {};
+async function buildWebapp(env, { title, brief, style, brand, site }) {
+  const s = site || brand;
+  // Owner facts only when the app IS the owner's own business.
+  const facts = s.isOwnerBusiness ? (profileToFacts(s.profile || {}).facts || {}) : {};
   const factsLine = Object.entries(facts).slice(0, 6).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ');
   const messages = [
-    { role: 'system', content: webappSystemPrompt(brand, factsLine) },
+    { role: 'system', content: webappSystemPrompt(s, factsLine) },
     { role: 'user', content: `TITLE: ${title}\nBRIEF: ${brief}${style ? `\nSTYLE HINT: ${style}` : ''}\nProduce the complete single-file web app now. Keep it compact — it must fit in one response.` },
   ];
 
@@ -221,7 +224,7 @@ async function buildWebapp(env, { title, brief, style, brand }) {
       }
     }
   }
-  return { html: signatureApp({ title, brief, brand }), builder: 'signature' };
+  return { html: signatureApp({ title, brief, site: s }), builder: 'signature' };
 }
 
 /* ── v3 build pipeline (marketing kinds) ────────────────────────────── */
@@ -291,22 +294,30 @@ async function polishCopy(env, { kind, content, brand, skillsBlock, team = null 
  * engine) ships the page so a build can never fail. Templates are the
  * safety net, never the product.
  */
-async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaArgs, brand, sink = null }) {
+async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaArgs, brand, site, sink = null }) {
   const team = createTeamRun({ kind, title }, sink);
 
   // 0. LEAD — the orchestrator reads the brief and plans the run (the
   //    AI call + its fallback both land in the team trace)...
-  let lead = await leadPlan(env, { kind, brief, brand, style, team });
-  // 0b. LEAD DEEP-THINK — ...then critiques and sharpens its own plan
+  let lead = await leadPlan(env, { kind, brief, brand, site, style, team });
+  // 0b-identity: the Lead may have understood the client's name better
+  // than the deterministic extraction (e.g. an unquoted brand). Accept
+  // it when it is a real name and not a forbidden token.
+  if (lead?.ai && String(lead.brand_name || '').trim().length >= 3
+      && lead.brand_name.toLowerCase() !== String(brand?.name || '').toLowerCase()) {
+    site = { ...site, name: String(lead.brand_name).trim().slice(0, 80), nameSource: 'lead' };
+  }
+  team.record('lead', 'locking the identity', { ok: true, ai: false, detail: `the client is "${site.name}" — every specialist brands with this` });
+  // 0c. LEAD DEEP-THINK — ...then critiques and sharpens its own plan
   //     (v10: think → self-critique → revise). One bounded pass.
-  const rev = await leadDeepThink(env, { kind, brief, brand, plan: lead, team });
+  const rev = await leadDeepThink(env, { kind, brief, brand, site, plan: lead, team });
   lead = applyDeepThink(lead, rev);
   team.stage('lead', true, lead.ai, lead.ai ? `deep-thought plan: ${lead.sections_target} sections · ${String(lead.audience || '').slice(0, 50)}` : 'classic plan');
 
-  // 0c. ANALYST — the Project Understanding artifact every specialist
+  // 0d. ANALYST — the Project Understanding artifact every specialist
   //     reads (v10: the team shares ONE model of the business). Never
   //     throws; on failure everyone proceeds on the brief.
-  const understanding = await projectUnderstanding(env, { kind, brief, brand, team });
+  const understanding = await projectUnderstanding(env, { kind, brief, brand, site, team });
   team.stage('understand', true, Boolean(understanding), understanding ? `mapped: ${String(understanding.success_metric || understanding.business_model || 'project').slice(0, 70)}` : 'brief-only understanding');
 
   // 1. SKILLS — load the expert skill pack (seeded + everything the agent
@@ -316,7 +327,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   const copySkills = await skillsForDomain(store, uid, 'copy', { maxChars: 700 });
 
   // 2. THINK — the Art Director's design system + research queries.
-  const thought = await designBrief(env, { kind, brief, style, brand, skillsBlock: designSkills.block, lead, understanding, team });
+  const thought = await designBrief(env, { kind, brief, style, brand, site, skillsBlock: designSkills.block, lead, understanding, team });
   team.stage('think', true, thought.ai, `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero${thought.design.motion_intensity ? ` · ${thought.design.motion_intensity} motion` : ''}`);
 
   // 3. RESEARCH — the Researcher gathers live facts and SYNTHESIZES them
@@ -328,7 +339,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   let facts = '';
   let researchAi = false;
   if (RESEARCH_KINDS.has(kind) && queries.length) {
-    const ri = await researchIntelligence(env, { queries, brief, brand, team });
+    const ri = await researchIntelligence(env, { queries, brief, brand, site, team });
     facts = ri.block;
     researchAi = ri.ai;
     team.record('researcher', 'scanning the live web', {
@@ -343,8 +354,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   }
 
   // 4. WRITE — the Copywriter drafts (falls back to brief-derived copy).
-  const base = defaultCopy({ kind, title, brief, brand });
-  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, thought, factsBlock: facts, skillsBlock: copySkills.block, lead, understanding, team });
+  const base = defaultCopy({ kind, title, brief, brand: site });
+  const { content: aiCopy, ai: copyAi } = await writeCopy(env, { kind, title, brief, brand, site, thought, factsBlock: facts, skillsBlock: copySkills.block, lead, understanding, team });
   let content = mergeCopy(aiCopy, base);
   content = applyCtaOverrides(content, ctaArgs);
   if (!content.headline) content.headline = title;
@@ -367,6 +378,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       kind,
       brief,
       brand,
+      site,
       thought,
       content,
       skillsBlock: designSkills.block,
@@ -374,6 +386,18 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       understanding,
       team,
     });
+
+    // IDENTITY SCRUB (v11) — the deterministic firewall pass: any owner
+    // token that still leaked (aidraft.bond, the owner's name, email…)
+    // is replaced before the page ships. Reported in the trace.
+    let html = cg.html;
+    let leakCount = 0;
+    try {
+      const scrubbed = scrubSiteHtml(html, site, brand);
+      html = scrubbed.html;
+      leakCount = scrubbed.leaks;
+      team.record('builder', 'identity integrity pass', { ok: true, ai: false, detail: leakCount ? `${leakCount} foreign brand token(s) scrubbed` : 'page is 100% the client\'s brand' });
+    } catch { html = cg.html; }
 
     // 10. REFLECT — the Reflector distills this finished build into a
     //     learned skill so the NEXT build starts smarter (self-evolution;
@@ -404,7 +428,7 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
     }
 
     return {
-      html: cg.html,
+      html,
       content,
       design: thought.design,
       stages: team.stages,
@@ -416,6 +440,9 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       sections: cg.plan.sections,
       nav: cg.plan.nav,
       coded: cg.coded,
+      images: cg.images || [],
+      siteName: site.name,
+      leaksScrubbed: leakCount,
       reflected,
       understanding,
       deep: lead.deep === true,
@@ -424,7 +451,11 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
     console.warn('[builder] codegen → engine fallback:', e?.message || e);
     team.record('builder', 'shipping the engine render', { ok: true, ai: false, detail: 'AI page unviable — deterministic engine shipped the build' });
     team.stage('render', true, false, 'engine fallback — deterministic render');
-    const html = renderSite({ kind, design: thought.design, content, brand });
+    let html = renderSite({ kind, design: thought.design, content, brand: site });
+    try {
+      const scrubbed = scrubSiteHtml(html, site, brand);
+      html = scrubbed.html;
+    } catch { /* keep raw */ }
     return {
       html,
       content,
@@ -437,6 +468,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       engine: 'template',
       sections: null,
       nav: null,
+      images: [],
+      siteName: site.name,
       understanding,
       deep: lead.deep === true,
     };
@@ -499,9 +532,12 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
   const profile = store ? await getBusinessProfile(store).catch(() => null) : null;
   const brand = brandFor(env, profile);
   brand.profile = profile;
-
   const style = String(args.style || profile?.default_style || '').trim();
   const ctaArgs = { cta_text: args.cta_text, cta_url: args.cta_url, contact_email: args.contact_email };
+  // IDENTITY FIREWALL (v11): the site's brand is the CLIENT's, resolved
+  // from the brief — never the CRM owner's business. aidraft.bond, the
+  // owner's name/color/contacts can no longer reach any page.
+  const site = extractSiteBrand({ title: effTitle, brief, kind, ctaArgs, profile, brand });
 
   // Rate limit — extreme capability, guarded (applies to app + MCP + chat).
   const rl = await rateLimit(store, user?.uid || '', 'build_website');
@@ -510,12 +546,17 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     return { ok: false, rateLimited: true, error: rl.error };
   }
 
-  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '', deep = false, understanding = null;
+  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '', deep = false, understanding = null, siteName = site.name, leaksScrubbed = 0, images = [];
   try {
     if (kind === 'webapp') {
-      const r = await buildWebapp(env, { title: effTitle, brief, style, brand });
+      const r = await buildWebapp(env, { title: effTitle, brief, style, brand, site });
       html = r.html;
       builder = r.builder;
+      try {
+        const scrubbed = scrubSiteHtml(html, site, brand);
+        html = scrubbed.html;
+        leaksScrubbed = scrubbed.leaks;
+      } catch { /* keep raw */ }
       stages = [
         { stage: 'think', ok: true, ai: builder === 'ai', detail: 'app architecture' },
         { stage: 'write', ok: true, ai: builder === 'ai', detail: builder === 'ai' ? 'app coded by AI' : 'signature app shell' },
@@ -523,7 +564,7 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
       ];
       teamTrace = [{ agent: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections', action: 'coding the single-file web app', ok: builder === 'ai', ai: builder === 'ai', ms: 0, detail: builder === 'ai' ? 'app hand-coded in one file' : 'signature app shell' }];
     } else {
-      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand, sink: liveSink });
+      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand, site, sink: liveSink });
       html = r.html;
       // 'ai' = the AI led design + copy AND hand-wrote the page code.
       // 'ai+engine' = AI design/copy with the deterministic engine render
@@ -537,8 +578,12 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
       reflected = r.reflected || '';
       deep = r.deep === true;
       understanding = r.understanding || null;
+      siteName = r.siteName || site.name;
+      leaksScrubbed = r.leaksScrubbed || 0;
+      images = r.images || [];
       plan = {
         kind, title: effTitle, brief: brief.slice(0, 4000), style,
+        site_name: siteName,
         design: r.design, content: r.content,
         engine: r.engine, sections: r.sections, nav: r.nav,
         // Coded fragments (v9) — the raw material for surgical refines:
@@ -546,14 +591,21 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
         coded: Array.isArray(r.coded)
           ? r.coded.slice(0, CODED_CAP).map((c) => ({ id: c.id, html: c.html, css: c.css }))
           : null,
+        // Verified imagery (v11) — refines may re-cast or reuse these.
+        images: images.slice(0, 8),
       };
     }
   } catch (e) {
     // The pipeline is designed not to throw; this is the last-resort net.
     console.error('[builder] pipeline error, using signature builder:', e?.stack || e);
-    const design = normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, brandColor: brand.color });
-    const content = applyCtaOverrides(defaultCopy({ kind, title: effTitle, brief, brand }), ctaArgs);
-    html = renderSite({ kind, design, content, brand });
+    const design = normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, seedAccent: site.color || undefined });
+    const content = applyCtaOverrides(defaultCopy({ kind, title: effTitle, brief, brand: site }), ctaArgs);
+    html = renderSite({ kind, design, content, brand: site });
+    try {
+      const scrubbed = scrubSiteHtml(html, site, brand);
+      html = scrubbed.html;
+      leaksScrubbed = scrubbed.leaks;
+    } catch { /* keep raw */ }
     builder = 'signature';
     stages = [{ stage: 'render', ok: true, ai: false, detail: 'fallback template' }];
   }
@@ -608,6 +660,9 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     title: effTitle,
     url: finalUrl,
     builder,
+    brand: siteName,
+    leaks_scrubbed: leaksScrubbed,
+    images,
     bytes: html.length,
     sha256: digest,
     version: 1,
@@ -644,6 +699,11 @@ export async function refineSite(env, store, user, args, origin = '') {
   const title = plan?.title || doc.title || effTitleFromDoc(doc);
   const brief = plan?.brief || '';
   const style = plan?.style || '';
+  // IDENTITY (v11): the site keeps ITS name across refines — the stored
+  // site_name wins; a fresh extraction only fills the gaps.
+  const ctaArgs = { cta_text: args.cta_text, cta_url: args.cta_url, contact_email: args.contact_email };
+  const site = extractSiteBrand({ title, brief, kind, ctaArgs, profile, brand });
+  if (plan?.site_name) site.name = String(plan.site_name).slice(0, 80);
 
   let html, version, note = 'updated from your instruction';
   let content, design;
@@ -683,6 +743,7 @@ export async function refineSite(env, store, user, args, origin = '') {
       brief: `${plan?.brief || doc.title}\n\nUPDATE REQUEST: ${instruction}`,
       style,
       brand,
+      site,
     });
     html = r.html;
     nextCoded = null;
@@ -694,7 +755,7 @@ export async function refineSite(env, store, user, args, origin = '') {
     // fragments byte-identical), otherwise as a full re-code with the
     // SAME section architecture. Both are real iterations, not
     // re-renders; the template engine remains the never-fail net.
-    const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand, team });
+    const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand: site, team });
     content = r.content;
     design = plan.design;
     if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
@@ -708,7 +769,7 @@ export async function refineSite(env, store, user, args, origin = '') {
         let viable = true;
         for (const t of targets) {
           const section = plan.sections.find((s) => s.id === t);
-          const ctx = { kind, brief: updateBrief, brand, thought, content, design, team, section };
+          const ctx = { kind, brief: updateBrief, brand: site, site, thought, content, design, team, section, allowedImages: new Set((plan.images || []).map((im) => im.url)) };
           let out = await codeSection(env, ctx);
           if (!out) {
             // One director-forced simpler redo before giving up on surgical.
@@ -722,7 +783,7 @@ export async function refineSite(env, store, user, args, origin = '') {
           // QA review scoped to the re-coded subset, one bounded rework each.
           const review = await reviewSections(env, {
             kind,
-            brand,
+            brand: site,
             sections: recoded.map(({ id, out }) => {
               const sec = plan.sections.find((s) => s.id === id) || {};
               return { id, name: sec.name || id, goal: sec.goal || '', css: out.css };
@@ -732,7 +793,7 @@ export async function refineSite(env, store, user, args, origin = '') {
           for (const { id } of recoded) {
             if (review.verdicts[id] !== 'fix') continue;
             const section = plan.sections.find((s) => s.id === id);
-            const ctx = { kind, brief: updateBrief, brand, thought, content, design, team, section, critique: review.notes[id] || 'director flagged this section' };
+            const ctx = { kind, brief: updateBrief, brand: site, site, thought, content, design, team, section, critique: review.notes[id] || 'director flagged this section', allowedImages: new Set((plan.images || []).map((im) => im.url)) };
             const redo = await codeSection(env, ctx);
             if (!redo) continue;
             const at = recoded.findIndex((x) => x.id === id);
@@ -744,7 +805,7 @@ export async function refineSite(env, store, user, args, origin = '') {
           }
           html = assembleSite({
             design,
-            brand,
+            brand: site,
             content,
             coded,
             plan: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4) },
@@ -763,6 +824,7 @@ export async function refineSite(env, store, user, args, origin = '') {
           kind,
           brief: updateBrief,
           brand,
+          site,
           thought,
           content,
           preplanned: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4), ai: false },
@@ -776,7 +838,7 @@ export async function refineSite(env, store, user, args, origin = '') {
       }
     } catch (e) {
       console.warn('[builder] refine codegen → engine fallback:', e?.message || e);
-      html = renderSite({ kind, design, content, brand }).trim();
+      html = renderSite({ kind, design, content, brand: site }).trim();
       nextEngine = 'template';
       nextSections = null;
       nextNav = null;
@@ -786,9 +848,9 @@ export async function refineSite(env, store, user, args, origin = '') {
   } else {
     if (plan?.content) {
       // Fast path: re-render from the stored plan with the instruction applied.
-      const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand, team });
+      const r = await applyRefinement(env, { instruction, kind, content: plan.content, design: plan.design, brand: site, team });
       content = r.content;
-      design = plan.design?.theme ? plan.design : normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, brandColor: brand.color });
+      design = plan.design?.theme ? plan.design : normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, seedAccent: site.color || undefined });
       if (!r.ai) note = 'AI did not respond — rebuilt with your instruction noted in the brief';
       content = applyCtaOverrides(content, { cta_text: args.cta_text, cta_url: args.cta_url });
       nextCoded = null;
@@ -796,7 +858,7 @@ export async function refineSite(env, store, user, args, origin = '') {
       // Legacy artifact (pre-codegen build, no plan) → full pipeline with
       // the original brief + instruction folded in.
       const fullBrief = `${brief || doc.title}\n\nUPDATE REQUEST: ${instruction}`;
-      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title, brief: fullBrief, style, ctaArgs: {}, brand });
+      const r = await buildViaAgent(env, store, user?.uid || '', { kind, title, brief: fullBrief, style, ctaArgs, brand, site });
       content = r.content;
       design = r.design;
       nextEngine = r.engine;
@@ -805,9 +867,14 @@ export async function refineSite(env, store, user, args, origin = '') {
       nextCoded = Array.isArray(r.coded) ? r.coded.slice(0, CODED_CAP).map((c) => ({ id: c.id, html: c.html, css: c.css })) : null;
       if (r.engine === 'codegen') html = r.html.trim(); // already a final coded page
     }
-    if (!html) html = renderSite({ kind, design, content, brand }).trim();
+    if (!html) html = renderSite({ kind, design, content, brand: site }).trim();
     version = (Number(doc.version) || 1) + 1;
   }
+  // IDENTITY SCRUB (v11): the firewall runs on refines too.
+  try {
+    const scrubbed = scrubSiteHtml(html, site, brand);
+    html = scrubbed.html;
+  } catch { /* keep raw */ }
   if (html.length > MAX_SITE_BYTES) html = html.slice(0, MAX_SITE_BYTES) + '\n<!-- truncated -->';
 
   const digest = await sha256Hex(html);
@@ -830,8 +897,8 @@ export async function refineSite(env, store, user, args, origin = '') {
 
   if (store) {
     const nextPlan = kind === 'webapp'
-      ? { kind, title, brief: `${plan?.brief || ''}\n\nUPDATE REQUEST: ${instruction}`.trim(), style }
-      : { kind, title, brief, style, design, content, engine: nextEngine, sections: nextSections, nav: nextNav, coded: nextCoded };
+      ? { kind, title, brief: `${plan?.brief || ''}\n\nUPDATE REQUEST: ${instruction}`.trim(), style, site_name: site.name }
+      : { kind, title, brief, style, site_name: site.name, design, content, engine: nextEngine, sections: nextSections, nav: nextNav, coded: nextCoded, images: plan?.images || [] };
     await store.put(`agent:siteplan:${id}`, JSON.stringify(nextPlan)).catch(() => {});
     await putArtifact(store, user?.uid || '', {
       id, kind, title, url: doc.url || (origin ? `${origin}/sites/${id}` : `/sites/${id}`),
