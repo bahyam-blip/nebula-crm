@@ -283,8 +283,12 @@ section('TEAM: the Photographer joins; the Lead locks the client name');
     { match: (t) => t.includes('casting the photography'), reply: { assign: [{ section: 'hero', url: 'https://upload.wikimedia.org/w/commons/1/coffee-shop.jpg', alt: 'warm cafe interior' }], vibe: 'film warmth' } },
     { match: (t) => t.includes('HAND-CODING one section'), reply: (text) => {
       const id = /sec-([a-z]+)/.exec(text)?.[1] || 'hero';
+      // IMAGE REWORK check: on the first hero attempt OMIT the photo; the
+      // rework pass (critique present) must embed it.
+      const omit = id === 'hero' && !/assigned photo is missing/.test(text);
+      const img = omit ? '' : `<img src="https://upload.wikimedia.org/w/commons/1/coffee-shop.jpg" alt="warm cafe interior" class="ph" loading="lazy">`;
       const sec = id === 'hero'
-        ? `<section id="sec-hero"><div class="marquee"><div class="marquee-track"><span>Filter</span><span>Snacks</span><span>Beans</span><span>Filter</span><span>Snacks</span><span>Beans</span></div></div><h1>Filter coffee, done right</h1><p>Slow-poured cups and warm light in the heart of Bangalore.</p><span data-count="40">0</span><span>%</span><img src="https://upload.wikimedia.org/w/commons/1/coffee-shop.jpg" alt="warm cafe interior" class="ph" loading="lazy"></section><style>#sec-hero h1{font-family:var(--display);font-size:clamp(30px,5vw,56px);color:var(--ink)}#sec-hero p{color:var(--muted)}#sec-hero .marquee-track{display:flex;gap:20px;width:max-content;animation:marquee-x 22s linear infinite}@keyframes hero-rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}</style>`
+        ? `<section id="sec-hero"><div class="marquee"><div class="marquee-track"><span>Filter</span><span>Snacks</span><span>Beans</span><span>Filter</span><span>Snacks</span><span>Beans</span></div></div><h1>Filter coffee, done right</h1><p>Slow-poured cups and warm light in the heart of Bangalore.</p><span data-count="40">0</span><span>%</span>${img}</section><style>#sec-hero h1{font-family:var(--display);font-size:clamp(30px,5vw,56px);color:var(--ink)}#sec-hero p{color:var(--muted)}#sec-hero .marquee-track{display:flex;gap:20px;width:max-content;animation:marquee-x 22s linear infinite}@keyframes hero-rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}</style>`
         : `<section id="sec-${id}"><h2>More of the story</h2><p>This section keeps the promise with specifics and proof the visitor can feel.</p><a class="btn btn-accent" href="#sec-contact">Visit us</a></section><style>#sec-${id} h2{font-family:var(--display);color:var(--ink)}#sec-${id} p{color:var(--muted)}@keyframes ${id}-rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}</style>`;
       return { __raw: sec };
     } },
@@ -322,7 +326,8 @@ section('E2E: build carries ONLY the client brand (poisoned owner profile)');
   // AURA motion on the served page:
   ok(page.includes('marquee-x') || page.includes('.marquee'), 'marquee system shipped');
   ok(page.includes('data-count'), 'count-up shipped');
-  ok(page.includes('upload.wikimedia.org'), 'real photography shipped');
+  ok(page.includes('upload.wikimedia.org'), 'real photography shipped (image rework loop fired)');
+  ok((res.team || []).some((r) => /re-coded to embed the cast photo/.test(r.detail) || /re-coded to wire the assigned photo/.test(r.detail)), 'image rework traced');
   ok(!page.includes('evil.example.com'), 'no foreign image hosts');
 
   // The photographer + identity rows are in the team trace:

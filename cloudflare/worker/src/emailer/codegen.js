@@ -200,7 +200,7 @@ Respond with ONLY this format (no markdown fences, no commentary):
 
 HARD RULES
 - Exactly one <section id="sec-${id}"> root element. No <script>, no <html>/<head>/<body>, no <iframe>, no inline on* handlers, no style="" attributes.
-- IMAGES: only when an IMAGES list is provided below. <img> is allowed ONLY with those EXACT URLs (never invent, shorten or edit a URL); loading="lazy", honest alt text, class="ph" for the built-in treatment. No IMAGES list → NO <img> at all; build the atmosphere with pure CSS (gradients, layered shapes, the page art variables).
+- IMAGES CONTRACT: when the user message contains an IMAGES list, the section MUST embed that photo as <img src="EXACT-URL" alt="..." class="ph" loading="lazy"> and build the composition AROUND it (framed panel, split layout, overlay, mask). Ignoring the assigned photo fails review. No IMAGES list → NO <img> at all; build the atmosphere with pure CSS (gradients, layered shapes, the page art variables).
 - Every CSS selector starts with #sec-${id}. Mobile-first: phone layout first, then ONE @media (min-width:768px) block.
 - Use the page variables (given in the brief): colors, --r radius, --font body / --display display font, spacing scale --sp1..--sp6. Content sits inside .wrap (already centered, max-width var(--maxw)) — do NOT redefine .wrap.
 - Typography: clamp() font sizes; headings use var(--display).
@@ -705,6 +705,33 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
       coded.push({ id: section.id, ...out });
       trace(`code:${section.id}`, true, true, `${section.name} coded (${out.html.length + out.css.length} chars)`);
     }
+  }
+
+  // 2b. IMAGE REWORK (v11) — a section that was cast a photo but shipped
+  //     without <img> gets ONE engineer re-code with the omission named.
+  //     Bounded (≤2 re-codes): a missing photo degrades to CSS art, it
+  //     never blocks the build.
+  let imageRetries = 0;
+  for (const c of coded) {
+    if (imageRetries >= 2) break;
+    const assigned = imagesBySection.find((im) => im.section === c.id);
+    if (!assigned || /<img[\s>]/i.test(c.html)) continue;
+    const section = plan.sections.find((s) => s.id === c.id);
+    if (!section) continue;
+    const ctx = {
+      ...ctxBase,
+      section,
+      critique: `the assigned photo is missing — embed <img src="${assigned.url}" alt="${assigned.alt}" class="ph" loading="lazy"> as a central part of the composition`,
+    };
+    const redo = await codeSection(env, ctx);
+    if (redo && /<img[\s>]/i.test(redo.html)) {
+      imageRetries++;
+      coded[coded.indexOf(c)] = { id: c.id, ...redo };
+      trace(`code:${c.id}`, true, true, `${section.name} re-coded to wire the assigned photo`);
+    }
+  }
+  if (imageCount && imageRetries) {
+    if (team) team.record('photographer', 'wiring the photography', { ok: true, ai: false, detail: `${imageRetries} section(s) re-coded to embed the cast photo(s)` });
   }
 
   // 3. REVIEW — director pass; flagged sections get one real regen

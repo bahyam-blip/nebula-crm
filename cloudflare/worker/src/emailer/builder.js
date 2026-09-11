@@ -305,7 +305,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   // it when it is a real name and not a forbidden token.
   if (lead?.ai && String(lead.brand_name || '').trim().length >= 3
       && lead.brand_name.toLowerCase() !== String(brand?.name || '').toLowerCase()) {
-    site = { ...site, name: String(lead.brand_name).trim().slice(0, 80), nameSource: 'lead' };
+    const leadName = String(lead.brand_name).replace(/^["'“”\s]+|["'“”\s]+$/g, '').trim().slice(0, 80);
+    if (leadName.length >= 3) site = { ...site, name: leadName, nameSource: 'lead' };
   }
   team.record('lead', 'locking the identity', { ok: true, ai: false, detail: `the client is "${site.name}" — every specialist brands with this` });
   // 0c. LEAD DEEP-THINK — ...then critiques and sharpens its own plan

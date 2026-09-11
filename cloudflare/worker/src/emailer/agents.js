@@ -234,7 +234,7 @@ export async function leadPlan(env, { kind, brief, brand, site, style, team = nu
       (out) => `${out.sections_target || 4} sections · ${String(out.audience || '').slice(0, 60)}`
     );
     const plan = {
-      brand_name: String(j.brand_name || '').slice(0, 80),
+      brand_name: String(j.brand_name || '').replace(/^["'“”\s]+|["'“”\s]+$/g, '').slice(0, 80),
       audience: String(j.audience || '').slice(0, 140),
       page_goal: String(j.page_goal || '').slice(0, 90),
       research_focus: String(j.research_focus || '').slice(0, 200),
