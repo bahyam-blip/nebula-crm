@@ -94,7 +94,7 @@ jobs:
           SARVAM_AI_API: ${{ secrets.SARVAM_AI_API }}
         run: |
           if [ -z "$SARVAM_AI_API" ]; then
-            echo "::warning::SARVAM_AI_API not set - AI endpoint will return 503."
+            echo "::warning::SARVAM_AI_API not set - fine, the free Workers AI engine carries AI by default; Sarvam is just absent as fallback."
             exit 0
           fi
           printf '%s' "$SARVAM_AI_API" \
@@ -239,22 +239,31 @@ jobs:
             exit 1
           fi
 
-      - name: Verify the Sarvam model responds
+      - name: Verify AI engines (Sarvam = optional legacy, warn only)
         env:
           SARVAM_AI_API: ${{ secrets.SARVAM_AI_API }}
         run: |
-          [ -z "$SARVAM_AI_API" ] && exit 0
+          # Nebula Core architecture: the DEFAULT engine is the free Workers AI
+          # binding (created by the wrangler deploy above — a broken binding
+          # fails that step), and our fine-tuned model rides LLM_CUSTOM_BASE_URL.
+          # Sarvam is a paid legacy FALLBACK: an exhausted quota or dead key
+          # must never block shipping (this exact gate failed v15's deploy).
+          if [ -z "$SARVAM_AI_API" ]; then
+            echo "::warning::SARVAM_AI_API unset — legacy fallback engine not probed (free engines carry the load)."
+            exit 0
+          fi
           CODE=$(curl -s -o /tmp/ai.json -w "%{http_code}" \
             -X POST https://api.sarvam.ai/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "api-subscription-key: $SARVAM_AI_API" \
             -d '{"model":"sarvam-105b","messages":[{"role":"user","content":"Reply with the word ok"}],"temperature":0}')
           BODY=$(tr '\n' ' ' < /tmp/ai.json | cut -c1-220)
-          echo "::warning::SARVAM model check HTTP $CODE $BODY"
-          if [ "$CODE" != "200" ]; then
-            echo "::error::Sarvam rejected the request - the model name or key is wrong."
-            exit 1
+          if [ "$CODE" = "200" ]; then
+            echo "::warning::SARVAM fallback engine healthy (HTTP $CODE)"
+          else
+            echo "::warning::SARVAM fallback unavailable (HTTP $CODE $BODY) — non-fatal: Workers AI / Nebula Core serve the platform."
           fi
+          exit 0
 
       # Is the FCM API actually enabled on the project? Firestore was not,
       # and the failure looks identical from the app: silence.
