@@ -35,7 +35,10 @@ import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
 import { extractSiteBrand, siteIdentityBlock, scrubSiteHtml } from './sitebrand.js';
 import { designBrief, researchIntelligence, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
-import { codegenSite, codeSection, reviewSections, assembleSite } from './codegen.js';
+import { codegenSite, codeSection, reviewSections, assembleSite, injectCanonical } from './codegen.js';
+import { fontPairFor } from './mastery.js';
+import { hashSeed } from './designer.js';
+import { checkQuota, consumeBuild, consumeRefine } from './plans.js';
 import { skillsForDomain } from './skills.js';
 import { rateLimit, sha256Hex } from './guard.js';
 import { esc } from './htmlutil.js';
@@ -139,17 +142,56 @@ function noteToHtml(doc) {
 
 /* ── Webapp path (AI-authored, bounded + gated) ─────────────────────── */
 
-function webappSystemPrompt(site, factsLine) {
+function webappSystemPrompt(site, factsLine, planBlock = '', fontLine = '') {
   return `You are a senior product engineer. Build a SMALL INTERACTIVE single-file web app. Respond with ONE complete HTML document only — no markdown fences, no commentary.
 
 HARD RULES:
 - Start with <!DOCTYPE html> and end with </html>. ALL CSS in one <style>; ALL JS in one inline <script> at the end of <body>.
 - Mobile-first, feels native on a phone: sticky bottom tab bar or big touch targets, cards, rounded corners, system font stack.
-- The app MUST work fully offline in one file. State persists in localStorage. No network calls, no iframes, no images. ONE allowed external resource: a Google Fonts stylesheet (fonts.googleapis.com) for typography.
+- The app MUST work fully offline in one file. State persists in localStorage under ONE versioned key (e.g. "app.v1") with a tiny migrate() guard — records are flat objects with ISO dates so a backend can mirror the schema later.
+- No network calls, no iframes. No images. ONE allowed external resource: a Google Fonts stylesheet (fonts.googleapis.com) for typography.
 - Keep it SMALL: one core interaction done really well (tracker, checklist, calculator, quiz, notes, counter...). 2-3 screens max.
+- ENGINEERING CRAFT: the store is the single source of truth (load → render → mutate → save → render); derived values computed in render(), never stored twice; destructive actions get a 3s undo toast instead of confirm(); empty states teach (one line + a big action), never a blank pane.
 - Premium visual standard: consistent spacing, accessible contrast, subtle transitions, on-brand.
 - IDENTITY LAW: the app belongs to "${site.name}" — its name, branding and footer are the client's ONLY. Never mention, credit or link any other business, brand, domain or the tool that built it.${factsLine ? ` Client facts: ${factsLine}.` : ''}
-- No lorem ipsum. Real labels. Copy in the user's language if their brief is not English.`;
+- No lorem ipsum. Real labels. Copy in the user's language if their brief is not English.${planBlock ? `\n\n${planBlock}` : ''}${fontLine ? `\n\n${fontLine}` : ''}`;
+}
+
+/**
+ * v12 WEBAPP PLAN — one bounded architect call BEFORE coding: features,
+ * data model, screens. The engineer then codes WITH this plan (real
+ * full-stack thinking instead of a one-shot guess). Never throws.
+ */
+async function planWebapp(env, { title, brief, site }) {
+  try {
+    const j = await sarvamChat(
+      env,
+      [
+        {
+          role: 'system',
+          content: `You are the lead engineer planning a small single-file web app. Respond with ONLY JSON:
+{"app_name":"<=30 chars","core_loop":"the ONE core interaction in one sentence","features":[{"name":"","purpose":"one sentence"} (3-5 items)],"data":{"entity":"e.g. Task","fields":["id","title","done","createdAt"]},"screens":["Home"],"empty_state":"the line a brand-new user sees"}
+Rules: ONE core interaction done really well; features serve THIS business; no accounts/auth (offline app); no backend.`,
+        },
+        { role: 'user', content: `APP FOR: ${site?.name || 'the client'}\nTITLE: ${title}\nBRIEF: ${String(brief).slice(0, 1200)}\nPlan it now.` },
+      ],
+      { json: true, maxTokens: 700, temperature: 0.5 }
+    );
+    if (!j || !Array.isArray(j.features) || !j.features.length) return null;
+    return {
+      appName: String(j.app_name || title).slice(0, 40),
+      coreLoop: String(j.core_loop || '').slice(0, 140),
+      features: j.features.slice(0, 5).map((f) => ({ name: String(f?.name || '').slice(0, 40), purpose: String(f?.purpose || '').slice(0, 120) })),
+      data: {
+        entity: String(j.data?.entity || 'Item').slice(0, 24),
+        fields: Array.isArray(j.data?.fields) ? j.data.fields.map((x) => String(x).slice(0, 20)).slice(0, 8) : ['id', 'title', 'createdAt'],
+      },
+      screens: Array.isArray(j.screens) ? j.screens.map((x) => String(x).slice(0, 24)).slice(0, 3) : ['Home'],
+      emptyState: String(j.empty_state || '').slice(0, 100),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function signatureApp({ title, brief, site }) {
@@ -177,7 +219,7 @@ main{flex:1;padding:18px;max-width:560px;width:100%;margin:0 auto}
 .item .del{background:none;border:0;color:#c2c6d4;font-size:18px;cursor:pointer}
 .bar{position:sticky;bottom:0;background:#ffffffee;backdrop-filter:blur(10px);border-top:1px solid #ecedf3;padding:12px 18px;display:flex;justify-content:space-between;font-size:13px;color:var(--mut);font-weight:600}
 </style></head><body>
-<header><h1>${esc(title || `${brand.name} Tracker`)}</h1><p>${esc(String(brief || '').slice(0, 90)) || `A quick tracker for ${name}`} · works offline</p></header>
+<header><h1>${esc(title || `${site.name} Tracker`)}</h1><p>${esc(String(brief || '').slice(0, 90)) || `A quick tracker for ${name}`} · works offline</p></header>
 <main id="list"></main>
 <div style="display:flex;gap:10px;padding:0 18px 18px;max-width:560px;margin:0 auto;width:100%">
 <input id="new" placeholder="Add an item…" style="flex:1;border:1.5px solid #e3e6ef;border-radius:14px;padding:14px 16px;font-size:15px;outline:none">
@@ -204,8 +246,29 @@ async function buildWebapp(env, { title, brief, style, brand, site }) {
   // Owner facts only when the app IS the owner's own business.
   const facts = s.isOwnerBusiness ? (profileToFacts(s.profile || {}).facts || {}) : {};
   const factsLine = Object.entries(facts).slice(0, 6).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ');
+
+  // v12 MASTERY: PLAN before CODE. One bounded architect call decides
+  // the app's name, core loop, features and DATA MODEL (entity/fields),
+  // then the engineer codes with that plan — full-stack thinking, not a
+  // one-shot guess. Falls back silently to plan-less coding.
+  const plan = await planWebapp(env, { title, brief, site: s });
+  let planBlock = '';
+  if (plan) {
+    planBlock = [
+      `ENGINEERING PLAN (build exactly this):`,
+      `Core loop: ${plan.coreLoop}`,
+      `Data model: ${plan.data.entity} { ${plan.data.fields.join(', ')} } — one versioned localStorage key.`,
+      `Screens: ${plan.screens.join(' → ')}`,
+      `Features: ${plan.features.map((f) => `${f.name} — ${f.purpose}`).join(' | ')}`,
+      plan.emptyState ? `Empty state: "${plan.emptyState}"` : '',
+    ].filter(Boolean).join('\n');
+  }
+  // v12 MASTERY: the app ships real typography from the pairing library.
+  const pair = fontPairFor({ brief, kind: 'webapp', seed: hashSeed(`${title}${brief.slice(0, 120)}`) });
+  const fontLine = `TYPOGRAPHY: load ONE Google Fonts stylesheet for "${pair.display}" (headings, 600-800) + "${pair.body}" (body) with display=swap; no other font families.`;
+
   const messages = [
-    { role: 'system', content: webappSystemPrompt(s, factsLine) },
+    { role: 'system', content: webappSystemPrompt(s, factsLine, planBlock, fontLine) },
     { role: 'user', content: `TITLE: ${title}\nBRIEF: ${brief}${style ? `\nSTYLE HINT: ${style}` : ''}\nProduce the complete single-file web app now. Keep it compact — it must fit in one response.` },
   ];
 
@@ -214,7 +277,7 @@ async function buildWebapp(env, { title, brief, style, brand, site }) {
       const raw = await sarvamChat(env, messages, { maxTokens: 1900, temperature: 0.55 });
       const { html, error } = extractSiteHtml(raw);
       if (!html) throw new Error(error);
-      return { html: sanitizeSiteHtml(html), builder: 'ai' };
+      return { html: sanitizeSiteHtml(html), builder: 'ai', plan };
     } catch (e) {
       if (attempt === 1) {
         // Most likely truncation — force a smaller app and try once more.
@@ -224,7 +287,7 @@ async function buildWebapp(env, { title, brief, style, brand, site }) {
       }
     }
   }
-  return { html: signatureApp({ title, brief, site: s }), builder: 'signature' };
+  return { html: signatureApp({ title, brief, site: s }), builder: 'signature', plan };
 }
 
 /* ── v3 build pipeline (marketing kinds) ────────────────────────────── */
@@ -547,6 +610,15 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     return { ok: false, rateLimited: true, error: rl.error };
   }
 
+  // v12 SUBSCRIPTION: the plan gate runs BEFORE the team wakes up —
+  // an over-quota user never burns agent compute. Failed builds are
+  // free (the counter is consumed only after the artifact ships).
+  const quota = await checkQuota(store, user?.uid || '', 'build', user?.role || '');
+  if (!quota.ok) {
+    if (finalizeRun) await finalizeRun({ status: 'error', error: String(quota.error || 'quota exceeded').slice(0, 240) });
+    return { ok: false, upgradeRequired: true, plan: quota.plan?.id, usage: quota.usage, error: quota.error };
+  }
+
   let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '', deep = false, understanding = null, siteName = site.name, leaksScrubbed = 0, images = [];
   try {
     if (kind === 'webapp') {
@@ -612,10 +684,18 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
   }
 
   html = html.trim();
+
+  // v12 SEO: mint the id first so the public URL can be baked into the
+  // page as canonical + og:url BEFORE storage (both build paths).
+  const id = `s_${Date.now().toString(36)}${Math.floor(Math.random() * 46656).toString(36)}`;
+  const finalUrl = origin ? `${origin}/sites/${id}` : `/sites/${id}`;
+  try {
+    html = injectCanonical(html, finalUrl);
+  } catch { /* SEO is a bonus, never a failure */ }
+
   if (html.length > MAX_SITE_BYTES) html = html.slice(0, MAX_SITE_BYTES) + '\n<!-- truncated -->';
 
   const digest = await sha256Hex(html);
-  const id = `s_${Date.now().toString(36)}${Math.floor(Math.random() * 46656).toString(36)}`;
   const key = `sites/${id}.html`;
   const stored = await env.MEDIA.put(key, html, {
     httpMetadata: { contentType: 'text/html; charset=utf-8' },
@@ -625,12 +705,14 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
 
   if (plan && store) await store.put(`agent:siteplan:${id}`, JSON.stringify(plan)).catch(() => {});
 
-  const finalUrl = origin ? `${origin}/sites/${id}` : `/sites/${id}`;
   await putArtifact(store, user?.uid || '', {
     id, kind, title: effTitle, url: finalUrl, builder, bytes: html.length, sha256: digest,
     version: 1, versions: [{ v: 1, at: new Date().toISOString(), bytes: html.length, sha256: digest }],
     at: new Date().toISOString(), by: user?.displayName || 'agent',
   });
+
+  // v12 SUBSCRIPTION: the build SHIPPED — consume one unit of quota.
+  try { await consumeBuild(store, user?.uid || ''); } catch { /* metering best-effort */ }
 
   if (finalizeRun) {
     await finalizeRun({
@@ -690,6 +772,13 @@ export async function refineSite(env, store, user, args, origin = '') {
 
   const rl = await rateLimit(store, user?.uid || '', 'refine_site');
   if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
+
+  // v12 SUBSCRIPTION: refines meter against the plan too (a refine runs
+  // real AI calls; surgical ones meter 1 like any other).
+  const quota = await checkQuota(store, user?.uid || '', 'refine', user?.role || '');
+  if (!quota.ok) {
+    return { ok: false, upgradeRequired: true, plan: quota.plan?.id, usage: quota.usage, error: quota.error };
+  }
 
   const plan = safeParse(await store.get(`agent:siteplan:${id}`));
   const profile = store ? await getBusinessProfile(store).catch(() => null) : null;
@@ -878,6 +967,13 @@ export async function refineSite(env, store, user, args, origin = '') {
   } catch { /* keep raw */ }
   if (html.length > MAX_SITE_BYTES) html = html.slice(0, MAX_SITE_BYTES) + '\n<!-- truncated -->';
 
+  // v12 SEO: refines keep the canonical/og:url pointing at the SAME
+  // public URL (the stored artifact's url wins over a fresh origin).
+  try {
+    const keepUrl = doc.url && /^https?:\/\//.test(doc.url) ? doc.url : (origin ? `${origin}/sites/${id}` : '');
+    html = injectCanonical(html, keepUrl);
+  } catch { /* SEO is a bonus */ }
+
   const digest = await sha256Hex(html);
 
   // Snapshot the previous render, then overwrite latest.
@@ -908,6 +1004,8 @@ export async function refineSite(env, store, user, args, origin = '') {
       at: doc.at, updated_at: new Date().toISOString(), by: doc.by || user?.displayName || 'agent',
       last_refine: instruction.slice(0, 140),
     });
+    // v12 SUBSCRIPTION: the refine shipped — consume one refinement unit.
+    try { await consumeRefine(store, user?.uid || ''); } catch { /* metering best-effort */ }
   }
 
   return {

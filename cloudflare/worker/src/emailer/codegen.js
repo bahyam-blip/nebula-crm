@@ -49,6 +49,7 @@ import { runAgent, understandingBlock } from './agents.js';
 import { hex, lum, mix, FONT_STACKS, DISPLAY_OF_FONT } from './site_templates.js';
 import { esc, safeHref } from './htmlutil.js';
 import { isAllowedImageSrc } from './imager.js';
+import { masteryBlock, cssGlobalPack, wiringPack, motionPack, policyNeeds, policyPack } from './mastery.js';
 
 const SECTION_AI_TOKENS = 1900;
 const PLAN_AI_TOKENS = 900;
@@ -185,7 +186,7 @@ export async function planSections(env, { kind, brief, brand, site = null, thoug
 
 /* ══ Stage 5 — CODE (per section) ════════════════════════════════════ */
 
-function sectionSystemPrompt({ id, kind, brand, hasImages }) {
+function sectionSystemPrompt({ id, kind, brand, hasImages, mastery = '' }) {
   return `You are a senior front-end engineer at an award-winning web studio. You are HAND-CODING one section of a bespoke ${kind} page for ${brand.name}. There is no template — every line is written for this business.
 
 Respond with ONLY this format (no markdown fences, no commentary):
@@ -211,11 +212,14 @@ HARD RULES
   · when your copy includes "marquee": render <div class="marquee"><div class="marquee-track"><span>word</span>…</div></div> with the words TWICE inside .marquee-track for a seamless loop (the page provides the animation),
   · when your copy includes "stats": render the value element as <span data-count="40">0</span> (keep the suffix like % or + OUTSIDE the span) — the page counts up on reveal.${hasImages ? '\n  · your IMAGES list is below — wire the photo into the composition with craft (mask, frame, overlay, parallax depth).' : ''}
 - Accessibility: text contrast >= 4.5:1, :focus-visible outline on links/buttons, buttons are <a class="btn btn-accent"> (page provides .btn styles) or real <button>.
-- Keep the whole answer under 100 lines. Every element earns its place; density and craft beat bloat.`;
+- Keep the whole answer under 100 lines. Every element earns its place; density and craft beat bloat.${mastery ? `\n\n${mastery}` : ''}`;
 }
 
 function sectionUserPrompt({ design, section, content, brand, kind, brief, images = null }) {
   const v = designVars(design);
+  const rampLine = design.ramp
+    ? ` RAMP: ${Object.entries(design.ramp).filter(([k]) => k !== 'onAccent').map(([k, hexv]) => `-${k}:${hexv}`).join(' ')}`
+    : '';
   const motionLine = design.motion_intensity === 'bold'
     ? 'MOTION INTENSITY: bold — confident choreographed entrances and visible ambient motion are wanted.'
     : design.motion_intensity === 'calm'
@@ -228,7 +232,8 @@ function sectionUserPrompt({ design, section, content, brand, kind, brief, image
   return [
     `BUSINESS: ${brand.name} — ${String(brief).slice(0, 200)}`,
     `VOICE: "${design.voice || 'clear, confident'}" · AUDIENCE: ${design.audience || 'general'} · KIND: ${kind}`,
-    `PAGE VARIABLES: --bg:${v.bg} --surface:${v.surface} --ink:${v.ink} --muted:${v.muted} --accent:${v.accent} (text on accent: ${v.onAccent}) --accent2:${v.accent2} --accent-soft (translucent accent tint) --border:${v.border} --r:${design.radius}px --font:${DISPLAY_OF_FONT[design.font] || "'Inter', sans-serif"} / body ${FONT_STACKS[design.font]?.css || FONT_STACKS.modern.css}`,
+    `PAGE VARIABLES: --bg:${v.bg} --surface:${v.surface} --ink:${v.ink} --muted:${v.muted} --accent:${v.accent} (text on accent: ${v.onAccent}) --accent2:${v.accent2} --accent-soft (translucent accent tint) --border:${v.border} --r:${design.radius}px --font:${DISPLAY_OF_FONT[design.font] || "'Inter', sans-serif"} / body ${FONT_STACKS[design.font]?.css || FONT_STACKS.modern.css}${rampLine}`,
+    design.fontPair ? `TYPE VOICE (page fonts already loaded): display ${design.fontPair.display} · body ${design.fontPair.body} — use var(--display)/var(--font), never @import.` : '',
     `TYPE SCALE: ${design.type_scale || 'classic'} — dramatic sizes must JUMP between levels; keep the rhythm intentional.`,
     motionLine,
     `SECTION: "${section.name}" — goal: ${section.goal || 'serve the visitor'}`,
@@ -320,7 +325,7 @@ async function codeSectionOnce(env, ctx, attempt, lastError) {
   const critique = String(ctx.critique || '').slice(0, 200);
   const allowed = ctx.allowedImages || null;
   const messages = [
-    { role: 'system', content: sectionSystemPrompt({ id: ctx.section.id, kind: ctx.kind, brand: ctx.brand, hasImages: Boolean(ctx.images?.some((im) => im.section === ctx.section.id)) }) },
+    { role: 'system', content: sectionSystemPrompt({ id: ctx.section.id, kind: ctx.kind, brand: ctx.brand, hasImages: Boolean(ctx.images?.some((im) => im.section === ctx.section.id)), mastery: ctx.mastery || '' }) },
     { role: 'user', content: attempt === 1 && !critique
       ? sectionUserPrompt(ctx)
       : [
@@ -449,7 +454,17 @@ export function globalCss(design) {
   const v = designVars(design);
   const body = FONT_STACKS[design.font]?.css || FONT_STACKS.modern.css;
   const display = DISPLAY_OF_FONT[design.font] || "'Inter', sans-serif";
-  const google = FONT_STACKS[design.font]?.google || FONT_STACKS.modern.google;
+  // v12 MASTERY: the build's locked Google Fonts pairing (display × body)
+  // overrides the generic stack — real typography from a 40+ pairing
+  // library, chosen per brief.
+  const pair = design.fontPair || null;
+  const google = pair?.google || FONT_STACKS[design.font]?.google || FONT_STACKS.modern.google;
+  const bodyCss = pair ? `"${pair.body}",${FONT_STACKS[design.font]?.css || FONT_STACKS.modern.css}` : body;
+  const displayCss = pair ? `"${pair.display}",${display}` : display;
+  const ramp = design.ramp || null;
+  const rampVars = ramp
+    ? Object.entries(ramp).map(([k, hexv]) => k === 'onAccent' ? '' : `--accent-${k}:${hexv}`).filter(Boolean).join(';') + ';'
+    : '';
   const r = design.radius || 16;
   // v10 design-system tokens: motion intensity scales the reveal system,
   // type scale sets the fluid steps, texture picks the page treatment.
@@ -470,7 +485,7 @@ export function globalCss(design) {
   return {
     google,
     css: `
-:root{--bg:${v.bg};--surface:${v.surface};--card:${v.card};--ink:${v.ink};--muted:${v.muted};--accent:${v.accent};--accent2:${v.accent2};--on-accent:${v.onAccent};--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent);--border:${v.border};--r:${r}px;--maxw:1120px;--font:${body};--display:${display};--sp1:6px;--sp2:12px;--sp3:20px;--sp4:32px;--sp5:52px;--sp6:84px;--dur-1:.25s;--dur-2:${revDur};--ease-out:cubic-bezier(.2,.7,.2,1);--shadow-rest:0 10px 30px -18px color-mix(in srgb,var(--accent) 55%,transparent);--shadow-lift:0 18px 44px -18px color-mix(in srgb,var(--accent) 70%,transparent);${steps}
+:root{--bg:${v.bg};--surface:${v.surface};--card:${v.card};--ink:${v.ink};--muted:${v.muted};--accent:${v.accent};--accent2:${v.accent2};--on-accent:${v.onAccent};--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent);--border:${v.border};--r:${r}px;--maxw:1120px;--font:${bodyCss};--display:${displayCss};--sp1:6px;--sp2:12px;--sp3:20px;--sp4:32px;--sp5:52px;--sp6:84px;--dur-1:.25s;--dur-2:${revDur};--ease-out:cubic-bezier(.2,.7,.2,1);--shadow-rest:0 10px 30px -18px color-mix(in srgb,var(--accent) 55%,transparent);--shadow-lift:0 18px 44px -18px color-mix(in srgb,var(--accent) 70%,transparent);${rampVars}${steps}
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
@@ -508,6 +523,37 @@ a{color:inherit;text-decoration:none}
 .ph:hover{transform:scale(1.02) translateY(-3px);filter:saturate(1.05) contrast(1.05);box-shadow:var(--shadow-lift)}
 .lift{transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)}
 .lift:hover{transform:translateY(-4px);box-shadow:var(--shadow-lift)}
+/* v12 WIRING component layer — tabs, accordions, dialogs, forms, snap rows */
+.tabs{display:flex;gap:var(--sp2);flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.tabs [data-tab]{appearance:none;background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer;transition:color .15s ease,border-color .15s ease}
+.tabs [data-tab][aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+details.acc{border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;background:var(--surface);overflow:hidden}
+details.acc summary{cursor:pointer;padding:15px 18px;font-weight:600;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px}
+details.acc summary::-webkit-details-marker{display:none}
+details.acc summary::after{content:"+";font-weight:700;color:var(--accent);transition:transform .2s var(--ease-out)}
+details.acc[open] summary::after{transform:rotate(45deg)}
+details.acc .acc-body{padding:0 18px 15px;color:var(--muted)}
+dialog{border:1px solid var(--border);border-radius:calc(var(--r) * 1.2);background:var(--surface);color:var(--ink);max-width:min(92vw,720px);padding:0}
+dialog::backdrop{background:color-mix(in srgb,var(--bg) 62%,transparent);backdrop-filter:blur(6px)}
+dialog .dlg-close{position:absolute;top:10px;right:10px;appearance:none;background:var(--surface-high,transparent);border:1px solid var(--border);color:var(--ink);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:16px}
+.snap-row{display:flex;gap:var(--sp3);overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding:var(--sp3);padding-bottom:8px;scrollbar-width:none}
+.snap-row::-webkit-scrollbar{display:none}
+.snap-row>*{scroll-snap-align:start;flex:0 0 min(84vw,340px)}
+form[data-validate] .field-err{color:#e5484d;font-size:12.5px;margin:5px 0 0}
+form[data-validate] input,form[data-validate] textarea,form[data-validate] select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:calc(var(--r) * .55);padding:12px 14px;color:var(--ink);font:inherit;transition:border-color .15s ease}
+form[data-validate] input:focus,form[data-validate] textarea:focus{outline:none;border-color:var(--accent)}
+form[data-validate] .ok-msg{color:var(--accent);font-weight:600}
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600}
+.switch input{appearance:none;width:44px;height:24px;border-radius:999px;background:var(--border);position:relative;transition:background .2s ease;cursor:pointer}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--ink);transition:transform .2s var(--ease-out)}
+.switch input:checked{background:var(--accent)}
+.switch input:checked::after{transform:translateX(20px)}
+/* cookie / policy band (assembler attaches when the brief demands it) */
+.policy-band{position:fixed;inset-inline:0;bottom:0;z-index:950;display:none;gap:var(--sp3);align-items:center;justify-content:space-between;padding:12px var(--sp4);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);border-top:1px solid var(--border);font-size:13px;color:var(--muted)}
+.policy-band.show{display:flex;flex-wrap:wrap}
+.policy-band .btn{padding:9px 16px;font-size:13px}
+.foot-legal{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:10px}
+.foot-legal a{text-decoration:underline;text-underline-offset:3px}
 /* nav + footer chrome */
 .site-nav{position:sticky;top:0;z-index:900;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 78%,transparent);border-bottom:1px solid var(--border);transition:box-shadow .3s ease}
 .site-nav .wrap{display:flex;align-items:center;gap:var(--sp3);height:62px;transition:height .3s var(--ease-out)}
@@ -545,7 +591,7 @@ function navHtml(brand, plan, content) {
   return `<nav class="site-nav"><div class="wrap"><a class="brand-mark" href="#sec-hero">${esc(brand.name)}</a><div class="nav-links">${links}</div>${cta}</div></nav>`;
 }
 
-function footerHtml(brand, content) {
+function footerHtml(brand, content, policy = null) {
   const c = content.contact || {};
   const lines = [
     c.phone ? `Phone ${esc(c.phone)}` : '',
@@ -553,10 +599,127 @@ function footerHtml(brand, content) {
     c.address ? esc(c.address) : '',
     c.hours ? esc(c.hours) : '',
   ].filter(Boolean);
+  // v12 IDENTITY: the page is 100% the client's — no tool credit ever.
+  // v12 POLICY: legal row renders when the brief implies data/commerce.
+  const legal = policy?.legalLinks
+    ? `<div class="foot-legal"><a href="#sec-hero" data-legal="privacy">Privacy</a><a href="#sec-hero" data-legal="terms">Terms</a>${policy.disclaimer ? '<span data-legal-note></span>' : ''}</div>`
+    : '';
+  const note = policy?.disclaimer
+    ? `${policy.health ? 'Informational only — consult a professional. ' : ''}${policy.finance ? 'Investments carry risk. ' : ''}`
+    : '';
   return `<footer class="site-footer"><div class="wrap">
-<div><div class="foot-brand">${esc(brand.name)}</div><div class="foot-meta">${lines.join('<br>') || esc(content.footer_note || '')}</div></div>
-<div class="foot-note">© ${new Date().getFullYear()} ${esc(brand.name)} · crafted by the Nebula agent</div>
+<div><div class="foot-brand">${esc(brand.name)}</div><div class="foot-meta">${lines.join('<br>') || esc(content.footer_note || '')}</div>${legal}</div>
+<div class="foot-note">© ${new Date().getFullYear()} ${esc(brand.name)}${note ? ` · ${note.trim()}` : ''}</div>
 </div></footer>`;
+}
+
+/**
+ * v12 WIRING LAYER — the global behavior layer. Sections declare
+ * STRUCTURE (data-tab, details.acc, data-dialog, form[data-validate],
+ * data-price-toggle, data-copy); this script attaches the behavior.
+ * Passive listeners, IIFE-guarded, zero dependencies.
+ */
+export function wiringJs() {
+  return `(function(){
+function qsa(s,c){return [].slice.call((c||document).querySelectorAll(s))}
+/* tabs */
+qsa('.tabs').forEach(function(tabs){
+  var btns=qsa('[data-tab]',tabs),scope=tabs.closest('[id]')||document;
+  function act(id){btns.forEach(function(b){var on=b.getAttribute('data-tab')===id;b.setAttribute('aria-selected',on?'true':'false');var p=document.querySelector('[data-panel="'+id+'"]');if(p)p.hidden=!on})}
+  btns.forEach(function(b){b.addEventListener('click',function(){act(b.getAttribute('data-tab'))})});
+  if(btns.length)act(btns[0].getAttribute('data-tab'));
+});
+/* single-open accordions */
+qsa('[data-single]').forEach(function(w){qsa('details.acc',w).forEach(function(d){d.addEventListener('toggle',function(){if(d.open)qsa('details.acc',w).forEach(function(o){if(o!==d)o.open=false})})})});
+/* dialogs */
+qsa('[data-dialog]').forEach(function(btn){var dlg=document.getElementById(btn.getAttribute('data-dialog'));if(!dlg)return;btn.addEventListener('click',function(){try{dlg.showModal()}catch(e){}})});
+qsa('dialog').forEach(function(d){d.addEventListener('click',function(e){if(e.target===d)d.close()});var x=d.querySelector('.dlg-close');if(x)x.addEventListener('click',function(){d.close()})});
+/* lightbox for .ph images */
+var lb=document.createElement('dialog');lb.style.padding='0';lb.innerHTML='<img alt="" style="display:block;max-width:92vw;max-height:88vh">';document.body.appendChild(lb);
+qsa('img.ph').forEach(function(img){img.addEventListener('click',function(){lb.querySelector('img').src=img.src;try{lb.showModal()}catch(e){}})});
+lb.addEventListener('click',function(){lb.close()});
+/* copy buttons */
+qsa('[data-copy]').forEach(function(btn){btn.addEventListener('click',function(){var v=btn.getAttribute('data-copy')||'';var el=v&&v.charAt(0)==='#'?document.querySelector(v):null;var text=el?(el.textContent||'').trim():v;try{navigator.clipboard.writeText(text);var old=btn.textContent;btn.textContent='Copied';setTimeout(function(){btn.textContent=old},1400)}catch(e){}})});
+/* pricing toggle */
+qsa('[data-price-toggle]').forEach(function(t){t.addEventListener('change',function(){var yr=t.checked;document.querySelectorAll('[data-monthly]').forEach(function(el){el.textContent=yr?(el.getAttribute('data-yearly')||''):(el.getAttribute('data-monthly')||'')})})});
+/* form validation + success (offline; logs nothing, sends nothing) */
+qsa('form[data-validate]').forEach(function(f){
+  f.setAttribute('novalidate','');
+  f.addEventListener('submit',function(e){
+    e.preventDefault();var bad=null;
+    qsa('input,textarea,select',f).forEach(function(el){
+      var err=el.parentElement.querySelector('.field-err');if(err)err.remove();
+      var msg='';
+      if(el.hasAttribute('required')&&!el.value.trim())msg='Please fill this in.';
+      else if(el.type==='email'&&el.value&&!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(el.value))msg='That email does not look right.';
+      else if(el.type==='tel'&&el.value&&!/^[+0-9()\\-\\s]{7,}$/.test(el.value))msg='That phone number does not look right.';
+      if(msg){bad=bad||el;var p=document.createElement('p');p.className='field-err';p.setAttribute('role','alert');p.textContent=msg;el.parentElement.appendChild(p)}
+    });
+    if(bad){bad.focus();return}
+    var okMsg=f.getAttribute('data-success')||'Thank you — we will be in touch soon.';
+    f.innerHTML='<p class="ok-msg">'+okMsg+'</p>';
+  });
+});
+})();`;
+}
+
+/**
+ * v12 LEGAL — the inline privacy/terms pages the footer links point to.
+ * Deterministic, brand-factual, dialog-rendered (no extra pages).
+ */
+export function legalJs(brand, policy) {
+  const y = new Date().getFullYear();
+  const privacy = `${brand.name} respects your privacy. Details you share through this page (such as your name, contact details or booking preferences) are used only to respond to your request and to provide the services you asked for. ${brand.name} does not sell your personal information, does not send unrelated marketing without your consent, and removes your details on request. Questions about your data: reach us through the contact details on this page. Last updated ${y}.`;
+  const terms = `By using this page you agree to use the information and services of ${brand.name} responsibly. Prices, availability and offer terms shown are honest at the time of publishing and may change; confirmed orders or bookings are governed by the confirmation you receive from ${brand.name}. Content, photographs and branding on this page belong to ${brand.name}. Questions: use the contact details on this page. Last updated ${y}.`;
+  return `(function(){
+var P=${JSON.stringify(privacy)};var T=${JSON.stringify(terms)};
+function show(title,body){
+  var d=document.createElement('dialog');d.style.padding='0';
+  var w=document.createElement('div');w.style.cssText='padding:26px;max-width:640px;max-height:80vh;overflow:auto';
+  var h=document.createElement('h2');h.textContent=title;h.style.marginBottom='10px';
+  var p=document.createElement('p');p.textContent=body;p.style.whiteSpace='pre-line';
+  var b=document.createElement('button');b.textContent='Close';b.className='btn btn-accent';b.style.marginTop='16px';
+  b.addEventListener('click',function(){d.close()});d.addEventListener('click',function(e){if(e.target===d)d.close()});
+  w.appendChild(h);w.appendChild(p);w.appendChild(b);d.appendChild(w);document.body.appendChild(d);
+  try{d.showModal()}catch(e){}d.addEventListener('close',function(){d.remove()});
+}
+qsa2('[data-legal="privacy"]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();show('Privacy Policy',P)})});
+qsa2('[data-legal="terms"]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();show('Terms of Service',T)})});
+function qsa2(s){return [].slice.call(document.querySelectorAll(s))}
+})();`;
+}
+
+/**
+ * v12 SEO — JSON-LD structured data from the page's own facts.
+ * Deterministic; only true statements (name, description, contact).
+ */
+export function jsonLd({ brand, content, kind, policy }) {
+  const c = content.contact || {};
+  const base = {
+    '@context': 'https://schema.org',
+    '@type': kind === 'event' ? 'Event' : (policy?.commerce ? 'Store' : 'LocalBusiness'),
+    name: brand.name,
+    description: String(content.sub || content.headline || '').slice(0, 220),
+  };
+  if (c.phone) base.telephone = c.phone;
+  if (c.address) base.address = { '@type': 'PostalAddress', streetAddress: c.address };
+  if (c.email) base.email = c.email;
+  const ev = content.event;
+  if (kind === 'event' && ev) {
+    if (ev.date_label) base.startDate = ev.ends || ev.date_label;
+    if (ev.venue) base.location = { '@type': 'Place', name: ev.venue };
+  }
+  if (content.primary_cta?.href && /^https?:\/\//.test(content.primary_cta.href)) base.url = content.primary_cta.href;
+  return JSON.stringify(base).replace(/</g, '\\u003c');
+}
+
+/** Canonical + OG URL injection post-assembly (builder knows the URL). */
+export function injectCanonical(html, url) {
+  if (!url || !/https?:\/\//.test(String(url))) return html;
+  const tag = `<link rel="canonical" href="${esc(String(url))}">`;
+  const og = `<meta property="og:url" content="${esc(String(url))}">`;
+  if (html.includes('rel="canonical"')) return html;
+  return html.replace('</title>', `</title>\n${tag}\n${og}`);
 }
 
 export function revealJs() {
@@ -589,12 +752,20 @@ function faviconSvg(brand, design) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-/** Assemble the final document from coded sections. */
-export function assembleSite({ design, brand, content, coded, plan, kind }) {
+/**
+ * Assemble the final document from coded sections.
+ * v12: full SEO head (OG/Twitter/robots), JSON-LD structured data,
+ * the wiring behavior layer, inline legal (privacy/terms) and the
+ * policy layer — assembled from the brief's policyNeeds.
+ */
+export function assembleSite({ design, brand, content, coded, plan, kind, brief = '' }) {
   const g = globalCss(design);
   const sectionsHtml = coded.map((s) => s.html).join('\n');
   const sectionsCss = coded.map((s) => `/* ── sec-${s.id} ── */\n${s.css}`).join('\n');
   const description = String(content.sub || content.headline || `${brand.name} — ${kind}`).slice(0, 160);
+  const policy = policyNeeds(brief || String(content.headline || ''), kind);
+  const ld = jsonLd({ brand, content, kind, policy });
+  const legal = policy.legalLinks ? `<script>${legalJs(brand, policy)}</script>` : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -603,6 +774,15 @@ export function assembleSite({ design, brand, content, coded, plan, kind }) {
 <title>${esc(content.title || brand.name)}</title>
 <meta name="description" content="${esc(description)}">
 <meta name="theme-color" content="${designVars(design).bg}">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${esc(brand.name)}">
+<meta property="og:title" content="${esc(content.title || brand.name)}">
+<meta property="og:description" content="${esc(description)}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(content.title || brand.name)}">
+<meta name="twitter:description" content="${esc(description)}">
+<script type="application/ld+json">${ld}</script>
 <link rel="icon" href="${faviconSvg(brand, design)}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -616,8 +796,10 @@ ${navHtml(brand, plan, content)}
 <main>
 ${sectionsHtml}
 </main>
-${footerHtml(brand, content)}
+${footerHtml(brand, content, policy)}
 <script>${revealJs()}</script>
+<script>${wiringJs()}</script>
+${legal}
 </body>
 </html>`;
 }
@@ -671,13 +853,23 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
   const verifiedImages = new Set(photography.images.map((im) => im.url));
   const imagesBySection = photography.images;
 
+  // v12 MASTERY — the engineers read from the same textbook: global CSS
+  // law, the wiring contract, the build's motion grammar and the brief's
+  // policy duties — packed into one bounded block for every section call.
+  const sectionMastery = masteryBlock([
+    cssGlobalPack(),
+    wiringPack(),
+    motionPack(thought.design?.motion_intensity),
+    policyPack(policyNeeds(brief, kind)),
+  ], { maxChars: 2600 });
+
   // 2. CODE — hand-write every section, IN PARALLEL (sections are
   //    independent: each gets the full design contract + its own copy).
   //    The hero MUST be AI-coded (it is the page's identity); any other
   //    section that fails twice degrades to a clean engine block rather
   //    than discarding the bespoke page. One simpler-redo per failed
   //    section; wall time ≈ one section, not the sum of all sections.
-  const ctxBase = { kind, brief, brand: identity, thought, content, design: thought.design, team, images: imagesBySection, allowedImages: verifiedImages };
+  const ctxBase = { kind, brief, brand: identity, thought, content, design: thought.design, team, images: imagesBySection, allowedImages: verifiedImages, mastery: sectionMastery };
   const results = await Promise.all(
     plan.sections.map(async (section) => {
       const ctx = { ...ctxBase, section };
@@ -762,7 +954,7 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
   }
 
   // 4. WIRE — deterministic assembly (cannot produce a malformed page).
-  const html = assembleSite({ design: thought.design, brand: identity, content, coded, plan, kind });
+  const html = assembleSite({ design: thought.design, brand: identity, content, coded, plan, kind, brief });
   trace('wire', true, false, `${coded.length} sections wired · fonts + motion + identity`);
   if (team) team.record('builder', 'wiring & hosting the page', { ok: true, ai: false, detail: `${coded.length} sections assembled with fonts + motion` });
 

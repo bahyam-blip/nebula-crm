@@ -9,16 +9,17 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/nebula_ui.dart';
 import '../../models/studio_models.dart';
 import '../../providers/studio_provider.dart';
+import '../widgets/plans_sheet.dart';
 import '../widgets/publish_sheet.dart';
 import 'site_preview_screen.dart';
 
-/// Nebula STUDIO — 3.0 "MISSION CONTROL".
+/// Nebula STUDIO — 4.0 "COMMAND".
 ///
-/// Rebuilt from scratch on the mono design law: true-black canvas,
-/// hairline chrome, white-is-the-accent, zero emoji in chrome. The
-/// composer is one tight surface; the build view is a live mission-
-/// control feed of the REAL agent team (monogram tiles, mono durations,
-/// timeline rail); the sites list is a dense, scannable ledger.
+/// Rebuilt from scratch (the owner rejected every previous layout): one
+/// command bar carrying the plan's quota chip, then a three-tab workspace
+/// — CREATE (the canvas), SITES (the ledger) and TEAM (the agents, live).
+/// The mono design law holds: true-black canvas, hairline chrome,
+/// white-is-the-accent, zero emoji in chrome.
 class StudioScreen extends ConsumerStatefulWidget {
   const StudioScreen({super.key});
 
@@ -30,34 +31,58 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   final _briefCtrl = TextEditingController();
   final _titleCtrl = TextEditingController();
   final _ctaCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
   final _briefFocus = FocusNode();
 
   String _kind = 'landing';
   String? _style;
   bool _options = false;
+  String _tab = 'create'; // create | sites | team
+  String _filter = 'all';
+  String _query = '';
 
-  static const _kinds = <(String, IconData, String)>[
-    ('landing', Icons.rocket_launch_outlined, 'Landing'),
-    ('promo', Icons.local_offer_outlined, 'Offer'),
-    ('event', Icons.event_outlined, 'Event'),
-    ('portfolio', Icons.palette_outlined, 'Portfolio'),
-    ('webapp', Icons.bolt_outlined, 'Web app'),
-    ('report', Icons.insert_chart_outlined, 'Report'),
+  static const _kinds = <(String, IconData, String, String)>[
+    ('landing', Icons.rocket_launch_outlined, 'Landing', 'Turns visitors into customers'),
+    ('promo', Icons.local_offer_outlined, 'Offer', 'A deal page with urgency'),
+    ('event', Icons.event_outlined, 'Event', 'Agenda, speakers, sign-ups'),
+    ('portfolio', Icons.palette_outlined, 'Portfolio', 'Your work, told as a story'),
+    ('webapp', Icons.bolt_outlined, 'Web app', 'A small offline tool'),
+    ('report', Icons.insert_chart_outlined, 'Report', 'Findings, numbers, sources'),
   ];
 
-  static const _styleHints = <String, String>{
-    'Onyx': 'Deep black minimal — white type, hairlines, one restrained accent, editorial spacing.',
-    'Aurora': 'Dark premium aurora look — glassy, glowing, high-end.',
-    'Editorial': 'Clean editorial magazine look with serif headlines.',
-    'Minimal': 'Clean, minimal, lots of whitespace.',
-    'Festive': 'Make it look festive and energetic with a bold offer layout.',
-  };
+  /// Each style swatch carries its actual palette so the picker TEACHES
+  /// the look before the build — three dots, real colors.
+  static const _styles = <(String, List<Color>, String)>[
+    ('Onyx', [Color(0xFF050505), Color(0xFF161616), Color(0xFFF2F2F2)], 'Deep black minimal'),
+    ('Aurora', [Color(0xFF07080F), Color(0xFF1C2436), Color(0xFF7DD3FC)], 'Dark glass, glowing'),
+    ('Editorial', [Color(0xFFFAF7F2), Color(0xFF14100C), Color(0xFFB4530A)], 'Magazine serif'),
+    ('Minimal', [Color(0xFFFFFFFF), Color(0xFFF0F0F0), Color(0xFF111111)], 'Whitespace first'),
+    ('Festive', [Color(0xFF2A0A12), Color(0xFFE11D48), Color(0xFFF59E0B)], 'Vivid celebration'),
+  ];
 
   static const _examples = [
     'A website for my coffee shop "Musafir" — menu, story, and a WhatsApp order button',
     'Diwali mega-sale offer page for my bakery — 40% off with a countdown',
     'Portfolio for a freelance photographer with an enquiry button',
     'A small tip-tracker web app my field team can use offline',
+  ];
+
+  /// The roster the Team tab renders — mirrors the REAL server-side team
+  /// (emailer/agents.js) name for name.
+  static const _roster = <(String, String)>[
+    ('Lead', 'Plans the run, deep-thinks it, revises it'),
+    ('Analyst', 'Builds the project understanding'),
+    ('Researcher', 'Studies your market on the live web'),
+    ('Art Director', 'Design system, palette, UX flow'),
+    ('Copywriter', 'Writes every word on the page'),
+    ('Copy Chief', 'Reviews and tightens every line'),
+    ('Architect', 'Journey-maps the sections'),
+    ('Photographer', 'Sources and verifies real imagery'),
+    ('Engineer', 'Hand-codes each section'),
+    ('QA Director', 'Reviews code, forces rework'),
+    ('Builder', 'Wires, hosts, enforces identity'),
+    ('Reflector', 'Turns the build into a lesson'),
+    ('Skill Researcher', 'Researches the craft, grows skills'),
   ];
 
   @override
@@ -71,6 +96,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     _briefCtrl.dispose();
     _titleCtrl.dispose();
     _ctaCtrl.dispose();
+    _searchCtrl.dispose();
     _briefFocus.dispose();
     super.dispose();
   }
@@ -133,6 +159,16 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     );
   }
 
+  void _openPlans() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surfaceHigh,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (_) => const PlansSheet(),
+    );
+  }
+
   Future<void> _build() async {
     final brief = _briefCtrl.text.trim();
     if (brief.length < 12) {
@@ -143,11 +179,12 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     }
     final title = _titleCtrl.text.trim().isEmpty ? brief.split(RegExp(r'[.!?\n]')).first.trim() : _titleCtrl.text.trim();
     FocusScope.of(context).unfocus();
+    setState(() => _tab = 'team'); // the build IS the team's show
     await ref.read(studioProvider.notifier).buildSite(
           title: title,
           brief: brief,
           kind: _kind,
-          style: _style != null ? _styleHints[_style] : null,
+          style: _style,
           ctaText: _ctaCtrl.text.trim().isNotEmpty ? _ctaCtrl.text.trim() : null,
           onDone: _openPreview,
         );
@@ -156,58 +193,49 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(studioProvider);
-    final sites = state.sites.where((s) => !s.isNote).toList();
+    final building = state.building;
+    final effectiveTab = building ? 'team' : _tab;
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        backgroundColor: AppColors.surfaceHigh,
-        onRefresh: () => ref.read(studioProvider.notifier).refresh(),
-        child: ListView(
-          padding: EdgeInsets.fromLTRB(0, MediaQuery.paddingOf(context).top + 2, 0, 44),
-          children: [
-            _header(),
-            Container(height: 1, color: AppColors.border),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: Column(
+        children: [
+          _commandBar(state),
+          _segmented(effectiveTab, building),
+          Expanded(
+            child: RefreshIndicator(
+              color: AppColors.primary,
+              backgroundColor: AppColors.surfaceHigh,
+              onRefresh: () => ref.read(studioProvider.notifier).refresh(),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 44),
                 children: [
-                  const SizedBox(height: 16),
                   if (state.error != null) ...[
                     _errorBanner(state.error!),
                     const SizedBox(height: 14),
                   ],
-                  if (state.building)
-                    MissionControl(state: state)
-                  else ...[
-                    _composer(),
-                    const SizedBox(height: 26),
-                    if (sites.isNotEmpty) ...[
-                      _sitesHeader(sites.length, state.loading),
-                      const SizedBox(height: 10),
-                      ...sites.asMap().entries.map((e) => StaggerIn(
-                            index: e.key,
-                            child: _siteCard(e.value),
-                          )),
-                    ] else
-                      ..._emptyState(),
-                  ],
+                  if (effectiveTab == 'create') ..._createTab(state),
+                  if (effectiveTab == 'sites') ..._sitesTab(state, state.sites.where((s) => !s.isNote).toList()),
+                  if (effectiveTab == 'team') ..._teamTab(state),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  // ── Header ──────────────────────────────────────────────────────────
+  // ── Command bar ─────────────────────────────────────────────────────
 
-  Widget _header() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 8, 12, 10),
+  Widget _commandBar(StudioState state) {
+    final b = state.billing;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      padding: EdgeInsets.fromLTRB(18, MediaQuery.paddingOf(context).top + 6, 12, 10),
       child: Row(
         children: [
           Expanded(
@@ -215,14 +243,14 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const OverlineLabel('NEBULA STUDIO', color: AppColors.textTertiary),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
-                  'Describe it. Watch it ship.',
+                  state.building ? 'The team is building…' : 'Describe it. Watch it ship.',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: 'Sora',
-                    fontSize: 21,
+                    fontSize: 19,
                     fontWeight: FontWeight.w700,
                     letterSpacing: -0.5,
                     color: AppColors.textPrimary,
@@ -231,393 +259,543 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
               ],
             ),
           ),
-          _iconAction(icon: Icons.dns_outlined, label: 'Hosting', onTap: _openPlatforms),
+          _quotaChip(b),
+          const SizedBox(width: 8),
+          _iconAction(icon: Icons.dns_outlined, onTap: _openPlatforms),
         ],
       ),
     ).animate().fadeIn(duration: 240.ms);
   }
 
-  Widget _iconAction({required IconData icon, required String label, required VoidCallback onTap}) {
+  Widget _quotaChip(BillingSnapshot? b) {
+    final expired = b?.expired ?? false;
+    final label = b == null
+        ? null
+        : expired
+            ? 'Plan ended'
+            : '${b.buildsLeft} left · ${b.planName}';
     return PressableScale(
-      onTap: onTap,
+      onTap: _openPlans,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(color: expired ? AppColors.danger.withValues(alpha: 0.5) : AppColors.border),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: AppColors.textSecondary),
-            const SizedBox(width: 6),
-            Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            if (b != null) ...[
+              SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(
+                  value: b.buildPct == 0 ? 0 : (1 - b.buildPct),
+                  strokeWidth: 2.2,
+                  strokeCap: StrokeCap.round,
+                  color: expired || b.low ? AppColors.danger : AppColors.primary,
+                  backgroundColor: AppColors.border,
+                ),
+              ),
+              const SizedBox(width: 7),
+            ] else ...[
+              const SizedBox(
+                width: 11, height: 11,
+                child: CircularProgressIndicator(strokeWidth: 1.6, color: AppColors.textTertiary),
+              ),
+              const SizedBox(width: 7),
+            ],
+            Text(
+              label ?? 'Plan…',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ── Composer — one tight surface ────────────────────────────────────
-
-  Widget _composer() {
-    final focused = _briefFocus.hasFocus;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: focused ? AppColors.textPrimary.withValues(alpha: 0.5) : AppColors.border),
+  Widget _iconAction({required IconData icon, required VoidCallback onTap}) {
+    return PressableScale(
+      onTap: onTap,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Icon(icon, size: 17, color: AppColors.textSecondary),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+
+  // ── Segmented control ───────────────────────────────────────────────
+
+  Widget _segmented(String active, bool building) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            _segment('Create', Icons.edit_square, active == 'create', !building, () => setState(() => _tab = 'create')),
+            const SizedBox(width: 3),
+            _segment('Sites', Icons.layers_outlined, active == 'sites', !building, () => setState(() => _tab = 'sites')),
+            const SizedBox(width: 3),
+            _segment('Team', Icons.groups_2_outlined, active == 'team', true, () => setState(() => _tab = 'team')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _segment(String label, IconData icon, bool active, bool enabled, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            color: active ? AppColors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(9.5),
+          ),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: active ? AppColors.background : AppColors.textTertiary),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                  color: active ? AppColors.background : AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── CREATE tab — the canvas ─────────────────────────────────────────
+
+  List<Widget> _createTab(StudioState state) {
+    final focused = _briefFocus.hasFocus;
+    return [
+      const SizedBox(height: 6),
+      // Kind grid — 3 × 2 tiles, each teaching what it builds.
+      GridView.count(
+        crossAxisCount: 3,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 1.06,
+        padding: EdgeInsets.zero,
         children: [
-          TextField(
-            controller: _briefCtrl,
-            focusNode: _briefFocus,
-            maxLines: 4,
-            minLines: 3,
-            maxLength: 1200,
-            textInputAction: TextInputAction.newline,
-            style: const TextStyle(fontSize: 14.5, height: 1.5, color: AppColors.textPrimary),
-            cursorColor: AppColors.primary,
-            decoration: InputDecoration(
-              hintText: 'What are we building? e.g. "${_examples.first}"',
-              hintStyle: TextStyle(color: AppColors.textTertiary.withValues(alpha: 0.8), fontSize: 13, height: 1.5),
-              hintMaxLines: 2,
-              border: InputBorder.none,
-              counterText: '',
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _kinds.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 7),
-              itemBuilder: (_, i) {
-                final k = _kinds[i];
-                return NebulaChip(
-                  label: k.$3,
-                  icon: k.$2,
-                  selected: _kind == k.$1,
-                  onSelected: () => setState(() => _kind = k.$1),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _styleHints.keys.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 7),
-              itemBuilder: (_, i) {
-                final s = _styleHints.keys.elementAt(i);
-                return NebulaChip(
-                  label: s,
-                  selected: _style == s,
-                  onSelected: () => setState(() => _style = _style == s ? null : s),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 10),
-          // Options — a flat disclosure, no box-in-box.
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => setState(() => _options = !_options),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  AnimatedRotation(
-                    turns: _options ? 0.25 : 0,
-                    duration: const Duration(milliseconds: 180),
-                    child: const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.textTertiary),
-                  ),
-                  const SizedBox(width: 4),
-                  const Text('Title & button', style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5, fontWeight: FontWeight.w600)),
-                ],
+          for (final k in _kinds) _kindTile(k),
+        ],
+      ),
+      const SizedBox(height: 14),
+      // The brief — the hero element of the whole tab.
+      Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: focused ? AppColors.textPrimary.withValues(alpha: 0.5) : AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _briefCtrl,
+              focusNode: _briefFocus,
+              maxLines: 5,
+              minLines: 4,
+              maxLength: 1200,
+              textInputAction: TextInputAction.newline,
+              style: const TextStyle(fontSize: 14.5, height: 1.55, color: AppColors.textPrimary),
+              cursorColor: AppColors.primary,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'What are we building? Say the name, what it is, who it is for, and the one action that matters…',
+                hintStyle: TextStyle(color: AppColors.textTertiary.withValues(alpha: 0.85), fontSize: 13, height: 1.5),
+                hintMaxLines: 3,
+                border: InputBorder.none,
+                counterText: '',
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
             ),
-          ),
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 200),
-            sizeCurve: Curves.easeOutCubic,
-            crossFadeState: _options ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            firstChild: const SizedBox(width: double.infinity),
-            secondChild: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _titleCtrl,
-                    style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary),
-                    decoration: _smallField('Page title (optional)'),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: LinearProgressIndicator(
+                      value: (_briefCtrl.text.length / 1200).clamp(0.0, 1.0),
+                      minHeight: 2.5,
+                      backgroundColor: AppColors.border,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _ctaCtrl,
-                    style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary),
-                    decoration: _smallField('Button text, e.g. "Order on WhatsApp"'),
-                  ),
-                ],
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '${_briefCtrl.text.length}',
+                  style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10, color: AppColors.textTertiary),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _styles.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 7),
+                itemBuilder: (_, i) {
+                  final s = _styles[i];
+                  final selected = _style == s.$1;
+                  return PressableScale(
+                    onTap: () => setState(() => _style = _style == s.$1 ? null : s.$1),
+                    pressedScale: 0.96,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: selected ? AppColors.textPrimary.withValues(alpha: 0.1) : AppColors.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: selected ? AppColors.textPrimary.withValues(alpha: 0.6) : AppColors.border),
+                      ),
+                      child: Row(
+                        children: [
+                          ...s.$2.map((c) => Container(
+                                width: 10,
+                                height: 10,
+                                margin: const EdgeInsets.only(right: 3),
+                                decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: AppColors.border, width: 0.8)),
+                              )),
+                          const SizedBox(width: 5),
+                          Text(
+                            s.$1,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
+      // Advanced — flat disclosure.
+      InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => setState(() => _options = !_options),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Row(
+            children: [
+              AnimatedRotation(
+                turns: _options ? 0.25 : 0,
+                duration: const Duration(milliseconds: 180),
+                child: const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.textTertiary),
+              ),
+              const SizedBox(width: 4),
+              const Text('Page title & button', style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5, fontWeight: FontWeight.w600)),
+            ],
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton(
-              onPressed: _build,
+        ),
+      ),
+      AnimatedCrossFade(
+        duration: const Duration(milliseconds: 200),
+        sizeCurve: Curves.easeOutCubic,
+        crossFadeState: _options ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+        firstChild: const SizedBox(width: double.infinity),
+        secondChild: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Column(
+            children: [
+              TextField(
+                controller: _titleCtrl,
+                style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary),
+                decoration: _smallField('Page title (optional — the brief names it)'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _ctaCtrl,
+                style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary),
+                decoration: _smallField('Button text, e.g. "Order on WhatsApp"'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 14),
+      SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: FilledButton(
+          onPressed: state.building ? null : _build,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: AppColors.background,
+            disabledBackgroundColor: AppColors.primaryPressed,
+            disabledForegroundColor: AppColors.background,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          child: const Text(
+            'Build it live',
+            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, letterSpacing: -0.2, fontFamily: 'Sora'),
+          ),
+        ),
+      ).animate(onPlay: (c) => c.repeat(reverse: true)).shimmer(
+            duration: 2600.ms,
+            color: AppColors.textPrimary.withValues(alpha: 0.08),
+          ),
+      const SizedBox(height: 10),
+      const Text(
+        'Thirteen specialists research, design, code and host it — you get a real public link. Your site carries your brand, never ours.',
+        style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
+      ),
+      const SizedBox(height: 16),
+      const OverlineLabel('OR START FROM', color: AppColors.textTertiary),
+      const SizedBox(height: 8),
+      ..._examples.map(_exampleCard),
+    ];
+  }
+
+  Widget _kindTile((String, IconData, String, String) k) {
+    final selected = _kind == k.$1;
+    return PressableScale(
+      onTap: () => setState(() => _kind = k.$1),
+      pressedScale: 0.97,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.textPrimary.withValues(alpha: 0.09) : AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: selected ? AppColors.textPrimary.withValues(alpha: 0.65) : AppColors.border),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(k.$2, size: 19, color: selected ? AppColors.textPrimary : AppColors.textSecondary),
+            const SizedBox(height: 6),
+            Text(
+              k.$3,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              k.$4,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 8.8, height: 1.25, color: AppColors.textTertiary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _exampleCard(String e) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: PressableScale(
+        onTap: () {
+          _briefCtrl.text = e;
+          setState(() {});
+        },
+        pressedScale: 0.985,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.auto_awesome_outlined, size: 13, color: AppColors.textTertiary),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  e,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+              ),
+              const Icon(Icons.arrow_upward_rounded, size: 13, color: AppColors.textTertiary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── SITES tab — the ledger ──────────────────────────────────────────
+
+  List<Widget> _sitesTab(StudioState state, List<StudioSite> sites) {
+    final filtered = sites.where((s) {
+      if (_filter != 'all' && s.kind != _filter) return false;
+      if (_query.isNotEmpty && !s.title.toLowerCase().contains(_query.toLowerCase())) return false;
+      return true;
+    }).toList();
+
+    return [
+      const SizedBox(height: 6),
+      TextField(
+        controller: _searchCtrl,
+        onChanged: (v) => setState(() => _query = v),
+        style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          hintText: 'Search your sites…',
+          hintStyle: const TextStyle(color: AppColors.textTertiary, fontSize: 13),
+          prefixIcon: const Icon(Icons.search_rounded, size: 19, color: AppColors.textTertiary),
+          filled: true,
+          fillColor: AppColors.surface,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: AppColors.border.withValues(alpha: 0.8)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: AppColors.border.withValues(alpha: 0.8)),
+          ),
+          focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: AppColors.textPrimary),
+          ),
+        ),
+      ),
+      const SizedBox(height: 10),
+      SizedBox(
+        height: 32,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _kinds.length + 1,
+          separatorBuilder: (_, __) => const SizedBox(width: 7),
+          itemBuilder: (_, i) {
+            final id = i == 0 ? 'all' : _kinds[i - 1].$1;
+            final label = i == 0 ? 'All' : _kinds[i - 1].$3;
+            final selected = _filter == id;
+            final count = id == 'all'
+                ? sites.length
+                : sites.where((s) => s.kind == id).length;
+            return NebulaChip(
+              label: '$label $count',
+              selected: selected,
+              onSelected: () => setState(() => _filter = id),
+            );
+          },
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (state.loading && sites.isEmpty)
+        for (var i = 0; i < 3; i++) ...[
+          Container(
+            height: 74,
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: AppColors.border),
+            ),
+          ).animate(onPlay: (c) => c.repeat(reverse: true)).fadeOut(duration: 700.ms),
+        ]
+      else if (filtered.isEmpty) ..._sitesEmpty(sites.isNotEmpty)
+      else
+        ...filtered.asMap().entries.map((e) => StaggerIn(
+              index: e.key,
+              child: _siteCard(e.value),
+            )),
+    ];
+  }
+
+  List<Widget> _sitesEmpty(bool hasHidden) {
+    return [
+      const SizedBox(height: 34),
+      Column(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.border),
+              color: AppColors.surface,
+            ),
+            child: const Icon(Icons.layers_outlined, color: AppColors.textSecondary, size: 22),
+          ),
+          const SizedBox(height: 13),
+          Text(
+            hasHidden ? 'Nothing matches' : 'Your sites will live here',
+            style: const TextStyle(fontFamily: 'Sora', fontWeight: FontWeight.w700, fontSize: 14.5, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasHidden
+                ? 'Try another search or filter.'
+                : 'Every build gets a real public link — preview it here, share it anywhere, then publish to GitHub, Vercel, Firebase or your own domain.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.55),
+          ),
+          if (!hasHidden) ...[
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => setState(() => _tab = 'create'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: AppColors.background,
-                disabledBackgroundColor: AppColors.primaryPressed,
-                disabledForegroundColor: AppColors.background,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Text(
-                'Build it live',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: -0.2, fontFamily: 'Sora'),
-              ),
+              child: const Text('Create your first', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
             ),
-          ),
-          const SizedBox(height: 9),
-          const Text(
-            'A research-deep agent team designs, codes and hosts it — you get a real public link. Your site carries your brand, never ours.',
-            style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
-          ),
+          ],
         ],
       ),
-    ).animate().fadeIn(duration: 220.ms);
-  }
-
-  // ── Mission control — the agents, live ──────────────────────────────
-
-  Widget MissionControl({required StudioState state}) {
-    final live = state.liveTrace;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle),
-              ).animate(onPlay: (c) => c.repeat(reverse: true)).fadeOut(duration: 700.ms),
-              const SizedBox(width: 8),
-              const Text(
-                'AGENT TEAM AT WORK',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.16, color: AppColors.textSecondary),
-              ),
-              const Spacer(),
-              if (live.isNotEmpty)
-                Text(
-                  '${live.length} steps',
-                  style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10.5, color: AppColors.textTertiary),
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Thirteen specialists — Lead (with a deep-think pass), Analyst, Researcher, Art Director, Copywriter, Copy Chief, Architect, Photographer, Engineers, QA, Builder, Reflector, Skill Researcher — research, design, code and host your page live. About a minute.',
-            style: TextStyle(fontSize: 11.5, height: 1.5, color: AppColors.textTertiary),
-          ),
-          const SizedBox(height: 14),
-          if (live.isEmpty)
-            ..._rosterRows(state)
-          else
-            ..._liveRows(live),
-        ],
-      ),
-    ).animate().fadeIn(duration: 200.ms);
-  }
-
-  /// Idle: the roster with a pacing engine — tight rows, no emoji chrome.
-  List<Widget> _rosterRows(StudioState state) {
-    final rows = <Widget>[];
-    for (int i = 0; i < kBuildStages.length; i++) {
-      final done = i < state.stageIndex;
-      final current = i == state.stageIndex;
-      rows.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            children: [
-              _statusDot(done: done, current: current),
-              const SizedBox(width: 11),
-              Expanded(
-                child: AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 200),
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: current ? FontWeight.w700 : FontWeight.w500,
-                    color: done || current ? AppColors.textPrimary : AppColors.textTertiary,
-                  ),
-                  child: Text(kBuildStages[i].label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return rows;
-  }
-
-  /// Live: the REAL team rows — monogram tile + action + mono duration.
-  List<Widget> _liveRows(List<AgentRunRow> live) {
-    final rows = <Widget>[];
-    for (int i = 0; i < live.length; i++) {
-      final row = live[i];
-      final isLast = i == live.length - 1;
-      rows.add(
-        _liveRow(row, isLast: isLast)
-            .animate()
-            .fadeIn(duration: 240.ms)
-            .slideY(begin: 0.3, end: 0, duration: 240.ms, curve: Curves.easeOutCubic),
-      );
-    }
-    return rows;
-  }
-
-  Widget _monogram(String agent, {bool active = false}) {
-    final initials = agent
-        .split(RegExp(r'\s+'))
-        .take(2)
-        .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
-        .join();
-    return Container(
-      width: 30,
-      height: 30,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: active ? AppColors.surfaceHigh : AppColors.surface,
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: active ? AppColors.textSecondary : AppColors.border),
-      ),
-      child: Text(
-        initials,
-        style: TextStyle(
-          fontFamily: 'JetBrains Mono',
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
-          color: active ? AppColors.textPrimary : AppColors.textSecondary,
-        ),
-      ),
-    );
-  }
-
-  Widget _statusDot({required bool done, required bool current}) {
-    if (done) {
-      return const Icon(Icons.check_rounded, size: 15, color: AppColors.success);
-    }
-    if (current) {
-      return const SizedBox(
-        width: 13,
-        height: 13,
-        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-      );
-    }
-    return Container(
-      width: 7,
-      height: 7,
-      decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.textTertiary, width: 1.2)),
-    );
-  }
-
-  Widget _liveRow(AgentRunRow row, {bool isLast = false}) {
-    final secs = row.ms / 1000;
-    final time = secs >= 10 ? '${secs.round()}s' : secs >= 1 ? '${secs.toStringAsFixed(1)}s' : '${row.ms}ms';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _monogram(row.agent, active: isLast),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        '${row.agent} · ${row.action}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      time,
-                      style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10, color: AppColors.textTertiary),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(
-                      row.ok ? Icons.check_rounded : Icons.priority_high_rounded,
-                      size: 13,
-                      color: row.ok ? AppColors.success : AppColors.danger,
-                    ),
-                  ],
-                ),
-                if (row.detail.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 1),
-                    child: Text(
-                      row.detail,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, height: 1.35, color: AppColors.textTertiary),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Sites ledger ────────────────────────────────────────────────────
-
-  Widget _sitesHeader(int count, bool loading) {
-    return Row(
-      children: [
-        const Text('Your sites', style: TextStyle(fontFamily: 'Sora', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary)),
-        const SizedBox(width: 8),
-        Text('$count', style: const TextStyle(fontFamily: 'JetBrains Mono', color: AppColors.textTertiary, fontSize: 12, fontWeight: FontWeight.w600)),
-        const Spacer(),
-        if (loading)
-          const SizedBox(
-            width: 13, height: 13,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textTertiary),
-          ),
-      ],
-    );
+    ];
   }
 
   Widget _siteCard(StudioSite site) {
     final dep = site.latestDeployment;
     final dateStr = _dateLabel(site.updatedAt ?? site.at);
+    final accent = _siteAccent(site.id);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -634,16 +812,18 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
             child: Row(
               children: [
+                // Per-site accent identity: the SAME hue the build's design
+                // system picked — the ledger teaches each site's palette.
                 Container(
                   width: 40,
                   height: 40,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
+                    color: accent.withValues(alpha: 0.13),
                     borderRadius: BorderRadius.circular(11),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: accent.withValues(alpha: 0.4)),
                   ),
-                  child: Icon(site.kindGlyph, size: 18, color: AppColors.textSecondary),
+                  child: Icon(site.kindGlyph, size: 18, color: Color.lerp(accent, AppColors.textPrimary, 0.35)),
                 ),
                 const SizedBox(width: 11),
                 Expanded(
@@ -738,67 +918,380 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     );
   }
 
-  // ── Empty state ─────────────────────────────────────────────────────
+  /// A stable per-site accent derived from the artifact id — deterministic,
+  /// tasteful (55-62% lightness range), and unique enough to tell builds apart.
+  Color _siteAccent(String id) {
+    var h = 2166136261;
+    for (final c in id.codeUnits) {
+      h ^= c;
+      h = (h * 16777619) & 0x7fffffff;
+    }
+    final hue = (h % 360).toDouble();
+    return HSLColor.fromAHSL(1, hue, 0.52, 0.6).toColor();
+  }
 
-  List<Widget> _emptyState() {
+  // ── TEAM tab — the agents, live ─────────────────────────────────────
+
+  List<Widget> _teamTab(StudioState state) {
+    final live = state.liveTrace;
     return [
-      const SizedBox(height: 14),
-      Column(
+      const SizedBox(height: 6),
+      // Roster strip — every specialist as a monogram chip; each lights up
+      // the moment its real row lands in the trace.
+      SizedBox(
+        height: 62,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _roster.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 7),
+          itemBuilder: (_, i) {
+            final r = _roster[i];
+            final idx = live.lastIndexWhere((row) => row.agent == r.$1);
+            final done = idx >= 0 && idx < live.length - 1;
+            final active = live.isNotEmpty && live.last.agent == r.$1;
+            return _rosterChip(r.$1, done: done, active: active);
+          },
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (state.building) ...[
+        // Progress rail — the fallback pacer, corrected by real rows.
+        _progressRail(state, live),
+        const SizedBox(height: 14),
+        if (live.isEmpty)
+          _thinkingCard('Lead', 'reading your brief…')
+        else ...[
+          _thinkingCard(live.last.agent, live.last.action),
+          const SizedBox(height: 12),
+          ...live.asMap().entries.map((e) => _traceRow(e.value, isLast: e.key == live.length - 1)),
+        ],
+      ] else ...[
+        // Idle: the team, introduced — this is WHAT the user is paying for.
+        const OverlineLabel('THE STUDIO TEAM', color: AppColors.textTertiary),
+        const SizedBox(height: 4),
+        const Text(
+          'A full crew works every build — the same engineering pattern as the frontier agents: isolated specialists, an artifact bus, review loops and self-evolution.',
+          style: TextStyle(fontSize: 12, height: 1.55, color: AppColors.textTertiary),
+        ),
+        const SizedBox(height: 14),
+        _crewGroup('COMMAND', _roster.sublist(0, 1)),
+        _crewGroup('UNDERSTANDING', _roster.sublist(1, 3)),
+        _crewGroup('CRAFT', _roster.sublist(3, 8)),
+        _crewGroup('ASSURANCE', _roster.sublist(8, 11)),
+        _crewGroup('EVOLUTION', _roster.sublist(11, 13)),
+        const SizedBox(height: 6),
+        _teamFact(
+          Icons.schedule_rounded,
+          'Thinks longer',
+          'The Lead critiques its own plan before anyone codes; the Researcher runs a second round when the picture is incomplete.',
+        ),
+        _teamFact(
+          Icons.verified_outlined,
+          'Quality-gated',
+          'WCAG contrast is enforced with math, QA can send code back, and every page passes the identity firewall.',
+        ),
+        _teamFact(
+          Icons.auto_graph_rounded,
+          'Gets better every job',
+          'A Reflector distills every finished build into a learned skill — the next build starts smarter.',
+        ),
+      ],
+    ];
+  }
+
+  Widget _rosterChip(String name, {required bool done, required bool active}) {
+    final initials = name
+        .split(RegExp(r'\s+'))
+        .take(2)
+        .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
+        .join();
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      width: 46,
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      decoration: BoxDecoration(
+        color: active ? AppColors.primary : AppColors.surface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(
+          color: active ? AppColors.primary : done ? AppColors.textSecondary.withValues(alpha: 0.5) : AppColors.border,
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          Text(
+            initials,
+            style: TextStyle(
+              fontFamily: 'JetBrains Mono',
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: active ? AppColors.background : done ? AppColors.textPrimary : AppColors.textTertiary,
+            ),
+          ),
+          const SizedBox(height: 3),
           Container(
-            width: 54,
-            height: 54,
-            alignment: Alignment.center,
+            width: 5,
+            height: 5,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border),
-              color: AppColors.surface,
+              color: active ? AppColors.background : done ? AppColors.success : AppColors.border,
             ),
-            child: const Icon(Icons.auto_awesome_outlined, color: AppColors.textSecondary, size: 22),
-          ),
-          const SizedBox(height: 13),
-          const Text(
-            'Your sites will live here',
-            style: TextStyle(fontFamily: 'Sora', fontWeight: FontWeight.w700, fontSize: 14.5, color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Every build gets a real public link — preview it in the app, share it anywhere, then publish it to GitHub, Vercel, Firebase or your own domain.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.55),
-          ),
-          const SizedBox(height: 15),
-          Wrap(
-            spacing: 7,
-            runSpacing: 7,
-            alignment: WrapAlignment.center,
-            children: [
-              for (final e in _examples.take(3))
-                PressableScale(
-                  onTap: () {
-                    _briefCtrl.text = e;
-                    setState(() {});
-                  },
-                  pressedScale: 0.96,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Text(
-                      e.length > 42 ? '${e.substring(0, 42)}…' : e,
-                      style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary),
-                    ),
-                  ),
-                ),
-            ],
           ),
         ],
       ),
-    ];
+    );
   }
+
+  Widget _progressRail(StudioState state, List<AgentRunRow> live) {
+    final frac = live.isNotEmpty
+        ? (live.length / (kBuildStages.length + 2)).clamp(0.04, 1.0)
+        : ((state.stageIndex + 1) / kBuildStages.length).clamp(0.04, 1.0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'BUILD PROGRESS',
+              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.16, color: AppColors.textTertiary),
+            ),
+            Text(
+              live.isNotEmpty ? '${live.length} steps' : 'connecting…',
+              style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10, color: AppColors.textTertiary),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: frac),
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeOutCubic,
+            builder: (_, v, __) => LinearProgressIndicator(
+              value: v,
+              minHeight: 4,
+              backgroundColor: AppColors.border,
+              color: AppColors.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _thinkingCard(String agent, String action) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  agent,
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  '$action…',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.textTertiary),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ).animate(onPlay: (c) => c.repeat(reverse: true)).fadeIn(duration: 600.ms);
+  }
+
+  Widget _traceRow(AgentRunRow row, {bool isLast = false}) {
+    final secs = row.ms / 1000;
+    final time = secs >= 10 ? '${secs.round()}s' : secs >= 1 ? '${secs.toStringAsFixed(1)}s' : '${row.ms}ms';
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Rail: monogram + connecting hairline.
+          SizedBox(
+            width: 30,
+            child: Column(
+              children: [
+                _monogram(row.agent, active: isLast),
+                if (!isLast)
+                  Expanded(child: Container(width: 1, color: AppColors.border)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          '${row.agent} · ${row.action}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        time,
+                        style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 10, color: AppColors.textTertiary),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        row.ok ? Icons.check_rounded : Icons.priority_high_rounded,
+                        size: 13,
+                        color: row.ok ? AppColors.success : AppColors.danger,
+                      ),
+                    ],
+                  ),
+                  if (row.detail.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Text(
+                        row.detail,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11, height: 1.35, color: AppColors.textTertiary),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 240.ms).slideY(begin: 0.3, end: 0, duration: 240.ms, curve: Curves.easeOutCubic);
+  }
+
+  Widget _monogram(String agent, {bool active = false}) {
+    final initials = agent
+        .split(RegExp(r'\s+'))
+        .take(2)
+        .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
+        .join();
+    return Container(
+      width: 30,
+      height: 30,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: active ? AppColors.surfaceHigh : AppColors.surface,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: active ? AppColors.textSecondary : AppColors.border),
+      ),
+      child: Text(
+        initials,
+        style: TextStyle(
+          fontFamily: 'JetBrains Mono',
+          fontSize: 10.5,
+          fontWeight: FontWeight.w700,
+          color: active ? AppColors.textPrimary : AppColors.textSecondary,
+        ),
+      ),
+    );
+  }
+
+  Widget _crewGroup(String title, List<(String, String)> members) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(13, 11, 13, 13),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            OverlineLabel(title, color: AppColors.textTertiary),
+            const SizedBox(height: 8),
+            ...members.map((m) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      _monogram(m.$1),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              m.$1,
+                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                            ),
+                            Text(
+                              m.$2,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, color: AppColors.textTertiary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _teamFact(IconData icon, String title, String body) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 17, color: AppColors.textSecondary),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(body, style: const TextStyle(fontSize: 11, height: 1.45, color: AppColors.textTertiary)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Shared widgets & helpers ────────────────────────────────────────
 
   Widget _errorBanner(String message) => Container(
         padding: const EdgeInsets.all(13),
@@ -814,11 +1307,14 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
             Expanded(
               child: Text(message, style: const TextStyle(color: AppColors.danger, fontSize: 12.5, height: 1.4)),
             ),
+            TextButton(
+              onPressed: _openPlans,
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8), minimumSize: Size.zero),
+              child: const Text('Plans', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w800, fontSize: 12)),
+            ),
           ],
         ),
       );
-
-  // ── Helpers ─────────────────────────────────────────────────────────
 
   InputDecoration _smallField(String hint) => InputDecoration(
         hintText: hint,

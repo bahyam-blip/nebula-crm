@@ -271,4 +271,18 @@ class StudioApiService {
         .map((d) => SiteDeployment.fromMap(d.cast<String, dynamic>()))
         .toList();
   }
+
+  // ── v12 BILLING (multi-user subscriptions) ──────────────────────
+
+  /// The signed-in user's plan + usage snapshot.
+  Future<BillingSnapshot> fetchBilling() async {
+    final json = await _send('GET', '/v1/billing/usage');
+    return BillingSnapshot.fromMap(json);
+  }
+
+  /// Create a pending upgrade order (manual activation today).
+  Future<String> createCheckout(String planId) async {
+    final json = await _send('POST', '/v1/billing/checkout', body: {'plan': planId});
+    return (json['note'] as String?) ?? 'Order created.';
+  }
 }

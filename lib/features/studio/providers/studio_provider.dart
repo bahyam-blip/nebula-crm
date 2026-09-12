@@ -44,7 +44,8 @@ const kBuildStages = <BuildStage>[
 ];
 
 /// Studio state: built sites + hosting platform connections + build/refine
-/// progress + the LIVE agent-team trace (Agent v10).
+/// progress + the LIVE agent-team trace (Agent v10) + the v12 billing
+/// snapshot (plan + quota).
 class StudioState {
   const StudioState({
     this.sites = const [],
@@ -54,6 +55,7 @@ class StudioState {
     this.refiningId,
     this.stageIndex = 0,
     this.liveTrace = const [],
+    this.billing,
     this.error,
   });
 
@@ -74,6 +76,9 @@ class StudioState {
   /// non-empty rows replace the ticker in the UI.
   final List<AgentRunRow> liveTrace;
 
+  /// v12: the user's plan + quota (null while loading / on old workers).
+  final BillingSnapshot? billing;
+
   final String? error;
 
   bool get anyHostingConnected =>
@@ -89,6 +94,8 @@ class StudioState {
     int? stageIndex,
     List<AgentRunRow>? liveTrace,
     bool clearTrace = false,
+    BillingSnapshot? billing,
+    bool clearBilling = false,
     String? error,
     bool clearError = false,
   }) =>
@@ -100,6 +107,7 @@ class StudioState {
         refiningId: clearRefining ? null : (refiningId ?? this.refiningId),
         stageIndex: stageIndex ?? this.stageIndex,
         liveTrace: clearTrace ? const [] : (liveTrace ?? this.liveTrace),
+        billing: clearBilling ? null : (billing ?? this.billing),
         error: clearError ? null : (error ?? this.error),
       );
 }
@@ -172,12 +180,25 @@ class StudioController extends StateNotifier<StudioState> {
     try {
       // Two independent calls, raced in parallel. (Future.wait with mixed
       // element types erases generics — awaiting both futures directly keeps
-      // the types intact.)
+      // the types intact.) Billing is best-effort: an old worker without
+      // /v1/billing must not break the Studio.
       final sitesFuture = _api.listSites();
       final connectorsFuture = _api.listConnectors();
       final sites = await sitesFuture;
       final connectors = await connectorsFuture;
-      state = state.copyWith(sites: sites, connectors: connectors, loading: false);
+      BillingSnapshot? billing;
+      try {
+        billing = await _api.fetchBilling();
+      } catch (_) {
+        billing = null; // old worker — the Studio works without billing
+      }
+      state = state.copyWith(
+        sites: sites,
+        connectors: connectors,
+        loading: false,
+        billing: billing,
+        clearBilling: billing == null,
+      );
     } on StudioApiException catch (e) {
       state = state.copyWith(loading: false, error: e.message);
     } catch (e) {
@@ -301,6 +322,9 @@ class StudioController extends StateNotifier<StudioState> {
     String name = 'www',
   }) =>
       _api.pointDomain(connector: connector, domain: domain, target: target, name: name);
+
+  /// v12: create a pending upgrade order (manual activation).
+  Future<String> checkout(String planId) => _api.createCheckout(planId);
 
   @override
   void dispose() {

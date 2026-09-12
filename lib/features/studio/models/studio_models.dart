@@ -247,3 +247,83 @@ class HostingConnector {
         connectedAt: m['connectedAt'] as String?,
       );
 }
+
+/// v12 BILLING — one plan in the subscription catalog.
+class PlanOption {
+  const PlanOption({
+    required this.id,
+    required this.name,
+    required this.priceInr,
+    required this.tagline,
+    required this.perks,
+    this.current = false,
+  });
+
+  final String id;
+  final String name;
+  final int priceInr;
+  final String tagline;
+  final List<String> perks;
+  final bool current;
+
+  factory PlanOption.fromMap(Map<String, dynamic> m) => PlanOption(
+        id: (m['id'] as String?) ?? '',
+        name: (m['name'] as String?) ?? '',
+        priceInr: (m['price_inr'] as num?)?.toInt() ?? 0,
+        tagline: (m['tagline'] as String?) ?? '',
+        perks: ((m['perks'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
+        current: m['current'] == true,
+      );
+}
+
+/// v12 BILLING — the signed-in user's plan + usage snapshot.
+class BillingSnapshot {
+  const BillingSnapshot({
+    required this.plan,
+    required this.planName,
+    required this.buildsUsed,
+    required this.buildsLimit,
+    required this.refinesUsed,
+    required this.refinesLimit,
+    this.status = 'active',
+    this.until,
+    this.catalog = const [],
+  });
+
+  final String plan;
+  final String planName;
+  final int buildsUsed;
+  final int buildsLimit;
+  final int refinesUsed;
+  final int refinesLimit;
+  final String status;
+  final String? until;
+  final List<PlanOption> catalog;
+
+  int get buildsLeft => (buildsLimit - buildsUsed).clamp(0, buildsLimit);
+  double get buildPct =>
+      buildsLimit <= 0 ? 0 : (buildsUsed / buildsLimit).clamp(0.0, 1.0);
+  bool get low => buildsLeft <= 1;
+  bool get expired => status == 'expired';
+
+  factory BillingSnapshot.fromMap(Map<String, dynamic> m) {
+    final usage = (m['usage'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final limits = (m['limits'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return BillingSnapshot(
+      plan: (m['plan'] as String?) ?? 'free',
+      planName: (m['plan_name'] as String?) ?? 'Free',
+      status: (m['status'] as String?) ?? 'active',
+      until: m['until'] as String?,
+      buildsUsed: (usage['builds'] as num?)?.toInt() ?? 0,
+      buildsLimit: (limits['builds_per_month'] as num?)?.toInt() ?? 0,
+      refinesUsed: (usage['refines'] as num?)?.toInt() ?? 0,
+      refinesLimit: (limits['refines_per_month'] as num?)?.toInt() ?? 0,
+      catalog: ((m['catalog'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((p) => PlanOption.fromMap(p.cast<String, dynamic>()))
+          .toList(),
+    );
+  }
+}

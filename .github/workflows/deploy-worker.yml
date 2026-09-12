@@ -26,6 +26,26 @@ jobs:
         with:
           node-version: '22'
 
+      # v12: the Worker test battery gates the deploy. Every suite is a
+      # standalone Node script (node:assert + scripted Sarvam harness); a
+      # failing suite fails the job BEFORE any deploy touches production.
+      - name: Run Worker test suites
+        run: |
+          set -e
+          failed=0
+          for t in scripts/test_*.mjs; do
+            echo "::group::$t"
+            if ! timeout 300 node "$t" > /tmp/test_out.log 2>&1; then
+              failed=1
+              tail -n 25 /tmp/test_out.log
+              echo "::error::$t failed"
+            else
+              tail -n 1 /tmp/test_out.log
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
       # A workers.dev subdomain is a one-time, account-wide setting. Wrangler
       # can only prompt for it interactively, which fails in CI, so register
       # it over the API instead.

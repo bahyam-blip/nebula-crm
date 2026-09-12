@@ -191,9 +191,14 @@ export function forbiddenTokens(site, brand = null) {
     push(owner.contact_email);
     push(owner.phone);
   }
-  // The tool must never leak into client pages either.
+  // The tool must never leak into client pages either (v12: the footer
+  // credit "crafted by the Nebula agent" shipped for months — now every
+  // tool-credit phrasing is scrubbed, not just the product name).
   push('Nebula CRM');
   push('nebulacrm');
+  push('Nebula agent');
+  push('Nebula Studio');
+  push('Nebula AI');
   return [...out];
 }
 

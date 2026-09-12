@@ -453,9 +453,9 @@ console.log('\n— 5. Agent loop end-to-end —');
     body: JSON.stringify({ messages: [{ role: 'user', content: 'Build me a festive promo page for my bakery' }] }),
   });
   const a2 = await (await handleAssistant(r2, env, { uid: 'u_mgr', ctx: CTX })).json();
-  ok(a2.ok && a2.actions[0]?.tool === 'build_website', 'build chain: agent built a website');
+  ok(a2.ok && a2.actions[0]?.tool === 'build_website', 'build chain: agent built a website', JSON.stringify(a2).slice(0,400));
   ok(Array.isArray(a2.artifacts) && a2.artifacts[0]?.url?.startsWith('https://worker.test/sites/'),
-    'artifact surfaced in chat response with URL', JSON.stringify(a2.artifacts));
+    'artifact surfaced in chat response with URL', JSON.stringify(a2).slice(0, 500));
   const builtId = a2.artifacts?.[0]?.id;
   ok(a2.reply.includes(builtId) || a2.reply.includes('QUOTE_URL'), 'reply references the built page', a2.reply.slice(0, 100));
   const builtServed = await serveAgentSite(new Request(a2.artifacts[0].url), env, `/sites/${builtId}`);

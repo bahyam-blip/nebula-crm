@@ -18,6 +18,7 @@ import { runAgent, leadBlock, understandingBlock } from './agents.js';
 import { sarvamChat } from './sarvam.js';
 import { webSearch } from './research.js';
 import { normalizeDesign, themeForStyleHint, THEMES } from './site_templates.js';
+import { expandPalette, fontPairFor, colorPack } from './mastery.js';
 
 const THEME_NAMES = Object.keys(THEMES);
 
@@ -129,6 +130,42 @@ export function pickDesignDna({ brief = '', kind = '', title = '', style = '' } 
   return { ...dna, themes };
 }
 
+/** Deterministic variety seed for the palette/font explorers. */
+function seedFor(brief, kind, site) {
+  return hashSeed(`${kind}::${site?.name || ''}::${String(brief).slice(0, 300)}`);
+}
+
+/**
+ * v12 MASTERY on the design object: expand the enforced palette into a
+ * full token set (10-step ramp + harmony second accent) and lock the
+ * build's font pairing. Mutates + returns the design. Runs on BOTH the
+ * AI and deterministic paths so mastery never depends on the model.
+ */
+function applyMastery(design, dna, brief, kind, seed) {
+  try {
+    const accent = /^#[0-9a-fA-F]{6}$/.test(String(design?.palette?.accent || ''))
+      ? design.palette.accent
+      : dna.hues[0];
+    const expanded = expandPalette(accent, {
+      theme: design.theme, seed,
+      harmony: ['analogous', 'complementary', 'split', 'triadic', 'tetradic'][seed % 5],
+    });
+    // The ramp + borders/muted neutrals are the MASTERY layer's math —
+    // the AI hues (already contrast-enforced) stay authoritative for
+    // bg/ink/accent; everything derived is filled from the expansion.
+    design.ramp = expanded.ramp;
+    if (!design.palette.accent2 || design.palette.accent2 === design.palette.accent) {
+      design.palette.accent2 = expanded.accent2;
+    }
+    if (!design.palette.border) design.palette.border = expanded.border;
+    design.fontPair = fontPairFor({ dnaName: dna.name, theme: design.theme, brief, kind, seed });
+    design.harmony = expanded.harmony;
+  } catch {
+    /* mastery must never break a build */
+  }
+  return design;
+}
+
 /* ══ Stage 1 — THINK (design-system v2) ══════════════════════════════ */
 
 function briefSystemPrompt(kind, site, style, dna) {
@@ -171,6 +208,7 @@ Design principles you apply (this is what separates premium from template):
 - must_have: think like the visitor — what proof do they need to act? (menu/pricing/proof/booking/FAQ).
 Rules: hex colors only.
 DESIGN DNA — YOUR REQUIRED STARTING POINT (v11): family "${dna.name}" — mood ${dna.mood}. The accent MUST stay in the ${dna.name} hue family (seed ${seedHue}; adjust lightness/saturation freely, drift to a DIFFERENT hue family is forbidden${site?.color ? ' — the client named this color themselves' : ''}). Theme candidates: ${dna.themes.join(' or ')}. Font pairing: ${dna.fonts.join(' or ')}. Texture bias: ${dna.texture}. Refine artfully INSIDE this family.${style ? ` The client asked for this style: "${style}" — honor it within the family.` : ''}
+${colorPack()}
 IDENTITY: the client is "${client}" — design for THEM and nobody else; never borrow another business's name, colors or logo.`;
 }
 
@@ -189,6 +227,7 @@ export async function designBrief(env, { kind, brief, style, brand, site = null,
     design.texture = ['onyx', 'aurora', 'luxe'].includes(String(design.theme || '')) ? 'grain' : (dna.texture === 'clean' ? 'clean' : 'grain');
     design.motion_intensity = 'balanced';
     design.ux_flow = [];
+    applyMastery(design, dna, brief, kind, seedFor(brief, kind, site));
     return { design, headlineAngle: '', mustHave: [], queries: [], ai: false, dna };
   };
   try {
@@ -217,6 +256,10 @@ export async function designBrief(env, { kind, brief, style, brand, site = null,
     design.ux_flow = Array.isArray(j.ux_flow) ? j.ux_flow.map((s) => String(s).slice(0, 110)).filter(Boolean).slice(0, 5) : [];
     // The deterministic accessibility gate: AI hues, math-guaranteed ratios.
     design.palette = enforceContrast(design.palette);
+    // v12 MASTERY: expand the palette (10-step ramp + harmony accent2)
+    // and lock this build's font pairing — "millions of colours and
+    // fonts", as parameters, on the AI path too.
+    applyMastery(design, dna, brief, kind, seedFor(brief, kind, site));
     return {
       design,
       headlineAngle: String(j.headline_angle || '').slice(0, 160),

@@ -23,6 +23,7 @@ import { handleMail, runMailCron, mailConfigState, deliverInternal, verifyRunSig
 import { handleAssistant, handleAssistantApproval } from './emailer/assistant.js';
 import { handleDataRequest } from './data_http.js';
 import { handleStudioRequest } from './studio_http.js';
+import { handleBillingRequest } from './billing_http.js';
 import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
 import { verifyIdToken } from './auth.js';
 import { handleMcp, handleMcpPair, serveAgentSite, mcpServerInfo } from './emailer/mcp.js';
@@ -284,6 +285,14 @@ export default {
     // credentials pulled from the encrypted vault (never from the client).
     if (path.startsWith('/v1/studio/')) {
       return handleStudioRequest(request, env, { url, path, uid, ctx });
+    }
+
+    // ── Nebula BILLING (multi-user subscriptions, v12) ──
+    // Plans, usage snapshots, checkout orders and owner-only grants:
+    // the commercial layer that lets the owner SELL the Studio as a
+    // subscription while every tenant's data stays per-uid isolated.
+    if (path.startsWith('/v1/billing/')) {
+      return handleBillingRequest(request, env, { url, path, uid });
     }
 
     // ── CRM database (D1) — the Firestore replacement ──
