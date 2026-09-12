@@ -21,7 +21,7 @@
 
 import { createStore, stateBackendName } from './emailer/state.js';
 import { loadUser } from './data.js';
-import { buildWebsite, refineSite, listArtifacts, getRunStatus } from './emailer/builder.js';
+import { buildWebsite, refineSite, listArtifacts, getRunStatus, getBuildReport } from './emailer/builder.js';
 import {
   connectPlatform,
   connectorStatus,
@@ -87,6 +87,12 @@ async function handleStudioInner(request, env, { url, path, uid, ctx }) {
   if (request.method === 'GET' && path === '/v1/studio/run') {
     const run = await getRunStatus(store, uid, url.searchParams.get('id'));
     return json(run, run.ok ? 200 : 404);
+  }
+
+  /* ── v13 build report — the deterministic handover sheet (owner-scoped) ── */
+  if (request.method === 'GET' && path === '/v1/studio/report') {
+    const rep = await getBuildReport(store, uid, url.searchParams.get('artifact_id'));
+    return json(rep, rep.ok ? 200 : 404);
   }
 
   /* ── refine an existing build (any teammate who may write) ── */

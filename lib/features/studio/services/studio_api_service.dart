@@ -15,6 +15,7 @@ class StudioRunStatus {
     this.title,
     this.error,
     this.site,
+    this.report,
   });
 
   /// running | done | error | timeout
@@ -25,6 +26,9 @@ class StudioRunStatus {
 
   /// The finished artifact when [status] == done.
   final StudioSite? site;
+
+  /// v13: the deterministic build report when [status] == done.
+  final BuildReport? report;
 }
 
 /// Studio API exception with a human-friendly message.
@@ -106,7 +110,7 @@ class StudioApiService {
   }
 
   /// Poll a live run: status + every agent row so far (+ the finished site
-  /// in the result payload when the run doc is done).
+  /// and its build report in the result payload when the run doc is done).
   Future<StudioRunStatus> pollRun(String runId) async {
     final json = await _send('GET', '/v1/studio/run?id=$runId');
     if (json['ok'] != true) {
@@ -127,17 +131,20 @@ class StudioApiService {
               ...result,
               'id': result['artifact_id'],
             }),
+      report: result == null ? null : BuildReport.fromMap((result['report'] as Map?)?.cast<String, dynamic>()),
     );
   }
 
   /// Build a site: AI generates a complete branded page, hosted instantly
-  /// at /sites/<id>. Long timeout — generation takes a while.
+  /// at /sites/<id>. Long timeout — generation takes a while. Returns
+  /// (site, buildReport) — v13 ships the deterministic handover sheet
+  /// alongside the artifact (null on old workers).
   ///
   /// Pass [runId] (client-generated, e.g. `b_x7g2k1abcd`) to make the build
   /// a WATCHABLE RUN: the Worker streams the team's trace into that run doc
   /// while the request is in flight; poll [pollRun] concurrently for the
   /// live agent feed. Old deployments simply ignore it.
-  Future<StudioSite> buildSite({
+  Future<(StudioSite, BuildReport?)> buildSite({
     required String title,
     required String brief,
     required String kind,
@@ -160,10 +167,25 @@ class StudioApiService {
     }
     // The build endpoint returns the artifact at the top level with
     // artifact_id; StudioSite expects an `id` key like the sites list.
-    return StudioSite.fromMap(<String, dynamic>{
+    final site = StudioSite.fromMap(<String, dynamic>{
       ...json,
       'id': json['artifact_id'],
     });
+    final report = BuildReport.fromMap((json['report'] as Map?)?.cast<String, dynamic>());
+    return (site, report);
+  }
+
+  /// v13 — fetch the stored build report for an artifact (the handover
+  /// sheet: stack, technology, front end, back end, quality, crew).
+  /// Returns null when the worker predates v13 or nothing is stored.
+  Future<BuildReport?> fetchReport(String artifactId) async {
+    try {
+      final json = await _send('GET', '/v1/studio/report?artifact_id=$artifactId');
+      if (json['ok'] != true) return null;
+      return BuildReport.fromMap((json['report'] as Map?)?.cast<String, dynamic>());
+    } on StudioApiException {
+      return null;
+    }
   }
 
   /// Refine an existing build with a change request. Returns the updated

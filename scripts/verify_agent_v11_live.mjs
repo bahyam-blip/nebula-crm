@@ -46,7 +46,7 @@ async function main() {
   const health = await jfetch('/v1/health');
   ok(health.status === 200 && health.json?.ok === true, 'worker healthy');
   const advert = await jfetch('/mcp');
-  ok(advert.status === 200 && advert.json?.version === '6.0.0', `/mcp advert version 6.0.0 (got ${advert.json?.version})`);
+  ok(advert.status === 200 && advert.json?.version === '7.0.0', `/mcp advert version 7.0.0 (got ${advert.json?.version})`);
   const caps = JSON.stringify(advert.json?.capabilities || []);
   ok(/identity firewall/i.test(caps) && /Photographer/i.test(caps), 'advert names the identity firewall + Photographer', caps.slice(0, 240));
 

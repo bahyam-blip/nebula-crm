@@ -51,15 +51,32 @@ import { esc, safeHref } from './htmlutil.js';
 import { isAllowedImageSrc } from './imager.js';
 import { masteryBlock, cssGlobalPack, wiringPack, motionPack, policyNeeds, policyPack } from './mastery.js';
 
-const SECTION_AI_TOKENS = 1900;
+const SECTION_AI_TOKENS = 2600; // v13: room for real composition craft
 const PLAN_AI_TOKENS = 900;
-const REVIEW_AI_TOKENS = 500;
+const REVIEW_AI_TOKENS = 650;
 const MAX_SECTIONS = 5;
 const MAX_REGENS = 2;
 const HTML_MIN = 150;
 const HTML_MAX = 9500;
 const CSS_MIN = 60;
 const CSS_MAX = 9500;
+
+/**
+ * v13 CRAFT — a bounded code payload attached to engineer trace rows so
+ * the app can show the code AS IT IS WRITTEN, expanded in a shell view.
+ */
+function codePayload(section, out) {
+  const htmlHead = String(out.html || '').slice(0, 480);
+  const cssHead = String(out.css || '').slice(0, 380);
+  const lines = (String(out.html || '').match(/\n/g) || []).length + (String(out.css || '').match(/\n/g) || []).length + 3;
+  return {
+    lang: 'html',
+    label: `sec-${section.id} · ${section.name}`,
+    preview: `<section id="sec-${section.id}"> …\n${htmlHead}\n…\n<style>\n${cssHead}\n…</style>`,
+    lines,
+    chars: String(out.html || '').length + String(out.css || '').length,
+  };
+}
 
 /* ══ Copy fragments — only the groups a section needs ═══════════════ */
 
@@ -189,6 +206,23 @@ export async function planSections(env, { kind, brief, brand, site = null, thoug
 function sectionSystemPrompt({ id, kind, brand, hasImages, mastery = '' }) {
   return `You are a senior front-end engineer at an award-winning web studio. You are HAND-CODING one section of a bespoke ${kind} page for ${brand.name}. There is no template — every line is written for this business.
 
+COMPOSITION LIBRARY (pick per content — never repeat the same composition twice on a page):
+• bento — 12-col grid, tiles spanning 2-3 cols, ONE dominant tile, others supporting
+• split-feature — 7/5 asymmetric split, media bleeding toward the section edge
+• sticky-rail — title column sticky, content column scrolls (features, menus, services)
+• overlap — cards overlap the previous section's edge (negative margin), depth via shadow
+• mosaic — editorial media grid with varied tile heights, caption overlays
+• stat-band — full-width row of 3-4 oversized tabular-number stats separated by hairlines
+• timeline — vertical rail with time chips and alternating rows
+• quote-feature — ONE testimonial spotlighted with an oversized quotation glyph
+• parallax-band — full-bleed media band with layered content and gradient scrim
+CRAFT LAWS (the difference between premium and template):
+• ONE focal point per section; everything else supports it
+• scale CONTRAST: oversized display element beside small precise caption; never all-same-size
+• asymmetric beats symmetric; overlap beats floating; hairlines beat boxes
+• whitespace is a material — density comes from typography, not cramming
+• never render 3+ identical cards in a row — vary spans, offsets, media, or rhythm
+
 Respond with ONLY this format (no markdown fences, no commentary):
 
 <section id="sec-${id}" ...>
@@ -212,7 +246,8 @@ HARD RULES
   · when your copy includes "marquee": render <div class="marquee"><div class="marquee-track"><span>word</span>…</div></div> with the words TWICE inside .marquee-track for a seamless loop (the page provides the animation),
   · when your copy includes "stats": render the value element as <span data-count="40">0</span> (keep the suffix like % or + OUTSIDE the span) — the page counts up on reveal.${hasImages ? '\n  · your IMAGES list is below — wire the photo into the composition with craft (mask, frame, overlay, parallax depth).' : ''}
 - Accessibility: text contrast >= 4.5:1, :focus-visible outline on links/buttons, buttons are <a class="btn btn-accent"> (page provides .btn styles) or real <button>.
-- Keep the whole answer under 100 lines. Every element earns its place; density and craft beat bloat.${mastery ? `\n\n${mastery}` : ''}`;
+- Glass surfaces may use .glass, gradient text .text-gradient, glow fields .glow, bento grids .bento (page provides them).
+- Keep the whole answer under 150 lines. Every element earns its place; density and craft beat bloat.${mastery ? `\n\n${mastery}` : ''}`;
 }
 
 function sectionUserPrompt({ design, section, content, brand, kind, brief, images = null }) {
@@ -387,7 +422,7 @@ export function engineFallbackSection(section, content, design) {
     ? `<a class="btn btn-accent" href="${safeHref(content.primary_cta.href)}">${esc(content.primary_cta.label || 'Get started')}</a>`
     : '';
   const html = `<section id="sec-${section.id}" data-rev><div class="wrap"><span class="kicker">${esc(String(section.id).slice(0, 16))}</span><h2>${title}</h2>${list}${cta}</div></section>`;
-  const css = `#sec-${section.id}{padding:var(--sp6) 0}#sec-${section.id} h2{font-family:var(--display);font-size:clamp(28px,4.5vw,48px);margin:var(--sp2) 0 var(--sp4)}#sec-${section.id} .s-list{list-style:none;display:grid;gap:var(--sp3)}@media(min-width:768px){#sec-${section.id} .s-list{grid-template-columns:1fr 1fr}}#sec-${section.id} .s-list li{border:1px solid var(--border);border-radius:var(--r);padding:var(--sp3);display:grid;gap:6px;background:var(--card)}#sec-${section.id} .s-list strong{font-size:16px}#sec-${section.id} .s-list span{color:var(--muted);font-size:14px}#sec-${section.id} .s-sub{color:var(--muted)}#sec-${section.id} .btn{margin-top:var(--sp4)}@keyframes ${section.id}-rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}/* engine section */`;
+  const css = `#sec-${section.id}{padding:var(--sp6) 0}#sec-${section.id} h2{font-family:var(--display);font-size:clamp(28px,4.5vw,48px);margin:var(--sp2) 0 var(--sp4)}#sec-${section.id} .s-list{list-style:none;display:grid;gap:var(--sp3)}@media(min-width:768px){#sec-${section.id} .s-list{grid-template-columns:1fr 1fr}}#sec-${section.id} .s-list li{border:1px solid var(--border);border-radius:var(--r);padding:var(--sp3);display:grid;gap:6px;background:var(--card)}#sec-${section.id} .s-list strong{font-size:16px}#sec-${section.id} .s-list span{color:var(--muted);font-size:14px}#sec-${section.id} .s-sub{color:var(--muted)}#sec-${section.id} .btn{margin-top:var(--sp4)}@keyframes sec-${section.id}-rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}/* engine section */`;
   return { html, css };
 }
 
@@ -407,7 +442,7 @@ export async function reviewSections(env, { kind, brand, sections, team = null }
       [
         {
           role: 'system',
-          content: `You are the design director reviewing hand-coded sections of a ${kind} page for ${brand.name} before it ships. A section is "fix" ONLY if it is broken for a live page: unstyled, contradicts the design direction, empty shell, unusable on mobile, shows a foreign brand name, or references an image not in its verified list. Stylistic taste is NOT a fix reason. Respond with ONLY JSON: {"verdicts":[{"id":"...","verdict":"good"|"fix","note":"<=10 words"}]}`,
+          content: `You are the design director reviewing hand-coded sections of a ${kind} page for ${brand.name} before it ships. Judge CRAFT as well as correctness. A section is "fix" if ANY of: broken for a live page (unstyled, empty shell, unusable on mobile, shows a foreign brand name, references an image not in its verified list); FLAT DESIGN (one boring stack of identical cards, no clear focal point, no hierarchy between display and body, wall-of-text with no visual relief); IGNORES THE DESIGN DIRECTION (composition contradicts the planned layout, motion contract missing — no data-rev, no hover state, no unique keyframes); or WASTED SPACE (giant empty regions, content hugging one edge). Stylistic taste ALONE is not a fix reason. Respond with ONLY JSON: {"verdicts":[{"id":"...","verdict":"good"|"fix","note":"<=10 words"}]}`,
         },
         { role: 'user', content: digest },
       ],
@@ -523,6 +558,25 @@ a{color:inherit;text-decoration:none}
 .ph:hover{transform:scale(1.02) translateY(-3px);filter:saturate(1.05) contrast(1.05);box-shadow:var(--shadow-lift)}
 .lift{transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)}
 .lift:hover{transform:translateY(-4px);box-shadow:var(--shadow-lift)}
+/* v13 CRAFT primitives — sections compose with these like a design system */
+.glass{background:color-mix(in srgb,var(--surface) 74%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--border)}
+.text-gradient{background:linear-gradient(100deg,var(--ink) 25%,var(--accent) 65%,var(--accent2) 95%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.glow{position:relative}
+.glow::before{content:"";position:absolute;inset:-22%;background:radial-gradient(50% 50% at 50% 50%,color-mix(in srgb,var(--accent) 24%,transparent),transparent 72%);filter:blur(42px);z-index:0;pointer-events:none}
+.glow>*{position:relative;z-index:1}
+.bento{display:grid;gap:var(--sp3);grid-template-columns:repeat(12,1fr)}
+.bento>*{grid-column:span 4}
+.bento>.span-6{grid-column:span 6}.bento>.span-8{grid-column:span 8}.bento>.span-12{grid-column:span 12}
+@media(max-width:760px){.bento>*{grid-column:1/-1}}
+.duo{position:relative;isolation:isolate}
+.duo::after{content:"";position:absolute;inset:0;border-radius:inherit;background:color-mix(in srgb,var(--accent) 22%,transparent);mix-blend-mode:multiply;pointer-events:none}
+.arch{border-radius:calc(var(--r) * 8) calc(var(--r) * 8) var(--r) var(--r);overflow:hidden}
+.hairline{border-top:1px solid var(--border)}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--muted) 34%,transparent);border-radius:99px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--accent) 55%,transparent)}
 /* v12 WIRING component layer — tabs, accordions, dialogs, forms, snap rows */
 .tabs{display:flex;gap:var(--sp2);flex-wrap:wrap;border-bottom:1px solid var(--border)}
 .tabs [data-tab]{appearance:none;background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer;transition:color .15s ease,border-color .15s ease}
@@ -825,6 +879,13 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
   // 1. PLAN — information architecture (or reuse the stored plan).
   const plan = preplanned || (await planSections(env, { kind, brief, brand: identity, site, thought, content, skillsBlock, lead, understanding, team }));
   trace('plan', true, plan.ai, `${plan.sections.length} sections planned${plan.ai ? '' : ' · classic plan'}`);
+  if (team) {
+    team.record('architect', 'section plan locked', {
+      ok: true, ai: false,
+      detail: plan.sections.map((s) => s.name).join(' · ').slice(0, 120),
+      artifact: { type: 'plan', label: `${plan.sections.length}-section architecture`, detail: plan.sections.map((s) => `${s.id}: ${s.name}`).join(' · ') },
+    });
+  }
 
   // 1b. PHOTOGRAPHY (v11) — the Photographer sources and verifies real
   //     imagery for the sections that need it. Deterministic queries from
@@ -843,7 +904,13 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
   }
   const imageCount = photography.images.length;
   if (imageCount || photography.ai) {
-    if (team) team.record('photographer', 'casting the photography', { ok: true, ai: photography.ai, detail: imageCount ? `${imageCount} verified image(s) placed${photography.vibe ? ` · ${photography.vibe.slice(0, 60)}` : ''}` : 'nothing fit — clean typography wins' });
+    if (team) {
+      team.record('photographer', 'casting the photography', {
+        ok: true, ai: photography.ai,
+        detail: imageCount ? `${imageCount} verified image(s) placed${photography.vibe ? ` · ${photography.vibe.slice(0, 60)}` : ''}` : 'nothing fit — clean typography wins',
+        artifact: imageCount ? { type: 'photos', label: `${imageCount} photograph${imageCount === 1 ? '' : 's'} cast`, detail: photography.images.map((im) => im.alt || im.section).filter(Boolean).slice(0, 4).join(' · ') } : null,
+      });
+    }
   } else if (team) {
     team.record('photographer', 'scouting real photography', { ok: true, ai: false, detail: 'no verified imagery — pure CSS art direction' });
   }
@@ -896,6 +963,15 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
     } else {
       coded.push({ id: section.id, ...out });
       trace(`code:${section.id}`, true, true, `${section.name} coded (${out.html.length + out.css.length} chars)`);
+      // v13 TRANSPARENCY: the row carries the actual code — the app
+      // expands it in a shell view while the build is still running.
+      if (team) {
+        team.record('engineer', `shipped "${section.name}"`, {
+          ok: true, ai: false,
+          detail: `${out.html.length + out.css.length} chars hand-written`,
+          code: codePayload(section, out),
+        });
+      }
     }
   }
 
@@ -956,7 +1032,13 @@ export async function codegenSite(env, { kind, brief, brand, site = null, though
   // 4. WIRE — deterministic assembly (cannot produce a malformed page).
   const html = assembleSite({ design: thought.design, brand: identity, content, coded, plan, kind, brief });
   trace('wire', true, false, `${coded.length} sections wired · fonts + motion + identity`);
-  if (team) team.record('builder', 'wiring & hosting the page', { ok: true, ai: false, detail: `${coded.length} sections assembled with fonts + motion` });
+  if (team) {
+    team.record('builder', 'wiring & hosting the page', {
+      ok: true, ai: false,
+      detail: `${coded.length} sections assembled with fonts + motion`,
+      artifact: { type: 'site', label: `${(html.length / 1024).toFixed(1)} KB page assembled`, detail: `${coded.length} sections · ${thought.design.fontPair ? `${thought.design.fontPair.display} × ${thought.design.fontPair.body}` : 'font pairing'} · ${photography.images.length} photo(s)` },
+    });
+  }
 
   return { html, plan, coded, images: photography.images, stages: { reviewed, verdicts: qaVerdicts } };
 }

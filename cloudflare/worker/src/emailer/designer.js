@@ -377,7 +377,10 @@ export async function researchIntelligence(env, { queries, brief = '', brand, si
 
     // ROUND 2 — chase the one concrete gap the synthesis named. Merge the
     // new facts (deduped by prefix overlap) without a second synthesis
-    // call: the new raw lines are appended as direct facts.
+    // call: the new raw lines are appended as direct facts. v13 DEEP
+    // RESEARCH: the Researcher also OPENS the single most credible page
+    // from round 1 and reads it — page-level truth (numbers, names,
+    // specifics) that search snippets are too shallow to carry.
     if (followUp && followUp.length > 8) {
       try {
         const round2 = await gatherRawResults([followUp]);
@@ -397,6 +400,41 @@ export async function researchIntelligence(env, { queries, brief = '', brand, si
         }
       } catch { /* round 2 is a bonus, never a failure */ }
     }
+
+    // v13 DEEP RESEARCH — read one credible source in full (bounded):
+    // the most authoritative URL from the raw results, its readable text
+    // mined for 2-3 hard facts the snippets did not carry. Never throws.
+    try {
+      const { webFetch } = await import('./research.js');
+      const credible = items.find((r) => (
+        /^https?:\/\//.test(r?.url || '')
+        && !/\.pdf($|\?)/i.test(r.url)
+        && !/(facebook|instagram|tiktok|x\.com|twitter|linkedin|pinterest)\./i.test(r.url)
+      ));
+      if (credible?.url) {
+        const page = await webFetch({ url: credible.url });
+        const text = String(page?.text || '');
+        if (text.length > 400) {
+          if (team) {
+            team.record('researcher', 'reading the primary source', {
+              ok: true, ai: false,
+              detail: `opened ${String(credible.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 60)}`,
+            });
+          }
+          // Surface the densest fact-bearing lines to the copywriter's
+          // intelligence block (deterministic pick: numbers and named
+          // specifics beat boilerplate).
+          const dense = text
+            .split(/(?<=[.!?])\s+/)
+            .filter((s) => /\d/.test(s) && s.length > 45 && s.length < 260)
+            .slice(0, 3)
+            .map((s) => s.trim());
+          if (dense.length) {
+            facts = [...facts, ...dense.map((d) => `${d.slice(0, 150)} [source: ${String(credible.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 60)}]`)].slice(0, 10);
+          }
+        }
+      }
+    } catch { /* deep read is a bonus */ }
 
     if (!facts.length) return { block: rawBlock, ai: false, follow_up: '' };
     const block = [

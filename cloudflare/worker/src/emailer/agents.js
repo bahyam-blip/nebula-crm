@@ -101,9 +101,9 @@ export function createTeamRun(meta = {}, sink = null) {
         summary: run.summary(),
       };
     },
-    record(key, action, { ok = true, ai = true, ms = 0, detail = '' } = {}) {
+    record(key, action, { ok = true, ai = true, ms = 0, detail = '', code = null, artifact = null } = {}) {
       const a = AGENT_TEAM[key] || { name: String(key || 'agent'), emoji: '🤖', role: 'specialist' };
-      run.trace.push({
+      const row = {
         agent: a.name,
         emoji: a.emoji,
         role: a.role,
@@ -112,7 +112,28 @@ export function createTeamRun(meta = {}, sink = null) {
         ai: ai === true,
         ms: Math.max(1, Math.round(ms || 0)),
         detail: String(detail || '').slice(0, 140),
-      });
+      };
+      // v13 TRANSPARENCY — rows can carry the actual CODE the agent just
+      // wrote (bounded preview; the app expands it in a shell view) and
+      // ARTIFACT events (design system, plan, photography, assembly) so
+      // the user watches real deliverables materialize, not just labels.
+      if (code && typeof code === 'object') {
+        row.code = {
+          lang: String(code.lang || 'html').slice(0, 12),
+          label: String(code.label || '').slice(0, 60),
+          preview: String(code.preview || '').slice(0, 900),
+          lines: Math.max(1, Math.round(Number(code.lines) || 1)),
+          chars: Math.max(1, Math.round(Number(code.chars) || 1)),
+        };
+      }
+      if (artifact && typeof artifact === 'object') {
+        row.artifact = {
+          type: String(artifact.type || 'artifact').slice(0, 16),
+          label: String(artifact.label || '').slice(0, 80),
+          detail: String(artifact.detail || '').slice(0, 160),
+        };
+      }
+      run.trace.push(row);
       emit();
     },
     stage(name, ok, ai, detail) {
@@ -145,10 +166,24 @@ export async function runAgent(env, team, key, action, messages, opts = {}, deta
   try {
     const out = await sarvamChat(env, messages, opts);
     let detail = '';
+    let code = null;
+    let artifact = null;
     if (typeof detailFn === 'function') {
-      try { detail = String(detailFn(out) || ''); } catch { detail = ''; }
+      try {
+        // v13: the detailFn may return a plain string (the human line) or
+        // an object { detail, code, artifact } when the row should carry
+        // the code just written and/or an artifact event.
+        const d = detailFn(out);
+        if (d && typeof d === 'object') {
+          detail = String(d.detail || '');
+          code = d.code || null;
+          artifact = d.artifact || null;
+        } else {
+          detail = String(d || '');
+        }
+      } catch { detail = ''; }
     }
-    T.record(key, action, { ok: true, ai: true, ms: Date.now() - t0, detail });
+    T.record(key, action, { ok: true, ai: true, ms: Date.now() - t0, detail, code, artifact });
     return out;
   } catch (e) {
     T.record(key, action, { ok: false, ai: true, ms: Date.now() - t0, detail: String(e?.message || e) });

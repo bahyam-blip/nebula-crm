@@ -56,6 +56,7 @@ class StudioState {
     this.stageIndex = 0,
     this.liveTrace = const [],
     this.billing,
+    this.lastReport,
     this.error,
   });
 
@@ -79,6 +80,11 @@ class StudioState {
   /// v12: the user's plan + quota (null while loading / on old workers).
   final BillingSnapshot? billing;
 
+  /// v13: the BUILD REPORT of the most recent build — the deterministic
+  /// handover sheet (stack, technology, front end, back end, crew) the
+  /// Team tab renders once the run finishes.
+  final BuildReport? lastReport;
+
   final String? error;
 
   bool get anyHostingConnected =>
@@ -96,6 +102,8 @@ class StudioState {
     bool clearTrace = false,
     BillingSnapshot? billing,
     bool clearBilling = false,
+    BuildReport? lastReport,
+    bool clearReport = false,
     String? error,
     bool clearError = false,
   }) =>
@@ -108,6 +116,7 @@ class StudioState {
         stageIndex: stageIndex ?? this.stageIndex,
         liveTrace: clearTrace ? const [] : (liveTrace ?? this.liveTrace),
         billing: clearBilling ? null : (billing ?? this.billing),
+        lastReport: clearReport ? null : (lastReport ?? this.lastReport),
         error: clearError ? null : (error ?? this.error),
       );
 }
@@ -168,7 +177,14 @@ class StudioController extends StateNotifier<StudioState> {
           seen = s.trace.length;
           state = state.copyWith(liveTrace: s.trace);
         }
-        if (s.status != 'running') return; // done/error/timeout — final doc
+        if (s.status != 'running') {
+          // v13: the run doc's final payload carries the build report —
+          // land it even if the POST response races us (covers timeouts).
+          if (s.report != null) {
+            state = state.copyWith(lastReport: s.report);
+          }
+          return; // done/error/timeout — final doc
+        }
       } on StudioApiException {
         continue; // old server (404: no run doc) or a network blip — keep going
       }
@@ -223,12 +239,12 @@ class StudioController extends StateNotifier<StudioState> {
     String? ctaUrl,
     void Function(StudioSite site)? onDone,
   }) async {
-    state = state.copyWith(building: true, clearError: true);
+    state = state.copyWith(building: true, clearError: true, clearReport: true);
     _startStages();
     try {
       final runId = _newRunId();
       unawaited(_watchRun(runId)); // telemetry only — never throws
-      final site = await _api.buildSite(
+      final (site, report) = await _api.buildSite(
         title: title,
         brief: brief,
         kind: kind,
@@ -238,7 +254,9 @@ class StudioController extends StateNotifier<StudioState> {
         runId: runId,
       );
       _stopStages();
-      state = state.copyWith(building: false);
+      // v13: keep the handover sheet — the Team tab renders it right
+      // after the run, and the user can reopen it from the sites ledger.
+      state = state.copyWith(building: false, lastReport: report);
       await refresh();
       onDone?.call(site);
     } on StudioApiException catch (e) {
@@ -325,6 +343,16 @@ class StudioController extends StateNotifier<StudioState> {
 
   /// v12: create a pending upgrade order (manual activation).
   Future<String> checkout(String planId) => _api.createCheckout(planId);
+
+  /// v13: dismiss the build report card on the Team tab.
+  void dismissReport() {
+    state = state.copyWith(clearReport: true);
+  }
+
+  /// v13: fetch the stored build report for any artifact (sites ledger →
+  /// "Build report"). Returns null when nothing is stored (pre-v13 build
+  /// or old worker).
+  Future<BuildReport?> loadReport(String artifactId) => _api.fetchReport(artifactId);
 
   @override
   void dispose() {

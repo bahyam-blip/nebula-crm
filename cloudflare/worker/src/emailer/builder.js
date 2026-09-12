@@ -36,12 +36,13 @@ import { extractSiteBrand, siteIdentityBlock, scrubSiteHtml } from './sitebrand.
 import { designBrief, researchIntelligence, writeCopy, defaultCopy, mergeCopy, applyCtaOverrides, applyRefinement, extractSiteHtml, sanitizeCopy } from './designer.js';
 import { renderSite, normalizeDesign, themeForStyleHint } from './site_templates.js';
 import { codegenSite, codeSection, reviewSections, assembleSite, injectCanonical } from './codegen.js';
-import { fontPairFor } from './mastery.js';
+import { fontPairFor, policyNeeds } from './mastery.js';
 import { hashSeed } from './designer.js';
 import { checkQuota, consumeBuild, consumeRefine } from './plans.js';
 import { skillsForDomain } from './skills.js';
 import { rateLimit, sha256Hex } from './guard.js';
 import { esc } from './htmlutil.js';
+import { buildReport } from './report.js';
 
 const SITE_KINDS = ['landing', 'promo', 'event', 'portfolio', 'webapp', 'report'];
 const ARTIFACT_LIST_CAP = 60;
@@ -162,10 +163,13 @@ HARD RULES:
  * data model, screens. The engineer then codes WITH this plan (real
  * full-stack thinking instead of a one-shot guess). Never throws.
  */
-async function planWebapp(env, { title, brief, site }) {
+async function planWebapp(env, { title, brief, site, team = null }) {
   try {
-    const j = await sarvamChat(
+    const j = await runAgent(
       env,
+      team,
+      'architect',
+      'planning the app',
       [
         {
           role: 'system',
@@ -175,7 +179,8 @@ Rules: ONE core interaction done really well; features serve THIS business; no a
         },
         { role: 'user', content: `APP FOR: ${site?.name || 'the client'}\nTITLE: ${title}\nBRIEF: ${String(brief).slice(0, 1200)}\nPlan it now.` },
       ],
-      { json: true, maxTokens: 700, temperature: 0.5 }
+      { json: true, maxTokens: 700, temperature: 0.5 },
+      (out) => `planned: ${Array.isArray(out?.features) ? out.features.length : 0} features`
     );
     if (!j || !Array.isArray(j.features) || !j.features.length) return null;
     return {
@@ -241,7 +246,7 @@ render();
 }
 
 /** AI-authored webapp with truncation retry + deterministic fallback. */
-async function buildWebapp(env, { title, brief, style, brand, site }) {
+async function buildWebapp(env, { title, brief, style, brand, site, team = null }) {
   const s = site || brand;
   // Owner facts only when the app IS the owner's own business.
   const facts = s.isOwnerBusiness ? (profileToFacts(s.profile || {}).facts || {}) : {};
@@ -251,7 +256,7 @@ async function buildWebapp(env, { title, brief, style, brand, site }) {
   // the app's name, core loop, features and DATA MODEL (entity/fields),
   // then the engineer codes with that plan — full-stack thinking, not a
   // one-shot guess. Falls back silently to plan-less coding.
-  const plan = await planWebapp(env, { title, brief, site: s });
+  const plan = await planWebapp(env, { title, brief, site: s, team });
   let planBlock = '';
   if (plan) {
     planBlock = [
@@ -393,6 +398,19 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
   // 2. THINK — the Art Director's design system + research queries.
   const thought = await designBrief(env, { kind, brief, style, brand, site, skillsBlock: designSkills.block, lead, understanding, team });
   team.stage('think', true, thought.ai, `${thought.design.themeLabel}${thought.ai ? ' · AI art direction' : ' · classic direction'} · ${thought.design.hero} hero${thought.design.motion_intensity ? ` · ${thought.design.motion_intensity} motion` : ''}`);
+  // v13 TRANSPARENCY: the design system ships as a visible artifact.
+  if (team) {
+    const d = thought.design;
+    team.record('director', 'locking the design system', {
+      ok: true, ai: thought.ai,
+      detail: `${d.themeLabel || d.theme} · ${d.palette?.accent || ''} · ${d.fontPair ? `${d.fontPair.display} × ${d.fontPair.body}` : d.font || ''}`,
+      artifact: {
+        type: 'design',
+        label: `${d.themeLabel || d.theme} design system`,
+        detail: [d.palette?.accent ? `accent ${d.palette.accent}` : '', d.palette?.bg ? `bg ${d.palette.bg}` : '', d.fontPair ? `${d.fontPair.display} × ${d.fontPair.body}` : '', d.harmony ? `${d.harmony} harmony` : '', d.motion_intensity ? `${d.motion_intensity} motion` : ''].filter(Boolean).join(' · '),
+      },
+    });
+  }
 
   // 3. RESEARCH — the Researcher gathers live facts and SYNTHESIZES them
   //    into market intelligence (v10: up to 4 queries and a SECOND round
@@ -499,6 +517,9 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       team: team.trace,
       teamSummary: team.summary(),
       researched: Boolean(facts),
+      researchQueries: queries,
+      researchAi: researchAi,
+      researchFacts: facts ? facts.length : 0,
       skills: designSkills.learnedCount,
       engine: 'codegen',
       sections: cg.plan.sections,
@@ -509,6 +530,8 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       leaksScrubbed: leakCount,
       reflected,
       understanding,
+      qaVerdicts: cg.stages?.verdicts || {},
+      reworked: cg.stages?.reviewed || 0,
       deep: lead.deep === true,
     };
   } catch (e) {
@@ -516,9 +539,11 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
     team.record('builder', 'shipping the engine render', { ok: true, ai: false, detail: 'AI page unviable — deterministic engine shipped the build' });
     team.stage('render', true, false, 'engine fallback — deterministic render');
     let html = renderSite({ kind, design: thought.design, content, brand: site });
+    let fbLeaks = 0;
     try {
       const scrubbed = scrubSiteHtml(html, site, brand);
       html = scrubbed.html;
+      fbLeaks = scrubbed.leaks;
     } catch { /* keep raw */ }
     return {
       html,
@@ -528,13 +553,19 @@ async function buildViaAgent(env, store, uid, { kind, title, brief, style, ctaAr
       team: team.trace,
       teamSummary: team.summary(),
       researched: Boolean(facts),
+      researchQueries: queries,
+      researchAi: researchAi,
+      researchFacts: facts ? facts.length : 0,
       skills: designSkills.learnedCount,
       engine: 'template',
       sections: null,
       nav: null,
       images: [],
       siteName: site.name,
+      leaksScrubbed: fbLeaks,
       understanding,
+      qaVerdicts: {},
+      reworked: 0,
       deep: lead.deep === true,
     };
   }
@@ -619,23 +650,52 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     return { ok: false, upgradeRequired: true, plan: quota.plan?.id, usage: quota.usage, error: quota.error };
   }
 
-  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '', deep = false, understanding = null, siteName = site.name, leaksScrubbed = 0, images = [];
+  const t0 = Date.now();
+  let html, builder, stages = [], plan = null, teamTrace = [], teamSummary = null, reflected = '', deep = false, understanding = null, siteName = site.name, leaksScrubbed = 0, images = [], design = null, qaVerdicts = {}, reworked = 0, researchMeta = null, webappPlan = null;
   try {
     if (kind === 'webapp') {
-      const r = await buildWebapp(env, { title: effTitle, brief, style, brand, site });
+      // v13: the webapp path runs a REAL live team too — the run sink
+      // streams architect/engineer/builder rows while the request runs.
+      const team = createTeamRun({ kind, title: effTitle }, liveSink);
+      team.record('lead', 'reading the app brief', { ok: true, ai: false, detail: `${effTitle.slice(0, 50)} · ${String(brief).slice(0, 70)}` });
+      const r = await buildWebapp(env, { title: effTitle, brief, style, brand, site, team });
       html = r.html;
       builder = r.builder;
+      webappPlan = r.plan || null;
+      if (r.plan) {
+        team.record('architect', 'app plan locked', {
+          ok: true, ai: true,
+          detail: r.plan.coreLoop || 'core loop planned',
+          artifact: { type: 'plan', label: `${r.plan.features.length} features · ${(r.plan.screens || ['Home']).join(', ')}`, detail: `data model: ${r.plan.data.entity} { ${(r.plan.data.fields || []).join(', ')} }` },
+        });
+      }
+      team.record('engineer', 'hand-coding the single-file app', {
+        ok: builder === 'ai', ai: builder === 'ai',
+        detail: builder === 'ai' ? `${html.length} chars, works offline` : 'deterministic app shell',
+        code: { lang: 'html', label: effTitle.slice(0, 40), preview: String(html).slice(0, 860), lines: (String(html).match(/\n/g) || []).length, chars: html.length },
+      });
       try {
         const scrubbed = scrubSiteHtml(html, site, brand);
         html = scrubbed.html;
         leaksScrubbed = scrubbed.leaks;
       } catch { /* keep raw */ }
+      team.record('builder', 'wiring & hosting the app', {
+        ok: true, ai: false,
+        detail: 'sanitized + hosted',
+        artifact: { type: 'site', label: `${(html.length / 1024).toFixed(1)} KB app assembled`, detail: 'offline data layer · single file' },
+      });
       stages = [
         { stage: 'think', ok: true, ai: builder === 'ai', detail: 'app architecture' },
         { stage: 'write', ok: true, ai: builder === 'ai', detail: builder === 'ai' ? 'app coded by AI' : 'signature app shell' },
         { stage: 'render', ok: true, ai: false, detail: 'sanitized + hosted' },
       ];
-      teamTrace = [{ agent: 'Engineer', emoji: '🛠️', role: 'hand-codes the sections', action: 'coding the single-file web app', ok: builder === 'ai', ai: builder === 'ai', ms: 0, detail: builder === 'ai' ? 'app hand-coded in one file' : 'signature app shell' }];
+      teamTrace = team.trace;
+      teamSummary = team.summary();
+      plan = {
+        kind, title: effTitle, brief: brief.slice(0, 4000), style,
+        site_name: site.name, design: null, engine: 'webapp',
+        sections: null, nav: null, coded: null, images: [],
+      };
     } else {
       const r = await buildViaAgent(env, store, user?.uid || '', { kind, title: effTitle, brief, style, ctaArgs, brand, site, sink: liveSink });
       html = r.html;
@@ -654,6 +714,12 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
       siteName = r.siteName || site.name;
       leaksScrubbed = r.leaksScrubbed || 0;
       images = r.images || [];
+      design = r.design || null;
+      qaVerdicts = r.qaVerdicts || {};
+      reworked = r.reworked || 0;
+      researchMeta = r.researched
+        ? { queries: r.researchQueries || [], ai: r.researchAi === true, facts: r.researchFacts || 0 }
+        : null;
       plan = {
         kind, title: effTitle, brief: brief.slice(0, 4000), style,
         site_name: siteName,
@@ -671,7 +737,7 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
   } catch (e) {
     // The pipeline is designed not to throw; this is the last-resort net.
     console.error('[builder] pipeline error, using signature builder:', e?.stack || e);
-    const design = normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, seedAccent: site.color || undefined });
+    design = normalizeDesign({ theme: themeForStyleHint(style, kind), palette: {} }, { kind, styleHint: style, seedAccent: site.color || undefined });
     const content = applyCtaOverrides(defaultCopy({ kind, title: effTitle, brief, brand: site }), ctaArgs);
     html = renderSite({ kind, design, content, brand: site });
     try {
@@ -705,6 +771,39 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
 
   if (plan && store) await store.put(`agent:siteplan:${id}`, JSON.stringify(plan)).catch(() => {});
 
+  // v13 TRANSPARENCY — the deterministic BUILD REPORT: what was built,
+  // the stack, the technology, front end, back end, quality gates, the
+  // crew that made it. Stored with the artifact, returned in the
+  // response and streamed into the run doc so the app renders it as the
+  // build's final deliverable sheet.
+  let report = null;
+  try {
+    report = buildReport({
+      kind,
+      title: effTitle,
+      brand: siteName,
+      url: finalUrl,
+      html,
+      builder,
+      plan,
+      coded: Array.isArray(plan?.coded) ? plan.coded : null,
+      design: design || {},
+      images,
+      team: teamTrace,
+      teamSummary,
+      understanding,
+      lead: webappPlan ? { page_goal: webappPlan.coreLoop, audience: '' } : null,
+      research: researchMeta,
+      verdicts: qaVerdicts,
+      reworked,
+      leaks: leaksScrubbed,
+      skills: [reflected].filter(Boolean),
+      buildMs: Date.now() - t0,
+      policy: policyNeeds(brief, kind),
+    });
+    if (store) await store.put(`agent:report:${id}`, JSON.stringify(report)).catch(() => {});
+  } catch { /* the report is a deliverable, never a failure */ }
+
   await putArtifact(store, user?.uid || '', {
     id, kind, title: effTitle, url: finalUrl, builder, bytes: html.length, sha256: digest,
     version: 1, versions: [{ v: 1, at: new Date().toISOString(), bytes: html.length, sha256: digest }],
@@ -731,6 +830,7 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
         reflected,
         deep,
         understanding,
+        report,
         note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
       },
     });
@@ -755,6 +855,7 @@ export async function buildWebsite(env, store, user, args, origin = '', { sink =
     reflected,
     deep,
     understanding,
+    report,
     note: `"${effTitle}" is LIVE at ${finalUrl} — share this link with anyone.`,
   };
 }
@@ -900,6 +1001,7 @@ export async function refineSite(env, store, user, args, origin = '') {
             coded,
             plan: { sections: plan.sections, nav: plan.nav || plan.sections.map((s) => s.id).slice(0, 4) },
             kind,
+            brief: updateBrief, // v13 fix: the policy layer must see the update brief too
           }).trim();
           nextSections = plan.sections;
           nextNav = plan.nav || plan.sections.map((s) => s.id).slice(0, 4);
@@ -1019,8 +1121,62 @@ export async function refineSite(env, store, user, args, origin = '') {
     sha256: digest,
     team: team.trace,
     team_summary: team.summary(),
+    report: refreshReport(env, store, user, { id, html, kind, title, plan: { ...plan, content, engine: nextEngine, sections: nextSections, nav: nextNav, coded: nextCoded }, site, version, note }),
     note: `"${title}" updated to v${version} — ${note}. Same link, new look.`,
   };
+}
+
+/**
+ * v13 — regenerate + persist the build report after a refine (best-effort;
+ * a report failure never fails the refine). Returns the fresh report.
+ */
+function refreshReport(env, store, user, { id, html, kind, title, plan, site, version, note }) {
+  try {
+    const report = buildReport({
+      kind,
+      title,
+      brand: plan?.site_name || site.name,
+      url: plan?.url || '',
+      html,
+      builder: kind === 'webapp' ? 'ai' : (plan?.engine === 'codegen' ? 'ai' : 'ai+engine'),
+      plan,
+      coded: Array.isArray(plan?.coded) ? plan.coded : null,
+      design: plan?.design || {},
+      images: Array.isArray(plan?.images) ? plan.images : [],
+      team: [],
+      teamSummary: null,
+      understanding: null,
+      lead: null,
+      research: null,
+      verdicts: {},
+      reworked: 0,
+      leaks: 0,
+      skills: [],
+      buildMs: 0,
+      policy: policyNeeds(plan?.brief || '', kind),
+    });
+    if (store) {
+      store.put(`agent:report:${id}`, JSON.stringify(report)).catch(() => {});
+    }
+    return report;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * v13 — READ a stored build report (the deterministic handover sheet:
+ * stack, technology, front end, back end, quality, crew). Owner-scoped:
+ * the artifact must belong to the caller.
+ */
+export async function getBuildReport(store, uid, artifactId) {
+  const id = String(artifactId || '').trim();
+  if (!store || !/^[a-z0-9_]+$/i.test(id)) return { ok: false, error: 'report not found' };
+  const doc = await getArtifactDoc(store, uid, id);
+  if (!doc || doc.kind === 'note') return { ok: false, error: 'report not found' };
+  const report = safeParse(await store.get(`agent:report:${id}`));
+  if (!report) return { ok: false, error: 'no report stored for this artifact (built before v13)' };
+  return { ok: true, id, report };
 }
 
 /* ── Live runs (v9.1) — watch the team work, in real time ─────────── */

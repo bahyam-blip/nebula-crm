@@ -41,6 +41,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   String _filter = 'all';
   String _query = '';
 
+  /// v13: trace-row indexes whose code shell is expanded.
+  final _expandedCode = <int>{};
+
   static const _kinds = <(String, IconData, String, String)>[
     ('landing', Icons.rocket_launch_outlined, 'Landing', 'Turns visitors into customers'),
     ('promo', Icons.local_offer_outlined, 'Offer', 'A deal page with urgency'),
@@ -897,6 +900,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                       case 'open':
                         _openPreview(site);
                         break;
+                      case 'report':
+                        _openReport(site);
+                        break;
                       case 'copy':
                         _copyToClipboard(dep?.url ?? site.url ?? '');
                         break;
@@ -910,6 +916,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                   },
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'open', height: 40, child: Text('Preview', style: TextStyle(fontSize: 13.5))),
+                    PopupMenuItem(value: 'report', height: 40, child: Text('Build report', style: TextStyle(fontSize: 13.5))),
                     PopupMenuItem(value: 'copy', height: 40, child: Text('Copy link', style: TextStyle(fontSize: 13.5))),
                     PopupMenuItem(value: 'browser', height: 40, child: Text('Open in browser', style: TextStyle(fontSize: 13.5))),
                     PopupMenuItem(value: 'host', height: 40, child: Text('Publish & domains', style: TextStyle(fontSize: 13.5))),
@@ -968,9 +975,15 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         else ...[
           _thinkingCard(live.last.agent, live.last.action),
           const SizedBox(height: 12),
-          ...live.asMap().entries.map((e) => _traceRow(e.value, isLast: e.key == live.length - 1)),
+          ...live.asMap().entries.map((e) => _traceRow(e.value, isLast: e.key == live.length - 1, index: e.key)),
         ],
       ] else ...[
+        // v13: the BUILD REPORT — the team's handover sheet for the last
+        // build (stack, technology, front end, back end, crew).
+        if (state.lastReport != null) ...[
+          _reportCard(state.lastReport!),
+          const SizedBox(height: 16),
+        ],
         // Idle: the team, introduced — this is WHAT the user is paying for.
         const OverlineLabel('THE STUDIO TEAM', color: AppColors.textTertiary),
         const SizedBox(height: 4),
@@ -1125,9 +1138,10 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     ).animate(onPlay: (c) => c.repeat(reverse: true)).fadeIn(duration: 600.ms);
   }
 
-  Widget _traceRow(AgentRunRow row, {bool isLast = false}) {
+  Widget _traceRow(AgentRunRow row, {bool isLast = false, int index = 0}) {
     final secs = row.ms / 1000;
     final time = secs >= 10 ? '${secs.round()}s' : secs >= 1 ? '${secs.toStringAsFixed(1)}s' : '${row.ms}ms';
+    final codeOpen = _expandedCode.contains(index);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1183,6 +1197,23 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
                         style: const TextStyle(fontSize: 11, height: 1.35, color: AppColors.textTertiary),
                       ),
                     ),
+                  // v13: the deliverables this row produced.
+                  if (row.artifact != null) ...[
+                    const SizedBox(height: 7),
+                    _artifactChip(row.artifact!),
+                  ],
+                  if (row.code != null) ...[
+                    const SizedBox(height: 7),
+                    _codeToggle(row.code!, open: codeOpen, onToggle: () {
+                      setState(() {
+                        if (codeOpen) {
+                          _expandedCode.remove(index);
+                        } else {
+                          _expandedCode.add(index);
+                        }
+                      });
+                    }),
+                  ],
                 ],
               ),
             ),
@@ -1190,6 +1221,484 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         ],
       ),
     ).animate().fadeIn(duration: 240.ms).slideY(begin: 0.3, end: 0, duration: 240.ms, curve: Curves.easeOutCubic);
+  }
+
+  // ── v13 TRANSPARENCY: code shells, artifact chips, build report ────
+
+  /// "VIEW CODE" toggle + the mono shell it expands into.
+  Widget _codeToggle(AgentCodeSnippet code, {required bool open, required VoidCallback onToggle}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: onToggle,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            decoration: BoxDecoration(
+              color: open ? AppColors.primary.withValues(alpha: 0.14) : AppColors.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: open ? AppColors.primary.withValues(alpha: 0.55) : AppColors.border),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.code_rounded, size: 12, color: open ? AppColors.primary : AppColors.textSecondary),
+                const SizedBox(width: 5),
+                Text(
+                  open ? 'HIDE CODE' : 'VIEW CODE',
+                  style: TextStyle(
+                    fontFamily: 'JetBrains Mono',
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.12,
+                    color: open ? AppColors.primary : AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '${code.lines}L',
+                  style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9, color: AppColors.textTertiary),
+                ),
+                const SizedBox(width: 4),
+                AnimatedRotation(
+                  turns: open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Icon(Icons.keyboard_arrow_down_rounded, size: 13, color: open ? AppColors.primary : AppColors.textTertiary),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox(width: double.infinity),
+          secondChild: _codeShell(code),
+          crossFadeState: open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 200),
+        ),
+      ],
+    );
+  }
+
+  /// The mono shell — a tiny terminal window with the code the agent
+  /// just wrote (JetBrains Mono, true-black surface, copy button).
+  Widget _codeShell(AgentCodeSnippet code) {
+    return Container(
+      margin: const EdgeInsets.only(top: 7),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: const Color(0xFF05070B),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: const BoxDecoration(
+              color: Color(0xFF0C1017),
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.terminal_rounded, size: 12, color: AppColors.textTertiary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    code.label.isEmpty ? code.lang : code.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9.5, color: AppColors.textSecondary),
+                  ),
+                ),
+                Text(
+                  '${(code.chars / 1024).toStringAsFixed(1)}KB',
+                  style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9, color: AppColors.textTertiary),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () async {
+                    await Clipboard.setData(ClipboardData(text: code.preview));
+                    if (mounted) showNebulaToast(context, 'Code copied', icon: Icons.code_rounded);
+                  },
+                  child: const Icon(Icons.copy_rounded, size: 12, color: AppColors.textTertiary),
+                ),
+              ],
+            ),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(10),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(
+                  code.preview,
+                  style: TextStyle(
+                    fontFamily: 'JetBrains Mono',
+                    fontSize: 10,
+                    height: 1.55,
+                    color: AppColors.textSecondary.withValues(alpha: 0.92),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// An artifact event — a real deliverable the team produced mid-run.
+  Widget _artifactChip(AgentArtifactEvent a) {
+    return Container(
+      padding: const EdgeInsets.all(9),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(a.glyph, size: 14, color: AppColors.primary),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  a.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                ),
+                if (a.detail.isNotEmpty)
+                  Text(
+                    a.detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10, height: 1.3, color: AppColors.textTertiary),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            a.type.toUpperCase(),
+            style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: 0.14, color: AppColors.textTertiary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The BUILD REPORT card on the Team tab — the handover sheet.
+  Widget _reportCard(BuildReport r) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 0),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: OverlineLabel('BUILD REPORT', color: AppColors.primary),
+                ),
+                GestureDetector(
+                  onTap: () => ref.read(studioProvider.notifier).dismissReport(),
+                  child: const Padding(
+                    padding: EdgeInsets.all(6),
+                    child: Icon(Icons.close_rounded, size: 15, color: AppColors.textTertiary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  r.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${r.agentCount} agents · ${r.aiCalls} AI calls · ${(r.buildMs / 1000).round()}s · ${(r.bytes / 1024).toStringAsFixed(1)} KB',
+                  style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9.5, color: AppColors.textTertiary),
+                ),
+                if (r.overview.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    r.overview,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, height: 1.4, color: AppColors.textSecondary),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+            child: _reportBody(r, compact: true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The report renderer (card-compact or full-sheet).
+  Widget _reportBody(BuildReport r, {bool compact = false}) {
+    final stackRows = compact ? r.stack.take(6).toList() : r.stack;
+    Widget overline(String t) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: OverlineLabel(t, color: AppColors.textTertiary),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        overline('STACK & TECHNOLOGY'),
+        Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            children: [
+              for (var i = 0; i < stackRows.length; i++) ...[
+                if (i > 0) Container(height: 1, color: AppColors.border.withValues(alpha: 0.55)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 92,
+                        child: Text(
+                          stackRows[i].$1,
+                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.textSecondary),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          stackRows[i].$2,
+                          style: const TextStyle(fontSize: 10.5, height: 1.45, color: AppColors.textTertiary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (!compact && r.sections.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          overline('FRONT END — SECTIONS'),
+          ...r.sections.map((s) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        s.id,
+                        style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9, fontWeight: FontWeight.w800, color: AppColors.primary),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            s.name + (s.chars != null ? '  ·  ${s.chars} chars' : ''),
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                          ),
+                          if (s.goal.isNotEmpty)
+                            Text(s.goal, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, height: 1.3, color: AppColors.textTertiary)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+        if (!compact && r.components.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          overline('BUILT-IN BEHAVIORS'),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: r.components.map((c) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Text(c, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                )).toList(),
+          ),
+        ],
+        if (r.quality.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          overline('QUALITY GATES'),
+          ...r.quality.entries.map((e) => Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.verified_outlined, size: 12, color: AppColors.success),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        '${e.key.replaceAll('_', ' ')}: ${e.value}',
+                        style: const TextStyle(fontSize: 10.5, height: 1.4, color: AppColors.textTertiary),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+        if (!compact && r.crew.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          overline('THE CREW'),
+          ...r.crew.map((c) => Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Row(
+                  children: [
+                    _monogram(c.$1),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${c.$1} — ${c.$2}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 10.5, color: AppColors.textTertiary),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+        if (!compact && (r.research.isNotEmpty || r.skills.isNotEmpty)) ...[
+          const SizedBox(height: 12),
+          overline('RESEARCH & GROWTH'),
+          if (r.research.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Text(r.research, style: const TextStyle(fontSize: 10.5, height: 1.45, color: AppColors.textTertiary)),
+            ),
+          ...r.skills.map((s) => Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.auto_awesome_rounded, size: 12, color: AppColors.primary),
+                    const SizedBox(width: 7),
+                    Expanded(child: Text(s, style: const TextStyle(fontSize: 10.5, height: 1.4, color: AppColors.textTertiary))),
+                  ],
+                ),
+              )),
+        ],
+      ],
+    );
+  }
+
+  /// Sites ledger → "Build report" — fetches the stored sheet and shows it.
+  Future<void> _openReport(StudioSite site) async {
+    final current = ref.read(studioProvider).lastReport;
+    BuildReport? r = current?.title == site.title ? current : null;
+    r ??= await ref.read(studioProvider.notifier).loadReport(site.id);
+    if (!mounted) return;
+    if (r == null) {
+      showNebulaToast(context, 'No report stored for this build (pre-v13 build).',
+          icon: Icons.info_outline_rounded, color: AppColors.warning);
+      return;
+    }
+    _showReportSheet(r);
+  }
+
+  void _showReportSheet(BuildReport r) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surfaceHigh,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        maxChildSize: 0.94,
+        builder: (context, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 34),
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: OverlineLabel('BUILD REPORT', color: AppColors.primary),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded, size: 17, color: AppColors.textTertiary),
+                ),
+              ],
+            ),
+            Text(
+              r.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              '${r.agentCount} agents · ${r.aiCalls} AI calls · ${(r.buildMs / 1000).round()}s · ${(r.bytes / 1024).toStringAsFixed(1)} KB · ${r.brand}',
+              style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9.5, color: AppColors.textTertiary),
+            ),
+            if (r.url.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                r.url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 9.5, color: AppColors.primary),
+              ),
+            ],
+            const SizedBox(height: 14),
+            _reportBody(r),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _monogram(String agent, {bool active = false}) {

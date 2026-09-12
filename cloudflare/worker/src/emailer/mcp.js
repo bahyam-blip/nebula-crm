@@ -35,7 +35,7 @@ export { serveAgentSite } from './builder.js';
 const GRANT_TTL_SECONDS = 60 * 60 * 24; // pairing grants live 24h
 const GRANT_PREFIX = 'agent:mcp:grant:';
 const MCP_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18'];
-export const SERVER_VERSION = '6.0.0';
+export const SERVER_VERSION = '7.0.0';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -284,7 +284,7 @@ export function mcpServerInfo(request, _env) {
     transport: 'JSON-RPC 2.0 (initialize, tools/list, tools/call, ping)',
     tools: Object.keys(TOOLS).length,
     capabilities: [
-      'deep-thinking multi-agent build team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified tokens + UX flow + per-brief design-DNA palettes, Copywriter, Copy Chief, Architect, Photographer sourcing verified real images, Engineers with an advanced motion system, QA Director, Builder with an identity firewall — every site carries ONLY the client brand, Reflector, Skill Researcher) with live run streaming',
+      'deep-thinking multi-agent build team (Lead with self-critique pass, Analyst, Researcher with two-round research + primary-source deep reads, Art Director with WCAG-verified tokens + UX flow + per-brief design-DNA palettes, Copywriter, Copy Chief, Architect, Photographer sourcing verified real images, Engineers with a composition library + advanced motion system, QA Director judging craft, Builder with an identity firewall — every site carries ONLY the client brand, Reflector, Skill Researcher) with live run streaming — code payloads + artifact events in the trace, and a deterministic BUILD REPORT (stack, technology, front end, back end, quality, crew) with every build',
       'surgical refine: re-code named sections only (e.g. just the hero) via refine_site.sections',
       'live CRM reads/writes (role-enforced)',
       'AI email campaign engine with HITL approval',

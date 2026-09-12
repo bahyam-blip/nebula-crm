@@ -8,6 +8,68 @@ library;
 
 import 'package:flutter/material.dart';
 
+/// The code an agent just wrote, streamed inside its trace row (v13).
+/// The Studio expands it in a mono shell view — the user reads the real
+/// code AS the team writes it.
+class AgentCodeSnippet {
+  const AgentCodeSnippet({
+    required this.lang,
+    required this.label,
+    required this.preview,
+    required this.lines,
+    required this.chars,
+  });
+
+  final String lang;
+  final String label;
+  final String preview;
+  final int lines;
+  final int chars;
+
+  factory AgentCodeSnippet.fromMap(Map<String, dynamic> m) => AgentCodeSnippet(
+        lang: (m['lang'] as String?) ?? 'html',
+        label: (m['label'] as String?) ?? '',
+        preview: (m['preview'] as String?) ?? '',
+        lines: (m['lines'] as num?)?.toInt() ?? 0,
+        chars: (m['chars'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// A deliverable event the team produced (design system, section plan,
+/// photography, assembled site) — rendered as an artifact chip (v13).
+class AgentArtifactEvent {
+  const AgentArtifactEvent({
+    required this.type,
+    required this.label,
+    required this.detail,
+  });
+
+  final String type;
+  final String label;
+  final String detail;
+
+  IconData get glyph {
+    switch (type) {
+      case 'design':
+        return Icons.palette_outlined;
+      case 'plan':
+        return Icons.account_tree_outlined;
+      case 'photos':
+        return Icons.photo_camera_outlined;
+      case 'site':
+        return Icons.integration_instructions_outlined;
+      default:
+        return Icons.dataset_outlined;
+    }
+  }
+
+  factory AgentArtifactEvent.fromMap(Map<String, dynamic> m) => AgentArtifactEvent(
+        type: (m['type'] as String?) ?? 'artifact',
+        label: (m['label'] as String?) ?? '',
+        detail: (m['detail'] as String?) ?? '',
+      );
+}
+
 /// One live row from the agent team's trace, streamed by the Worker while
 /// a build runs (Agent v9 live runs). The Studio shows these AS they land —
 /// the user watches the real team work, not a paced ticker.
@@ -21,6 +83,8 @@ class AgentRunRow {
     required this.ai,
     required this.ms,
     this.detail = '',
+    this.code,
+    this.artifact,
   });
 
   final String agent;
@@ -32,6 +96,12 @@ class AgentRunRow {
   final int ms;
   final String detail;
 
+  /// v13: the code this row shipped (expandable shell view).
+  final AgentCodeSnippet? code;
+
+  /// v13: a deliverable event (design/plan/photos/site).
+  final AgentArtifactEvent? artifact;
+
   factory AgentRunRow.fromMap(Map<String, dynamic> m) => AgentRunRow(
         agent: (m['agent'] as String?) ?? 'Agent',
         emoji: (m['emoji'] as String?) ?? '🤖',
@@ -41,6 +111,12 @@ class AgentRunRow {
         ai: m['ai'] == true,
         ms: (m['ms'] as num?)?.toInt() ?? 0,
         detail: (m['detail'] as String?) ?? '',
+        code: m['code'] is Map<String, dynamic>
+            ? AgentCodeSnippet.fromMap((m['code'] as Map<String, dynamic>))
+            : null,
+        artifact: m['artifact'] is Map<String, dynamic>
+            ? AgentArtifactEvent.fromMap((m['artifact'] as Map<String, dynamic>))
+            : null,
       );
 }
 
@@ -208,6 +284,123 @@ class StudioSite {
             .whereType<Map>()
             .map((d) => SiteDeployment.fromMap(d.cast<String, dynamic>()))
             .toList(),
+      );
+}
+
+/// v13 BUILD REPORT — the deterministic handover sheet the team ships
+/// with every build: the stack, the technology, the front end, the back
+/// end, the quality gates and the crew that made it.
+class BuildReport {
+  const BuildReport({
+    required this.title,
+    required this.kind,
+    required this.brand,
+    required this.url,
+    required this.builder,
+    required this.bytes,
+    required this.buildMs,
+    this.overview = '',
+    this.stack = const [],
+    this.sections = const [],
+    this.components = const [],
+    this.images = 0,
+    this.quality = const {},
+    this.agentCount = 0,
+    this.aiCalls = 0,
+    this.crew = const [],
+    this.research = '',
+    this.skills = const [],
+  });
+
+  final String title;
+  final String kind;
+  final String brand;
+  final String url;
+  final String builder;
+  final int bytes;
+  final int buildMs;
+  final String overview;
+  final List<(String, String)> stack; // layer → detail
+  final List<ReportSection> sections;
+  final List<String> components;
+  final int images;
+  final Map<String, String> quality;
+  final int agentCount;
+  final int aiCalls;
+  final List<(String, String)> crew; // agent → action
+  final String research;
+  final List<String> skills;
+
+  static BuildReport? fromMap(Map<String, dynamic>? m) {
+    if (m == null) return null;
+    final qualityRaw = (m['quality'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final agents = (m['agents'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final research = (m['research'] as Map?)?.cast<String, dynamic>();
+    final frontend = (m['frontend'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return BuildReport(
+      title: (m['title'] as String?) ?? '',
+      kind: (m['kind'] as String?) ?? '',
+      brand: (m['brand'] as String?) ?? '',
+      url: (m['url'] as String?) ?? '',
+      builder: (m['builder'] as String?) ?? '',
+      bytes: (m['bytes'] as num?)?.toInt() ?? 0,
+      buildMs: (m['build_ms'] as num?)?.toInt() ?? 0,
+      overview: (m['overview'] as String?) ?? '',
+      stack: ((m['stack'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((s) => ((s['layer'] as String?) ?? '', (s['detail'] as String?) ?? ''))
+          .where((s) => s.$1.isNotEmpty)
+          .toList(),
+      sections: ((frontend['sections']) as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((s) => ReportSection.fromMap(s))
+          .toList(),
+      components: ((frontend['components']) as List?)
+              ?.whereType<String>()
+              .toList() ??
+          const <String>[],
+      images: (frontend['images'] as num?)?.toInt() ?? 0,
+      quality: qualityRaw.map((k, v) => MapEntry(k, v.toString())),
+      agentCount: (agents['count'] as num?)?.toInt() ?? 0,
+      aiCalls: (agents['ai_calls'] as num?)?.toInt() ?? 0,
+      crew: ((agents['crew'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((c) => ((c['agent'] as String?) ?? '', (c['action'] as String?) ?? ''))
+          .toList(),
+      research: research == null
+          ? ''
+          : [
+              'mode: ${(research['mode'] as String?) ?? 'live web search'}',
+              if (research['queries'] is List && (research['queries'] as List).isNotEmpty)
+                'queries: ${(research['queries'] as List).join(' · ')}',
+            ].join('  |  '),
+      skills: ((m['skills'] as List?) ?? const []).whereType<String>().toList(),
+    );
+  }
+}
+
+/// One section line of the report's front-end breakdown.
+class ReportSection {
+  const ReportSection({
+    required this.id,
+    required this.name,
+    required this.goal,
+    required this.motion,
+    this.chars,
+  });
+
+  final String id;
+  final String name;
+  final String goal;
+  final String motion;
+  final int? chars;
+
+  factory ReportSection.fromMap(Map<String, dynamic> m) => ReportSection(
+        id: (m['id'] as String?) ?? '',
+        name: (m['name'] as String?) ?? '',
+        goal: (m['goal'] as String?) ?? '',
+        motion: (m['motion'] as String?) ?? '',
+        chars: (m['chars'] as num?)?.toInt(),
       );
 }
 
