@@ -11,11 +11,17 @@ on:
 permissions:
   contents: read
 
+# The test battery gates the deploy — a full suite run takes ~12 minutes;
+# never cancel a queued deploy (that is what killed the 40558f5 run).
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy Cloudflare Worker
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
 
     steps:
       - name: Checkout source
