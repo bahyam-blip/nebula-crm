@@ -288,6 +288,7 @@ export function cssGlobalPack() {
 • Layering: base → layout → components → utilities; z-scale only 3 levels (content < nav 900 < overlay 1000).
 • Logical properties: margin-inline, padding-block, inset-inline — pages can be mirrored.
 • States: :focus-visible rings (2px accent, 3px offset), :hover lifts 4-6px max, :active compresses scale .98. prefers-reduced-motion kills all motion.
+• LAYOUT SAFETY (hard rules — a linter and the QA director both check): position:absolute ONLY for decorative layers/scrims (pointer-events:none, z-index:-1/0) — never position text, cards or CTAs; position:fixed is forbidden inside sections; 100svh instead of bare 100vh; every grid/flex child holding text gets min-width:0; equal-height card rows via grid, never float hacks.
 • Print: @media print — hide nav/marquee/ambient, black on white, links print their href.`;
 }
 

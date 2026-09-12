@@ -12,11 +12,19 @@
  *      nouns, page kind, the Lead's image_ideas).
  *   2. SOURCE  — Wikimedia Commons' open search API (no key, CORS-open,
  *      hotlinkable via upload.wikimedia.org). Landscape bitmaps only.
- *   3. ASSIGN  — one small Photographer call picks which image serves
+ *      v14: COMMONS-ONLY — the Openverse fallback was removed because its
+ *      URLs come from hosts the serve-time sanitizer strips (they were
+ *      being cast as "verified" and then deleted at assembly → the exact
+ *      broken images users saw). A candidate that cannot be served must
+ *      never be cast.
+ *   3. VERIFY  — every candidate URL gets a liveness probe (HEAD, with a
+ *      Range-GET fallback) before it can be assigned. Dead URLs die here,
+ *      not on the user's screen.
+ *   4. ASSIGN  — one small Photographer call picks which image serves
  *      which section (hero, showcase, work tiles) and writes real alt
  *      text. Degrades deterministically (hero gets the best candidate)
- *      when the AI is unreachable.
- *   4. ALLOWLIST — the codegen sanitizer now admits exactly these hosts,
+ *      when the AI is unreachable. One URL is never used twice on a page.
+ *   5. ALLOWLIST — the codegen sanitizer now admits exactly these hosts,
  *      and engineers may reference ONLY the URLs given to them. An
  *      invented URL cannot survive: it is stripped, not served broken.
  *
@@ -30,7 +38,11 @@ import { runAgent } from './agents.js';
 export const ALLOWED_IMAGE_HOSTS = ['upload.wikimedia.org', 'commons.wikimedia.org'];
 
 const FETCH_TIMEOUT_MS = 12_000;
+const VERIFY_TIMEOUT_MS = 6_000;
 const COMMONS_UA = 'NebulaStudio/1.0 (https://nebula.app; builder@nebula.app)';
+// v14 MERIDIAN: thumbs ship at 1280px — big enough for full-bleed heroes
+// on a phone, 3-6x lighter than the originals users were being handed.
+const THUMB_WIDTH = '1280';
 const KIND_SCENE = {
   landing: ['interior', 'workspace', 'storefront'],
   promo: ['product', 'display', 'offer'],
@@ -64,7 +76,7 @@ export async function searchCommons(query, { limit = 8 } = {}) {
     gsrlimit: String(Math.min(12, Math.max(4, limit))),
     prop: 'imageinfo',
     iiprop: 'url|size|mime',
-    iiurlwidth: '1600',
+    iiurlwidth: THUMB_WIDTH,
     format: 'json',
     origin: '*',
   }).toString();
@@ -98,7 +110,12 @@ export async function searchCommons(query, { limit = 8 } = {}) {
   }
 }
 
-/** Openverse fallback — CC-licensed images when Commons is blocked. */
+/**
+ * Openverse fallback — REMOVED from the sourcing chain (v14).
+ * Its results come from arbitrary hosts that the sanitizer strips at
+ * serve time, so casting them guaranteed broken images. Kept as dead
+ * code only so any external importer still resolves.
+ */
 async function searchOpenverse(query, { limit = 8 } = {}) {
   const url = 'https://api.openverse.org/v1/images/?' + new URLSearchParams({
     q: String(query).slice(0, 180),
@@ -162,7 +179,11 @@ function simplifyQuery(q) {
   return { two: words.slice(0, 2).join(' '), one: words.slice(0, 1).join(' '), last: words[words.length - 1] || '' };
 }
 
-/** One image sourcing round: provider chain × simplifying cascade. */
+/**
+ * One image sourcing round: Commons × simplifying cascade.
+ * v14: Commons ONLY. (Openverse removed — its URLs cannot survive the
+ * serve-time host allowlist, so they always rendered broken.)
+ */
 async function searchImages(query, opts = {}) {
   const { two, one, last } = simplifyQuery(query);
   // The subject noun usually sits LAST ("…dark filter coffee") — the
@@ -171,10 +192,47 @@ async function searchImages(query, opts = {}) {
   for (const q of attempts) {
     const first = await searchCommons(q, opts);
     if (first.length) return first;
-    const ov = await searchOpenverse(q, opts);
-    if (ov.length) return ov;
   }
   return [];
+}
+
+/**
+ * v14 LIVENESS PROBE — a URL is only servable if it actually responds
+ * with image bytes. HEAD first; some CDN edge configs refuse HEAD, so a
+ * 1 KB Range-GET is the fallback. A dead candidate never reaches a page.
+ */
+async function imageUrlAlive(url) {
+  try {
+    const head = await fetch(url, {
+      method: 'HEAD',
+      headers: { 'User-Agent': COMMONS_UA },
+      signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
+    });
+    if (head.ok) return true;
+    if (head.status === 405 || head.status === 403) {
+      const ranged = await fetch(url, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-1023', 'User-Agent': COMMONS_UA },
+        signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
+      });
+      try { if (ranged.body?.cancel) await ranged.body.cancel(); } catch { /* drain */ }
+      return ranged.ok;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Probe a bounded list of candidates, keep only the alive ones. */
+async function probeAlive(pool) {
+  const slice = pool.slice(0, 10);
+  const verdicts = await Promise.allSettled(slice.map((c) => imageUrlAlive(c.url)));
+  const aliveSet = new Set();
+  verdicts.forEach((v, i) => {
+    if (v.status === 'fulfilled' && v.value) aliveSet.add(slice[i].url);
+  });
+  return pool.filter((c) => aliveSet.has(c.url));
 }
 
 /**
@@ -216,7 +274,7 @@ Rules:
 export async function findSiteImages(env, { queries = [], sections = [], team = null, brief = '' } = {}) {
   if (!queries.length || !sections.length) return { images: [], vibe: '', ai: false };
   const settled = await Promise.allSettled(queries.slice(0, 3).map((q) => searchImages(q, { limit: 6 })));
-  const pool = [];
+  let pool = [];
   const seen = new Set();
   for (const s of settled) {
     for (const img of (s.status === 'fulfilled' ? s.value : [])) {
@@ -225,6 +283,8 @@ export async function findSiteImages(env, { queries = [], sections = [], team = 
       pool.push(img);
     }
   }
+  // v14: liveness gate — only URLs that actually serve bytes move on.
+  pool = await probeAlive(pool);
   if (!pool.length) return { images: [], vibe: '', ai: false };
 
   const sectionList = sections.slice(0, 5).map((s) => `${s.id} (${s.name}${s.goal ? ` — ${String(s.goal).slice(0, 60)}` : ''})`).join('; ');
@@ -252,11 +312,13 @@ export async function findSiteImages(env, { queries = [], sections = [], team = 
     const valid = new Map(pool.map((c) => [c.url, c]));
     const images = [];
     const usedSections = new Set();
+    const usedUrls = new Set(); // v14: one URL never appears on two sections
     for (const a of (Array.isArray(j?.assign) ? j.assign : [])) {
       const section = String(a?.section || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 12);
       const url = String(a?.url || '');
-      if (!section || usedSections.has(section) || !valid.has(url)) continue;
+      if (!section || usedSections.has(section) || usedUrls.has(url) || !valid.has(url)) continue;
       usedSections.add(section);
+      usedUrls.add(url);
       images.push({ section, url, alt: String(a?.alt || valid.get(url).title).slice(0, 90) });
       if (images.length >= 4) break;
     }
@@ -282,9 +344,15 @@ export async function findSiteImages(env, { queries = [], sections = [], team = 
     const source = relevant.length ? relevant : [];
     const order = sections.slice(0, 4).map((s) => s.id);
     const heroFirst = [...order.filter((id) => id === 'hero'), ...order.filter((id) => id !== 'hero')];
+    const usedUrls = new Set(); // v14: uniqueness on the deterministic path too
     const images = heroFirst
       .slice(0, 4)
-      .map((section, i) => (source[i] ? { section, url: source[i].url, alt: source[i].title } : null))
+      .map((section, i) => {
+        const cand = source.find((c) => !usedUrls.has(c.url));
+        if (!cand) return null;
+        usedUrls.add(cand.url);
+        return { section, url: cand.url, alt: cand.title };
+      })
       .filter(Boolean);
     return { images, vibe: '', ai: false };
   }

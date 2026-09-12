@@ -80,6 +80,11 @@ globalThis.fetch = async (url, init = {}) => {
     if (!openverseUp) return new Response('blocked', { status: 403 });
     return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
+  if (u.startsWith('https://upload.wikimedia.org/')) {
+    // v14: the Photographer liveness-probes candidate URLs (HEAD) before
+    // casting — the mock must serve bytes for the pool to survive.
+    return new Response('image-bytes', { status: 200 });
+  }
   if (u.startsWith('https://html.duckduckgo.com/') || u.startsWith('https://lite.duckduckgo.com/')) {
     return new Response('<html></html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
   }

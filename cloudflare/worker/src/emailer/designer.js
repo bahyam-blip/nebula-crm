@@ -464,7 +464,7 @@ const COPY_SCHEMA = `{
  "showcase": {"kicker": "", "title": "", "text": "", "art": "one emoji", "bullets": ["0-5 proof points"]},
  "testimonials": [{"quote": "1-2 sentences", "name": "Full Name", "role": "role, city"}],
  "faq": [{"q": "...", "a": "1-2 sentences"}],
- "offer": {"badge": "40% OFF", "price": "₹599", "old_price": "₹999", "note": "", "terms": "", "ends": "YYYY-MM-DDTHH:MM:SS", "perks_title": "", "perks": ["what's included"]},
+ "offer": {"badge": "40% OFF", "price": "₹599", "old_price": "₹999", "note": "", "terms": "", "ends": "future ISO datetime, YYYY-MM-DDTHH:MM:SS", "perks_title": "", "perks": ["what's included"]},
  "event": {"date_label": "Sat, 12 Oct", "time_label": "6:30 PM", "venue": "place, city", "venue_note": "", "agenda": [{"time": "6:30 PM", "item": "...", "who": ""}], "speakers": [{"name": "...", "role": "..."}]},
  "work": [{"title": "project", "tag": "category", "blurb": "1 sentence", "art": "emoji"}],
  "skills": ["skill chips"],
@@ -514,6 +514,7 @@ Craft rules — this is what makes copy convert:
 - Features: each title = an outcome ("Fitted in 30 minutes"), text = proof/how.
 - FAQ: pre-empt the real objections (price, time, trust, availability).
 - Never invent facts you were not given — keep numbers generic ("50+", "since 2019") unless the brief or MARKET FACTS state them.
+- DATES ARE FACTS: today is ${new Date().toISOString().slice(0, 10)}. Any offer "ends" or event date you write MUST be in the future — at least 2 weeks out. Never write a past date or a bare month/day.
 - "primary_cta.href": use the client's main link if given, else mailto:${site?.contactEmail || brand?.contactEmail || `hello@${slugifyClient(client)}`}.
 - If MARKET FACTS are provided, weave real specifics from them into copy and, for report kind, into report.findings/table/sources.
 - marquee: 3-6 punchy keywords for a scrolling band (cafes, studios, offers) — omit for reports.
@@ -542,6 +543,29 @@ ${skillsBlock}` : sys },
 /** Domain-ish slug from the client name for neutral mailto fallbacks. */
 function slugifyClient(name) {
   return String(name || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || 'client';
+}
+
+/**
+ * v14 DATE TRUTH — offer countdowns were shipping the model's invented
+ * dates ("25 Dec 2024" live in 2026). Rules now:
+ *   · parseable & future          → kept (ISO)
+ *   · parseable & past/<36h away  → pushed to today + 14 days
+ *   · year-less label ("28 Feb")  → resolved to the NEXT occurrence
+ *   · unparseable prose           → dropped (no countdown renders)
+ */
+export function saneEndsDate(raw, now = new Date()) {
+  const s = String(raw || '').trim();
+  if (!s || !/\d/.test(s)) return ''; // V8 parses prose like "whenever you can" — dates always contain digits
+  let d = new Date(s);
+  if (Number.isNaN(d.getTime())) {
+    const withYear = new Date(`${s} ${now.getFullYear()}`);
+    if (!Number.isNaN(withYear.getTime())) d = withYear;
+  }
+  if (Number.isNaN(d.getTime())) return '';
+  if (d.getTime() < now.getTime() + 36 * 3600 * 1000) {
+    d = new Date(now.getTime() + 14 * 86400 * 1000);
+  }
+  return d.toISOString().slice(0, 19);
 }
 
 /** Enforce shapes/limits on whatever the model produced. */
@@ -575,7 +599,7 @@ export function sanitizeCopy(j, { kind, brand }) {
             old_price: String(j.offer.old_price || '').slice(0, 20),
             note: String(j.offer.note || '').slice(0, 120),
             terms: String(j.offer.terms || '').slice(0, 220),
-            ends: String(j.offer.ends || '').slice(0, 30),
+            ends: saneEndsDate(j.offer.ends),
             perks_title: String(j.offer.perks_title || '').slice(0, 60),
             perks: Array.isArray(j.offer.perks) ? j.offer.perks.map((p) => String(p).slice(0, 90)).slice(0, 6) : [],
           }

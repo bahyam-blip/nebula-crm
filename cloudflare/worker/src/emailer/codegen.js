@@ -51,15 +51,15 @@ import { esc, safeHref } from './htmlutil.js';
 import { isAllowedImageSrc } from './imager.js';
 import { masteryBlock, cssGlobalPack, wiringPack, motionPack, policyNeeds, policyPack } from './mastery.js';
 
-const SECTION_AI_TOKENS = 2600; // v13: room for real composition craft
+const SECTION_AI_TOKENS = 3400; // v14: room for real composition craft
 const PLAN_AI_TOKENS = 900;
 const REVIEW_AI_TOKENS = 650;
-const MAX_SECTIONS = 5;
+const MAX_SECTIONS = 7; // v14: richer pages — 5 was starving the story
 const MAX_REGENS = 2;
 const HTML_MIN = 150;
-const HTML_MAX = 9500;
+const HTML_MAX = 12000; // v14
 const CSS_MIN = 60;
-const CSS_MAX = 9500;
+const CSS_MAX = 12000; // v14
 
 /**
  * v13 CRAFT — a bounded code payload attached to engineer trace rows so
@@ -185,10 +185,19 @@ export async function planSections(env, { kind, brief, brand, site = null, thoug
       if (sections.length >= cap) break;
     }
     if (!sections.length || sections[0].id !== 'hero') throw new Error('plan rejected: needs a hero first');
-    // Guarantee the copy survives: append keys no section claimed onto the
-    // closest section (never drop the model's written words).
+    // Guarantee the copy survives: hero copy is pinned to the hero; every
+    // other unclaimed key lands on the closest section (never drop the
+    // model's written words). v14 BUGFIX: headline/sub/kicker used to be
+    // dumped onto the LAST section — a testimonial band suddenly re-rendered
+    // the hero over a photo (the "duplicated hero" users reported).
+    const HERO_ONLY = new Set(['kicker', 'headline', 'sub']);
     const claimed = new Set(sections.flatMap((x) => x.content_keys));
-    const orphanKeys = Object.keys(content).filter((k) => !claimed.has(k) && !['title', 'footer_note'].includes(k));
+    const heroSec = sections.find((s) => s.id === 'hero');
+    if (heroSec) {
+      const pin = [...HERO_ONLY].filter((k) => !claimed.has(k) && hasValue(content[k]));
+      if (pin.length) heroSec.content_keys = [...new Set([...heroSec.content_keys, ...pin])].slice(0, 8);
+    }
+    const orphanKeys = Object.keys(content).filter((k) => !claimed.has(k) && !HERO_ONLY.has(k) && !['title', 'footer_note'].includes(k));
     if (orphanKeys.length) {
       const keys = orphanKeys.slice(0, 4);
       sections[sections.length - 1].content_keys = [...new Set([...sections[sections.length - 1].content_keys, ...keys])].slice(0, 8);
@@ -222,6 +231,11 @@ CRAFT LAWS (the difference between premium and template):
 • asymmetric beats symmetric; overlap beats floating; hairlines beat boxes
 • whitespace is a material — density comes from typography, not cramming
 • never render 3+ identical cards in a row — vary spans, offsets, media, or rhythm
+LAYOUT SAFETY (this page is served on real phones — violations get caught):
+• position:absolute is for DECORATIVE art layers and scrims ONLY (pointer-events:none, z-index:-1 or 0) — NEVER for text blocks, cards or CTAs; no position:fixed
+• every grid/flex child that holds text gets min-width:0 so long words wrap, never overflow
+• viewport-height art uses 100svh (never bare 100vh — mobile URL bars eat it)
+• card rows: equal heights via grid; headings clamp() so nothing sticks out of a card
 
 Respond with ONLY this format (no markdown fences, no commentary):
 
@@ -247,7 +261,7 @@ HARD RULES
   · when your copy includes "stats": render the value element as <span data-count="40">0</span> (keep the suffix like % or + OUTSIDE the span) — the page counts up on reveal.${hasImages ? '\n  · your IMAGES list is below — wire the photo into the composition with craft (mask, frame, overlay, parallax depth).' : ''}
 - Accessibility: text contrast >= 4.5:1, :focus-visible outline on links/buttons, buttons are <a class="btn btn-accent"> (page provides .btn styles) or real <button>.
 - Glass surfaces may use .glass, gradient text .text-gradient, glow fields .glow, bento grids .bento (page provides them).
-- Keep the whole answer under 150 lines. Every element earns its place; density and craft beat bloat.${mastery ? `\n\n${mastery}` : ''}`;
+- Keep the whole answer under 220 lines. Every element earns its place; density and craft beat bloat.${mastery ? `\n\n${mastery}` : ''}`;
 }
 
 function sectionUserPrompt({ design, section, content, brand, kind, brief, images = null }) {
@@ -304,6 +318,30 @@ function sanitizeSectionHtml(html, id, allowedImages = null) {
   return h.trim();
 }
 
+/**
+ * v14 LAYOUT HARDENER — deterministic repairs applied to EVERY section's
+ * CSS before it ships. The AI's layout mistakes (viewport-fixed elements,
+ * bare 100vh, unwrappable text, unpositioned section roots) are the ones
+ * that rendered as overlapping heroes and ragged cards; these classes are
+ * now structurally impossible to ship.
+ */
+export function hardenSectionCss(id, css) {
+  let c = String(css || '');
+  // 1. Nothing in a section may pin itself to the viewport (the rogue
+  //    fixed bars/marquees that slid over the hero).
+  c = c.replace(/position\s*:\s*fixed/gi, 'position:absolute');
+  // 2. 100vh → keep the declaration but add the small-viewport twin, so
+  //    phone URL bars can't push art under the fold (invalid svh on old
+  //    browsers is dropped, leaving the vh fallback intact).
+  c = c.replace(/(min-height|height)\s*:\s*100vh/gi, (m) => `${m};${m.replace(/100vh/i, '100svh')}`);
+  // 3. Anchor root + wrap safety: a positioned section root (so any
+  //    absolute art layers anchor to the SECTION, not the page), zero-min
+  //    grid/flex children (cards can shrink instead of overflowing), and
+  //    break-word on every text element (long words wrap, never stick out).
+  c += `\n#sec-${id}{position:relative;overflow-x:clip}#sec-${id} *{min-width:0}#sec-${id} h1,#sec-${id} h2,#sec-${id} h3,#sec-${id} h4,#sec-${id} h5,#sec-${id} p,#sec-${id} li,#sec-${id} span,#sec-${id} a,#sec-${id} b,#sec-${id} strong{overflow-wrap:break-word;hyphens:auto}`;
+  return c;
+}
+
 /** Validate + extract { html, css } from a model answer. Throws on garbage. */
 export function parseSection(raw, id, allowedImages = null) {
   let text = String(raw || '').trim();
@@ -342,6 +380,9 @@ export function parseSection(raw, id, allowedImages = null) {
 
   html = sanitizeSectionHtml(html, id, allowedImages);
 
+  // v14: validate the ENGINEER'S raw CSS first (scope + size gates must
+  // judge what the model wrote — the hardener appends scoped rules and
+  // would otherwise mask unscoped/too-small output), then harden.
   if (html.length < HTML_MIN) throw new Error('section HTML too small');
   if (html.length > HTML_MAX) throw new Error('section HTML too large');
   if (css.length < CSS_MIN) throw new Error('section CSS too small');
@@ -353,6 +394,8 @@ export function parseSection(raw, id, allowedImages = null) {
   const opens = (html.match(/<section[\s>]/gi) || []).length;
   const closes = (html.match(/<\/section\s*>/gi) || []).length;
   if (opens !== closes) throw new Error('unbalanced <section> tags');
+  css = hardenSectionCss(id, css);
+  if (css.length > CSS_MAX + 500) throw new Error('section CSS too large');
   return { html, css };
 }
 
@@ -430,10 +473,27 @@ export function engineFallbackSection(section, content, design) {
 
 export async function reviewSections(env, { kind, brand, sections, team = null }) {
   try {
+    // v14: the director now reviews a real STRUCTURAL DIGEST (tags, motion
+    // contract counts, image wiring, positioning audit) — CSS text alone
+    // is how overlapping heroes and empty shells slipped through before.
     const digest = sections
-      .map((s) => `#${s.id} (${s.name}) — goal: ${s.goal}\nCSS head: ${s.css.slice(0, 180)}${s.image ? `\nImage used: ${s.image}` : ''}`)
+      .map((s) => {
+        const html = String(s.html || '');
+        const css = String(s.css || '');
+        const tags = [...new Set((html.match(/<(h1|h2|h3|p|ul|ol|img|a|button|details|form|figure|blockquote)[\s>]/gi) || []).map((t) => t.slice(1, -1).toLowerCase()))].join(',');
+        const revs = (html.match(/data-rev/g) || []).length;
+        const kfs = (css.match(/@keyframes/g) || []).length;
+        const abs = (css.match(/position\s*:\s*(absolute|fixed)/gi) || []).length;
+        const fixed = /position\s*:\s*fixed/i.test(css);
+        const imgOk = !s.image || /class=["'][^"']*ph/.test(html);
+        return [
+          `#${s.id} (${s.name}) — goal: ${s.goal}`,
+          `html ${html.length}ch · css ${css.length}ch · tags[${tags}] · data-rev:${revs} · keyframes:${kfs} · abs/fixed:${abs}${fixed ? ' ⚠ position:fixed survived' : ''}${s.image ? ` · image:${imgOk ? 'wired as .ph' : '⚠ not class="ph"'}` : ''}`,
+          `CSS head: ${css.slice(0, 320)}`,
+        ].join('\n');
+      })
       .join('\n\n')
-      .slice(0, 2600);
+      .slice(0, 3400);
     const j = await runAgent(
       env,
       team,
@@ -525,7 +585,9 @@ export function globalCss(design) {
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+main{overflow-x:clip}
 img,svg{max-width:100%}
+h1,h2,h3,h4,h5,h6,p,li,span,a,b,strong{overflow-wrap:break-word}
 a{color:inherit;text-decoration:none}
 ::selection{background:var(--accent);color:var(--on-accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
@@ -554,7 +616,7 @@ a{color:inherit;text-decoration:none}
 .float-slower{animation:floaty 11s ease-in-out infinite}
 .sheen{position:relative;overflow:hidden}
 .sheen::after{content:'';position:absolute;top:0;bottom:0;width:34%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);animation:sheen-x 6s ease-in-out infinite;pointer-events:none}
-.ph{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);filter:saturate(.94) contrast(1.03);transition:transform .5s var(--ease-out),filter .5s var(--ease-out),box-shadow .5s var(--ease-out);box-shadow:var(--shadow-rest)}
+.ph{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);filter:saturate(.94) contrast(1.03);transition:transform .5s var(--ease-out),filter .5s var(--ease-out),box-shadow .5s var(--ease-out);box-shadow:var(--shadow-rest);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 22%,var(--surface)),color-mix(in srgb,var(--accent2) 14%,var(--surface)))}
 .ph:hover{transform:scale(1.02) translateY(-3px);filter:saturate(1.05) contrast(1.05);box-shadow:var(--shadow-lift)}
 .lift{transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)}
 .lift:hover{transform:translateY(-4px);box-shadow:var(--shadow-lift)}
@@ -666,6 +728,9 @@ function footerHtml(brand, content, policy = null) {
 <div class="foot-note">© ${new Date().getFullYear()} ${esc(brand.name)}${note ? ` · ${note.trim()}` : ''}</div>
 </div></footer>`;
 }
+
+/* v14 note: the resilience layer (image heal + overlap guard) is injected
+   in assembleSite right after the wiring script. */
 
 /**
  * v12 WIRING LAYER — the global behavior layer. Sections declare
@@ -807,6 +872,76 @@ function faviconSvg(brand, design) {
 }
 
 /**
+ * v14 RESILIENCE LAYER — the two runtime guards that make layout bugs
+ * non-events on the served page:
+ *   1. IMAGE HEAL — any <img> that fails to load (dead CDN, airplane
+ *      mode, stripped host) is swapped to a brand-coloured art tile built
+ *      at assembly. A visitor can never see a broken-image glyph again.
+ *   2. TEXT OVERLAP GUARD — after load (and on reflow), text-bearing
+ *      elements that physically collide (the overlapping-hero class of
+ *      bugs) are detected and the offender is reset into the flow.
+ *      Intentional overlays are respected: pairs involving media, or
+ *      ancestor/descendant pairs, are never touched.
+ */
+export function resilienceJs(artDataUri) {
+  return `(function(){
+var ART=${JSON.stringify(artDataUri)};
+document.addEventListener('error',function(e){
+  var t=e.target;
+  if(!t||!t.tagName||t.tagName!=='IMG'||t.getAttribute('data-nb-heal'))return;
+  t.setAttribute('data-nb-heal','1');t.src=ART;
+},true);
+function run(){
+  var secs=[].slice.call(document.querySelectorAll('main [id]'));
+  var els=[];
+  secs.forEach(function(sec){
+    if(sec.closest('dialog'))return;
+    [].slice.call(sec.querySelectorAll('*')).forEach(function(el){
+      if(els.length>420)return;
+      if(el.closest('.marquee-track'))return;
+      var hasText=false,nodes=el.childNodes;
+      for(var i=0;i<nodes.length;i++){if(nodes[i].nodeType===3&&nodes[i].textContent.trim()){hasText=true;break}}
+      if(!hasText)return;
+      if(el.querySelector('img,video,canvas,svg,picture,iframe'))return;
+      var r=el.getBoundingClientRect();
+      if(r.width<24||r.height<14)return;
+      els.push({el:el,x1:r.left,y1:r.top,x2:r.right,y2:r.bottom,area:r.width*r.height});
+    });
+  });
+  function anchored(a){var p=getComputedStyle(a.el).position;return p==='absolute'||p==='fixed'}
+  function ancestorOf(a,b){return a.el.contains(b.el)||b.el.contains(a.el)}
+  for(var i=0;i<els.length;i++)for(var j=i+1;j<els.length;j++){
+    var a=els[i],b=els[j];
+    if(ancestorOf(a,b))continue;
+    var ox=Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1);if(ox<=0)continue;
+    var oy=Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1);if(oy<=0)continue;
+    var inter=ox*oy,small=Math.min(a.area,b.area);
+    if(inter/small<0.42)continue;
+    var off=anchored(a)!==anchored(b)?(anchored(a)?a:b):(a.area<=b.area?a:b);
+    if(off.el.getAttribute('data-nb-fix'))continue;
+    off.el.setAttribute('data-nb-fix','');
+    var cs=getComputedStyle(off.el);
+    if(cs.position==='absolute'||cs.position==='fixed'){off.el.style.position='static';off.el.style.inset='auto'}
+    off.el.style.transform='none';off.el.style.marginTop='14px';
+  }
+}
+if(!document.documentElement.hasAttribute('data-nb-guard')){
+  document.documentElement.setAttribute('data-nb-guard','1');
+  var t=null;
+  addEventListener('load',run);addEventListener('resize',function(){clearTimeout(t);t=setTimeout(run,350)},{passive:true});
+  if('IntersectionObserver' in window)setTimeout(run,900);
+}
+})();`;
+}
+
+/** Brand art tile for the image-heal fallback (built from the palette). */
+export function healArtSvg(design) {
+  const v = designVars(design);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${v.surface}"/><stop offset="1" stop-color="${mix(v.accent, v.bg, 0.35)}"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/><circle cx="640" cy="140" r="220" fill="${v.accent}" opacity="0.18"/><circle cx="140" cy="500" r="180" fill="${v.accent2}" opacity="0.14"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/**
  * Assemble the final document from coded sections.
  * v12: full SEO head (OG/Twitter/robots), JSON-LD structured data,
  * the wiring behavior layer, inline legal (privacy/terms) and the
@@ -853,6 +988,7 @@ ${sectionsHtml}
 ${footerHtml(brand, content, policy)}
 <script>${revealJs()}</script>
 <script>${wiringJs()}</script>
+<script>${resilienceJs(healArtSvg(design))}</script>
 ${legal}
 </body>
 </html>`;
