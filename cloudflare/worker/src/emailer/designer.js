@@ -15,6 +15,7 @@
  */
 
 import { runAgent, leadBlock, understandingBlock } from './agents.js';
+import { masterBlock } from './masterprompt.js';
 import { sarvamChat } from './sarvam.js';
 import { webSearch } from './research.js';
 import { normalizeDesign, themeForStyleHint, THEMES } from './site_templates.js';
@@ -171,7 +172,11 @@ function applyMastery(design, dna, brief, kind, seed) {
 function briefSystemPrompt(kind, site, style, dna) {
   const client = site?.name || 'the client';
   const seedHue = site?.color || dna.hues[0];
-  return `You are the design director of a world-class web studio (Awwwards-tier). Respond with ONLY a JSON object.
+  // v15: the Art Director wakes up carrying the master prompt's designer
+  // slice — design is a first-class system, never decoration.
+  return `${masterBlock('designer')}
+
+You are the design director of a world-class web studio (Awwwards-tier). Respond with ONLY a JSON object.
 
 A client described a ${kind} page. Decide the design system — not just a theme, the full art direction.
 

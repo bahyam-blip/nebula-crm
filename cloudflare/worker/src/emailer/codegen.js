@@ -50,6 +50,7 @@ import { hex, lum, mix, FONT_STACKS, DISPLAY_OF_FONT } from './site_templates.js
 import { esc, safeHref } from './htmlutil.js';
 import { isAllowedImageSrc } from './imager.js';
 import { masteryBlock, cssGlobalPack, wiringPack, motionPack, policyNeeds, policyPack } from './mastery.js';
+import { masterBlock, commitmentsBlock, FIRST_ROUND_LAW } from './masterprompt.js';
 
 const SECTION_AI_TOKENS = 3400; // v14: room for real composition craft
 const PLAN_AI_TOKENS = 900;
@@ -91,12 +92,18 @@ function copyFragment(content, keys) {
 
 /* ══ Stage 4 — PLAN ══════════════════════════════════════════════════ */
 
-const PLAN_SYSTEM = `You are the lead architect of a world-class web studio. A client wants a bespoke page. Plan its information architecture — mapped to the design director's UX flow. Respond with ONLY JSON:
+// v15 GLM-FIRST: the architect carries the master prompt's architect
+// slice and plans the FULL first-round story (5-7 sections).
+const PLAN_SYSTEM = `${masterBlock('architect')}
+
+You are the lead architect of a world-class web studio. A client wants a bespoke page. Plan its information architecture — mapped to the design director's UX flow. Respond with ONLY JSON:
 
 {"sections":[{"id":"short-id (a-z, 3-10 chars)","name":"Nav label, 1-2 words","goal":"what this section must make the visitor think or do","journey":"which UX-flow beat this section serves, 2-6 words","layout":"1-2 sentences describing the COMPOSITION you will hand-code for this content — asymmetry, columns, alignment, art placement. Decide like a designer, not a menu.","content_keys":["which copy JSON groups this section renders, e.g. headline, sub, primary_cta, features"],"motion":"the entrance/ambient motion idea, 5-12 words"}],"nav":["section ids to show in the navbar, 3-5, ending with a contact-ish section"]}
 
 Rules:
-- 4-6 sections total. First MUST be a hero (id "hero"). Last MUST convert (contact/booking/CTA band).
+- ${FIRST_ROUND_LAW}
+- 5-7 sections total. First MUST be a hero (id "hero"). Last MUST convert (contact/booking/CTA band). Never plan a thin page — the brief deserves the full story.
+- If the brief includes a FEATURE CONTRACT, every feature must be realized in the section(s) that own it — a promised interaction that does not work is a failed build.
 - Sections must serve THIS business — no generic "About us" filler unless the brief demands proof.
 - Vary composition across sections: do not plan two identical column grids.
 - journey: quote or compress the matching beat from the UX FLOW the Art Director gave you — every section must advance the journey; no dead sections.
@@ -156,6 +163,7 @@ export async function planSections(env, { kind, brief, brand, site = null, thoug
             `DESIGN DIRECTION: theme ${thought.design.themeLabel}, voice "${thought.design.voice || 'clear, confident'}", audience "${thought.design.audience || 'general'}", hero style ${thought.design.hero}${thought.design.motion_intensity ? `, motion ${thought.design.motion_intensity}` : ''}${thought.design.type_scale ? `, type scale ${thought.design.type_scale}` : ''}`,
             uxFlow,
             thought.mustHave.length ? `MUST INCLUDE: ${thought.mustHave.join('; ')}` : '',
+            commitmentsBlock(lead),
             lead?.risks?.length ? `THE LEAD FLAGGED THESE RISKS — design against them: ${lead.risks.join('; ')}` : '',
             lead?.emphasis?.length ? `THE LEAD WANTS EXTRA CRAFT ON: ${lead.emphasis.join('; ')}` : '',
             `PLAN EXACTLY ${cap} SECTIONS (or fewer if the page is tighter for it).`,
@@ -213,7 +221,9 @@ export async function planSections(env, { kind, brief, brand, site = null, thoug
 /* ══ Stage 5 — CODE (per section) ════════════════════════════════════ */
 
 function sectionSystemPrompt({ id, kind, brand, hasImages, mastery = '' }) {
-  return `You are a senior front-end engineer at an award-winning web studio. You are HAND-CODING one section of a bespoke ${kind} page for ${brand.name}. There is no template — every line is written for this business.
+  return `${masterBlock('engineer')}
+
+You are a senior front-end engineer at an award-winning web studio. You are HAND-CODING one section of a bespoke ${kind} page for ${brand.name}. There is no template — every line is written for this business. ${FIRST_ROUND_LAW}
 
 COMPOSITION LIBRARY (pick per content — never repeat the same composition twice on a page):
 • bento — 12-col grid, tiles spanning 2-3 cols, ONE dominant tile, others supporting
@@ -502,7 +512,9 @@ export async function reviewSections(env, { kind, brand, sections, team = null }
       [
         {
           role: 'system',
-          content: `You are the design director reviewing hand-coded sections of a ${kind} page for ${brand.name} before it ships. Judge CRAFT as well as correctness. A section is "fix" if ANY of: broken for a live page (unstyled, empty shell, unusable on mobile, shows a foreign brand name, references an image not in its verified list); FLAT DESIGN (one boring stack of identical cards, no clear focal point, no hierarchy between display and body, wall-of-text with no visual relief); IGNORES THE DESIGN DIRECTION (composition contradicts the planned layout, motion contract missing — no data-rev, no hover state, no unique keyframes); or WASTED SPACE (giant empty regions, content hugging one edge). Stylistic taste ALONE is not a fix reason. Respond with ONLY JSON: {"verdicts":[{"id":"...","verdict":"good"|"fix","note":"<=10 words"}]}`,
+          // v15: the QA Director carries the master prompt's quality-gate
+          // slice — review like a senior engineer gating a release.
+          content: `${masterBlock('qa')}\n\nYou are the design director reviewing hand-coded sections of a ${kind} page for ${brand.name} before it ships. Judge CRAFT as well as correctness. A section is "fix" if ANY of: broken for a live page (unstyled, empty shell, unusable on mobile, shows a foreign brand name, references an image not in its verified list); FLAT DESIGN (one boring stack of identical cards, no clear focal point, no hierarchy between display and body, wall-of-text with no visual relief); IGNORES THE DESIGN DIRECTION (composition contradicts the planned layout, motion contract missing — no data-rev, no hover state, no unique keyframes); or WASTED SPACE (giant empty regions, content hugging one edge). Stylistic taste ALONE is not a fix reason. Respond with ONLY JSON: {"verdicts":[{"id":"...","verdict":"good"|"fix","note":"<=10 words"}]}`,
         },
         { role: 'user', content: digest },
       ],

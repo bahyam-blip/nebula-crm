@@ -341,6 +341,44 @@ class StudioController extends StateNotifier<StudioState> {
   }) =>
       _api.pointDomain(connector: connector, domain: domain, target: target, name: name);
 
+  // ── v15 GITHUB POWER CONNECTOR ──────────────────────────────────
+
+  /// Repos on the connected GitHub account (pickers + the flows panel).
+  Future<List<GithubRepo>> listGithubRepos() => _api.listGithubRepos();
+
+  /// Push a built site to GitHub as a FULL PROJECT (index.html + README +
+  /// CI flow files — pages deploy and/or APK build). Private repos allowed.
+  Future<SiteDeployment> pushToGithub({
+    required String artifactId,
+    String? repo,
+    bool isPrivate = false,
+    List<String> workflows = const [],
+    String? domain,
+    String? title,
+  }) async {
+    final dep = await _api.pushToGithub(
+      artifactId: artifactId,
+      repo: repo,
+      isPrivate: isPrivate,
+      workflows: workflows,
+      domain: domain,
+      title: title,
+    );
+    await refresh();
+    return dep;
+  }
+
+  /// Trigger a CI flow (APK build / Pages deploy) on any repo.
+  Future<WorkflowRun?> triggerWorkflow({
+    required String repo,
+    required String workflow,
+    String? ref,
+  }) =>
+      _api.triggerWorkflow(repo: repo, workflow: workflow, ref: ref);
+
+  /// Latest CI run status on a repo.
+  Future<List<WorkflowRun>> workflowRuns(String repo) => _api.workflowRuns(repo);
+
   /// v12: create a pending upgrade order (manual activation).
   Future<String> checkout(String planId) => _api.createCheckout(planId);
 

@@ -172,7 +172,7 @@ section('LEAD — the orchestrator agent');
   ok(lead.ai === true, 'Lead AI plan used');
   ok(lead.audience.length > 0 && lead.tone_note.includes('warm'), 'plan carries audience + tone');
   ok(lead.queries.length === 2, `queries capped at 2 (got ${lead.queries.length})`);
-  ok(lead.sections_target === 4, `sections_target clamped to the 4-5 budget (got ${lead.sections_target})`);
+  ok(lead.sections_target === 7, `sections_target clamped into the v15 5-7 budget (got ${lead.sections_target})`);
   ok(lead.emphasis.length === 2 && lead.risks.length === 1, 'emphasis + risks carried');
   ok(team.trace.some((r) => r.agent === 'Lead' && r.ok === true), 'Lead invocation traced');
   ok(sarvamSeen.at(-1).includes('A cozy specialty coffee shop'), 'Lead prompt carries the brief');
@@ -182,7 +182,7 @@ section('LEAD — the orchestrator agent');
   const lead2 = await leadPlan(env, { kind: 'event', brief: 'A pop-up supper club.', brand });
   ok(lead2.ai === false && Array.isArray(lead2.emphasis) && lead2.emphasis.length >= 1, 'Lead falls back to a deterministic plan');
   const lead3 = defaultLeadPlan({ kind: 'portfolio', brief: '', brand });
-  ok(lead3.sections_target === 4 && lead3.tone_note.length > 10, 'deterministic plan is complete for every kind');
+  ok(lead3.sections_target === 6 && lead3.tone_note.length > 10, 'deterministic plan is complete for every kind (6 sections, v15 first-round depth)');
 
   // leadBlock formatting
   const block = leadBlock(lead);

@@ -17,6 +17,16 @@
  *   + domain pointing  — CNAME a GoDaddy/Hostinger domain at the deployed
  *                        site (real custom-domain chain)
  *
+ * v15 GITHUB POWER CONNECTOR — GitHub is not just a publish target, it is
+ * the user's own engineering pipeline:
+ *   • PROJECT PUSH  — a publish now commits a real PROJECT (index.html +
+ *     README.md + optional CI workflows), not a lone HTML file.
+ *   • CI FLOWS      — the connector commits deploy-pages.yml / build-apk.yml
+ *     and can TRIGGER any workflow (workflow_dispatch) on any repo of the
+ *     connected account, then report run status — "push the code, build
+ *     the APK, deploy the site" from inside the app.
+ *   • list_repos / workflow_runs — the app shows real repos + run status.
+ *
  * Every connector driver is provider-REST, token comes from the VAULT
  * (never from the request), and deployments are recorded per artifact so
  * the app can show "where is this site live".
@@ -31,9 +41,9 @@ const DEPLOY_CAP = 20;
 export const CONNECTORS = {
   github: {
     name: 'GitHub',
-    kind: 'hosting+code',
-    what: 'Keeps your code in a repo and publishes it free on GitHub Pages (username.github.io).',
-    fields: [{ key: 'token', label: 'Personal access token (repo + pages scope)', secret: true }],
+    kind: 'hosting+code+flows',
+    what: 'Your code in your repos, free GitHub Pages hosting, and CI flows: trigger APK builds or deploys on any of your repos. PAT needs repo + workflow scopes.',
+    fields: [{ key: 'token', label: 'Personal access token (repo + workflow scope)', secret: true }],
   },
   vercel: {
     name: 'Vercel',
@@ -144,6 +154,147 @@ async function githubVerify(creds) {
   return { ok: true, login: r.body?.login || '', name: r.body?.name || r.body?.login || '' };
 }
 
+/* ══ GitHub — CI workflow templates (v15 power connector) ════════════ */
+
+/** The official Pages-via-Actions deploy workflow (dispatchable). */
+export const PAGES_WORKFLOW_YML = `# Deploy the site to GitHub Pages (official Actions flow).
+# Triggered on every push to main, or manually from Nebula.
+name: Deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+`;
+
+/** The Flutter APK build workflow (dispatchable; runs when a Flutter app exists). */
+export const APK_WORKFLOW_YML = `# Build a release APK from the Flutter app in this repo.
+# Manual trigger from Nebula (workflow_dispatch) or on Flutter code pushes.
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'pubspec.yaml'
+      - 'lib/**'
+      - 'android/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Pub get
+        run: flutter pub get
+      - name: Build release APK
+        run: flutter build apk --release
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+`;
+
+export const WORKFLOW_FILES = {
+  pages: { path: '.github/workflows/deploy-pages.yml', yml: PAGES_WORKFLOW_YML, label: 'Pages deploy' },
+  apk: { path: '.github/workflows/build-apk.yml', yml: APK_WORKFLOW_YML, label: 'APK build' },
+};
+
+/**
+ * githubProjectFiles — the pure project builder. A publish commits a REAL
+ * project the user owns and can extend, not a lone HTML file:
+ *   index.html            the built page
+ *   README.md             what this is, where it is live, how to deploy
+ *   .github/workflows/*   the requested CI flows
+ * Pure + exported: tests assert the exact project shape.
+ */
+export function githubProjectFiles({ title = 'Nebula site', html = '', workflows = [], repoUrl = '', liveUrl = '', kind = '' } = {}) {
+  const files = new Map();
+  files.set('index.html', String(html || ''));
+  const flowLines = workflows.map((w) => WORKFLOW_FILES[w] ? `- \`${WORKFLOW_FILES[w].path}\` — ${WORKFLOW_FILES[w].label} flow (runs on push to main, or trigger it from the Nebula app)` : '').filter(Boolean);
+  files.set('README.md', [
+    `# ${title}`,
+    '',
+    kind ? `A ${kind} built with the Nebula AI agent — designed, researched, copywritten, hand-coded and QA-reviewed by a multi-agent studio.` : 'Built with the Nebula AI agent — a multi-agent studio (design, research, copy, code, QA).',
+    '',
+    '## Live',
+    liveUrl ? `- Hosted build: ${liveUrl}` : '- Connect GitHub Pages (or run the deploy workflow) to take this live.',
+    repoUrl ? `- Source: ${repoUrl}` : '',
+    '',
+    '## Structure',
+    '- `index.html` — the complete page: semantic HTML, scoped CSS, motion system, zero build step. Open it in a browser and it works.',
+    flowLines.length ? `- CI flows:\n${flowLines.join('\n')}` : '',
+    '',
+    '## Deploy',
+    'Every push to `main` redeploys (Pages flow) — or trigger a build/deploy flow from the Nebula app, GitHub Actions, or `gh workflow run`.',
+    '',
+    '## License',
+    'All rights reserved by the project owner.',
+  ].filter((l) => l !== '').join('\n') + '\n');
+  for (const w of workflows) {
+    const wf = WORKFLOW_FILES[w];
+    if (wf) files.set(wf.path, wf.yml);
+  }
+  return Object.fromEntries(files);
+}
+
+async function githubPutFile(creds, full, path, content, message) {
+  // Keep slashes literal (GitHub accepts encoded too, but clean paths read
+  // better in logs and match the REST browser URLs).
+  const enc = path.split('/').map(encodeURIComponent).join('/');
+  return apiFetch(`https://api.github.com/repos/${full}/contents/${enc}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, content: b64encodeUtf8(content) }),
+  });
+}
+
+/**
+ * githubPublish — v15: push the full PROJECT (index.html + README +
+ * requested CI workflow files), create the repo (private option), enable
+ * Pages (branch-source, or workflow-source when the Pages flow ships).
+ */
 async function githubPublish(creds, html, opts = {}) {
   const v = await githubVerify(creds);
   if (!v.ok) return v;
@@ -151,13 +302,19 @@ async function githubPublish(creds, html, opts = {}) {
     .toLowerCase()
     .replace(/[^a-z0-9._-]/g, '-')
     .slice(0, 90);
+  const workflows = Array.isArray(opts.workflows) ? opts.workflows.filter((w) => WORKFLOW_FILES[w]) : [];
 
   // 1. create the repo (exists → reuse)
   let full = '';
   const created = await apiFetch('https://api.github.com/user/repos', {
     method: 'POST',
     headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: repo, private: false, description: opts.title || 'Site deployed by Nebula CRM agent' }),
+    body: JSON.stringify({
+      name: repo,
+      private: opts.private === true,
+      description: opts.title ? `${opts.title} — built by the Nebula AI agent` : 'Site deployed by Nebula CRM agent',
+      auto_init: false,
+    }),
   });
   if (created.ok && created.body?.full_name) {
     full = created.body.full_name;
@@ -167,26 +324,27 @@ async function githubPublish(creds, html, opts = {}) {
     return { ok: false, error: `GitHub repo create failed (HTTP ${created.status}): ${JSON.stringify(created.body).slice(0, 200)}` };
   }
 
-  // 2. commit index.html
-  const put = await apiFetch(`https://api.github.com/repos/${full}/contents/index.html`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: 'Deploy via Nebula CRM agent',
-      content: b64encodeUtf8(html),
-    }),
+  // 2. commit the full project (page + README + CI flows)
+  const project = githubProjectFiles({
+    title: opts.title || repo,
+    html,
+    workflows,
+    repoUrl: `https://github.com/${full}`,
+    liveUrl: opts.liveUrl || '',
+    kind: opts.kind || '',
   });
-  if (!put.ok) {
-    return { ok: false, error: `GitHub file commit failed (HTTP ${put.status}): ${JSON.stringify(put.body).slice(0, 200)}` };
+  let committed = 0;
+  for (const [path, content] of Object.entries(project)) {
+    const put = await githubPutFile(creds, full, path, content, path === 'README.md' ? 'Project README via Nebula CRM agent' : path.startsWith('.github/') ? `${WORKFLOW_FILES[opts.workflows?.find((w) => WORKFLOW_FILES[w]?.path === path)]?.label || 'CI'} workflow via Nebula CRM agent` : 'Deploy via Nebula CRM agent');
+    if (!put.ok) {
+      return { ok: false, error: `GitHub commit failed for ${path} (HTTP ${put.status}): ${JSON.stringify(put.body).slice(0, 200)}` };
+    }
+    committed++;
   }
 
   // 3. optional custom domain: commit CNAME + register it with Pages
   if (opts.domain) {
-    await apiFetch(`https://api.github.com/repos/${full}/contents/CNAME`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Custom domain via Nebula CRM agent', content: b64encodeUtf8(String(opts.domain)) }),
-    });
+    await githubPutFile(creds, full, 'CNAME', String(opts.domain), 'Custom domain via Nebula CRM agent');
     await apiFetch(`https://api.github.com/repos/${full}/pages`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
@@ -194,11 +352,15 @@ async function githubPublish(creds, html, opts = {}) {
     });
   }
 
-  // 4. enable Pages from main /
+  // 4. enable Pages — workflow build when the Pages flow was committed
+  //    (the official Actions deploy owns it), otherwise branch source.
+  const pagesBody = workflows.includes('pages')
+    ? { build_type: 'workflow' }
+    : { source: { branch: 'main', path: '/' } };
   const pages = await apiFetch(`https://api.github.com/repos/${full}/pages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: { branch: 'main', path: '/' } }),
+    body: JSON.stringify(pagesBody),
   });
   const pagesEnabled = pages.ok || pages.status === 409; // 409 = already enabled
 
@@ -210,10 +372,114 @@ async function githubPublish(creds, html, opts = {}) {
     url,
     repo: full,
     repoUrl: `https://github.com/${full}`,
+    actionsUrl: `https://github.com/${full}/actions`,
     live: 'building', // Pages takes ~1 min on first build
     pagesEnabled,
-    note: `Code committed to ${full} and GitHub Pages publishing started. The site is usually live within a minute.`,
+    filesCommitted: committed,
+    workflows,
+    note: `Project committed to ${full} (${committed} files${workflows.length ? `, ${workflows.join(' + ')} flow${workflows.length > 1 ? 's' : ''} included` : ''}) and GitHub Pages publishing started. The site is usually live within a minute.`,
   };
+}
+
+/* ══ GitHub power connector — repos, workflow dispatch, run status ═══ */
+
+/** The connected account's repos (newest activity first) — for pickers. */
+export async function githubListRepos(creds) {
+  const r = await apiFetch('https://api.github.com/user/repos?per_page=100&sort=pushed&direction=desc', {
+    headers: { Authorization: `Bearer ${creds.token}` },
+  });
+  if (!r.ok) return { ok: false, error: `GitHub rejected the request (HTTP ${r.status})` };
+  const repos = (Array.isArray(r.body) ? r.body : []).slice(0, 100).map((x) => ({
+    full_name: x.full_name || '',
+    name: x.name || '',
+    private: x.private === true,
+    default_branch: x.default_branch || 'main',
+    updated_at: x.updated_at || null,
+    url: x.html_url || `https://github.com/${x.full_name}`,
+  }));
+  return { ok: true, repos, note: `${repos.length} repo(s) on the connected GitHub account` };
+}
+
+/** Accept "owner/repo" or a bare name (resolved against the account). */
+function normalizeRepoInput(name, login) {
+  const raw = String(name || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  if (!raw) return '';
+  return raw.includes('/') ? raw.slice(0, 160) : `${login ? `${login}/` : ''}${raw}`.slice(0, 160);
+}
+
+/**
+ * githubTriggerWorkflow — dispatch a workflow (workflow_dispatch) on any
+ * repo of the connected account and return the run that it started.
+ * This is "the flow": build the APK, deploy the site — from the app.
+ */
+export async function githubTriggerWorkflow(creds, { repo, workflow, ref = '', inputs = {} } = {}) {
+  const v = await githubVerify(creds);
+  if (!v.ok) return v;
+  const full = normalizeRepoInput(repo, v.login);
+  if (!full || !full.includes('/')) return { ok: false, error: 'repo is required — "owner/repo" or a repo name on the connected account' };
+  const wf = String(workflow || '').trim();
+  if (!wf) return { ok: false, error: 'workflow is required — the workflow FILE name (e.g. build-apk.yml or deploy-pages.yml)' };
+  const branch = String(ref || '').trim() || 'main';
+
+  const disp = await apiFetch(`https://api.github.com/repos/${full}/actions/workflows/${encodeURIComponent(wf)}/dispatches`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref: branch, inputs }),
+  });
+  if (!disp.ok) {
+    const hint = disp.status === 404
+      ? ' — check the repo name and that the workflow file exists (and the PAT has workflow scope)'
+      : disp.status === 422
+        ? ' — the workflow has no workflow_dispatch trigger or the ref does not exist'
+        : '';
+    return { ok: false, error: `workflow dispatch failed (HTTP ${disp.status})${hint}: ${JSON.stringify(disp.body).slice(0, 160)}` };
+  }
+  // The dispatch response is 204-empty; find the run it just created.
+  await new Promise((r) => setTimeout(r, 1500));
+  const runs = await apiFetch(`https://api.github.com/repos/${full}/actions/runs?per_page=3`, {
+    headers: { Authorization: `Bearer ${creds.token}` },
+  });
+  const latest = (Array.isArray(runs.body?.workflow_runs) ? runs.body.workflow_runs : [])
+    .find((x) => (x.path || '').endsWith(wf) || (x.name || '').toLowerCase().includes(wf.replace(/\.ya?ml$/i, '').replace(/[-_]/g, ' '))) || null;
+  return {
+    ok: true,
+    repo: full,
+    workflow: wf,
+    ref: branch,
+    run: latest ? {
+      id: latest.id,
+      status: latest.status || 'queued',
+      conclusion: latest.conclusion || null,
+      url: latest.html_url || `https://github.com/${full}/actions/runs/${latest.id}`,
+      created_at: latest.created_at || null,
+    } : null,
+    runsUrl: `https://github.com/${full}/actions`,
+    note: `Workflow "${wf}" dispatched on ${full} (${branch}). Watch it under Actions — an APK lands in the run's artifacts when it succeeds.`,
+  };
+}
+
+/** Latest workflow runs on a repo — the app's status chips. */
+export async function githubWorkflowRuns(creds, { repo, per_page = 5 } = {}) {
+  const v = await githubVerify(creds);
+  if (!v.ok) return v;
+  const full = normalizeRepoInput(repo, v.login);
+  if (!full || !full.includes('/')) return { ok: false, error: 'repo is required — "owner/repo" or a repo name on the connected account' };
+  const r = await apiFetch(`https://api.github.com/repos/${full}/actions/runs?per_page=${Math.min(Number(per_page) || 5, 20)}`, {
+    headers: { Authorization: `Bearer ${creds.token}` },
+  });
+  if (!r.ok) return { ok: false, error: `could not read workflow runs (HTTP ${r.status})` };
+  const runs = (Array.isArray(r.body?.workflow_runs) ? r.body.workflow_runs : []).slice(0, 20).map((x) => ({
+    id: x.id,
+    name: x.name || '',
+    workflow: String(x.path || '').split('/').pop() || '',
+    status: x.status || '',
+    conclusion: x.conclusion || null,
+    branch: x.head_branch || '',
+    event: x.event || '',
+    url: x.html_url || '',
+    created_at: x.created_at || null,
+  }));
+  return { ok: true, repo: full, runs };
 }
 
 /* ══ Vercel ══════════════════════════════════════════════════════════ */
@@ -612,6 +878,7 @@ export async function publishSite(env, store, user, args) {
 
   // Load the built site: R2 first, notes are not publishable.
   let html = null;
+  let liveUrl = '';
   if (env.MEDIA) {
     const obj = await env.MEDIA.get(`sites/${artifactId}.html`).catch(() => null);
     if (obj) html = await obj.text();
@@ -619,13 +886,32 @@ export async function publishSite(env, store, user, args) {
   if (!html) {
     return { ok: false, error: `artifact "${artifactId}" is not a hosted site (notes cannot be published) — build one with build_website` };
   }
+  if (env.MEDIA) {
+    // The hosted build URL goes into the README so the repo points at the
+    // live site from day one.
+    try {
+      const meta = await env.MEDIA.get(`sites/${artifactId}.json`).catch(() => null);
+      if (meta) {
+        const doc = JSON.parse(await meta.text());
+        liveUrl = doc?.publicUrl || doc?.url || '';
+      }
+    } catch { /* README lives without it */ }
+  }
 
+  // v15 GitHub power options: full project push + CI flows + privacy.
+  const workflows = Array.isArray(args.workflows)
+    ? args.workflows.map((w) => String(w)).filter((w) => ['pages', 'apk'].includes(w))
+    : [];
   const opts = {
     artifactId,
     repo: args.repo,
     domain: args.domain,
     site_id: args.site_id,
     title: args.title,
+    workflows,
+    private: args.private === true,
+    kind: String(args.kind || ''),
+    liveUrl,
   };
   let result;
   try {
@@ -654,4 +940,43 @@ export async function publishSite(env, store, user, args) {
     external_url: result.url,
     note: `${result.note}${args.domain ? ` Custom domain ${args.domain} will work once DNS points at the host.` : ''}`,
   };
+}
+
+/* ══ GitHub power tool surfaces (called from runTool + /v1/studio) ═══ */
+
+function githubConnError() {
+  return { ok: false, error: 'GitHub is not connected yet — connect it once from Studio → Hosting (a PAT with repo + workflow scopes); after that pushing code and triggering flows needs no tokens' };
+}
+
+/** list_github_repos — the account's repos for the app's pickers. */
+export async function listGithubRepos(env, store, user) {
+  const conn = await readConnection(env, store, user?.uid || '', 'github');
+  if (!conn) return githubConnError();
+  try {
+    return await githubListRepos(conn.credentials);
+  } catch (e) {
+    return { ok: false, error: `could not reach GitHub: ${String(e).slice(0, 140)}` };
+  }
+}
+
+/** trigger_workflow — dispatch a CI flow (APK build, Pages deploy, …). */
+export async function triggerWorkflow(env, store, user, args) {
+  const conn = await readConnection(env, store, user?.uid || '', 'github');
+  if (!conn) return githubConnError();
+  try {
+    return await githubTriggerWorkflow(conn.credentials, args);
+  } catch (e) {
+    return { ok: false, error: `could not reach GitHub: ${String(e).slice(0, 140)}` };
+  }
+}
+
+/** workflow_runs — latest CI run status on a repo (the app's chips). */
+export async function workflowRuns(env, store, user, args) {
+  const conn = await readConnection(env, store, user?.uid || '', 'github');
+  if (!conn) return githubConnError();
+  try {
+    return await githubWorkflowRuns(conn.credentials, args);
+  } catch (e) {
+    return { ok: false, error: `could not reach GitHub: ${String(e).slice(0, 140)}` };
+  }
 }

@@ -395,7 +395,7 @@ section('IDENTITY: webapp path obeys the identity law');
 /* ══ 9. MCP ══ */
 section('MCP: v6.0.0 advertises the v11 capabilities');
 {
-  ok(M.SERVER_VERSION === '7.0.0', 'server version 7.0.0', M.SERVER_VERSION);
+  ok(M.SERVER_VERSION === '8.0.0', 'server version 8.0.0', M.SERVER_VERSION);
   ok((M.MCP_SERVER_DESCRIPTION || '').includes('identity') || JSON.stringify(M.MCP_SERVER_DESCRIPTION || '').length > 0, 'description present');
 }
 

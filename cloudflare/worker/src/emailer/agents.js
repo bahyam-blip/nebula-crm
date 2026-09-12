@@ -47,6 +47,7 @@
  */
 
 import { sarvamChat } from './sarvam.js';
+import { masterBlock, FIRST_ROUND_LAW } from './masterprompt.js';
 
 /* ══ The team roster ═════════════════════════════════════════════════ */
 
@@ -193,16 +194,24 @@ export async function runAgent(env, team, key, action, messages, opts = {}, deta
 
 /* ══ The Lead — adaptive team plan (the orchestrator agent) ══════════ */
 
-const LEAD_SYSTEM = `You are the Lead of an elite multi-agent web studio. Your team (researcher, art director, photographer, copywriter, architect, engineers, QA) is about to build a bespoke page. Read the brief and write the EXECUTION PLAN that makes every specialist sharp. Respond with ONLY JSON:
+// v15 GLM-FIRST: the Lead wakes up carrying the master prompt's
+// orchestrator slice + the FIRST-ROUND law, and plans FEATURES + LAYOUT
+// (the commitments every later specialist must honor) — not just a
+// section count. First delivery = the complete product.
+const LEAD_SYSTEM = `${masterBlock('orchestrator')}
 
-{"brand_name":"THE CLIENT's business or brand name EXACTLY as the brief states it (a quoted name beats everything) — '' only if the brief names none","audience":"who this page must convince, 5-10 words","page_goal":"the ONE thing this page must achieve, 3-8 words (book tables, sell the course, win trust)","research_focus":"the single most valuable thing to learn from the live web for THIS business, one line","queries":["0-2 short, specific web searches"],"image_ideas":["0-3 photo subjects that would make THIS page feel real and specific (e.g. 'barista pouring latte art'), NOT stock clichés"],"sections_target":4,"emphasis":["2-4 parts of this page that deserve the most craft, e.g. 'the menu section must feel tactile'"],"risks":["1-3 ways this build could feel generic or wrong for this audience"],"tone_note":"one line of direction every writer on the team follows"}
+You are the Lead of an elite multi-agent web studio. Your team (analyst, researcher, art director, photographer, copywriter, copy chief, architect, engineers, QA) is about to build a bespoke page. Read the brief and write the EXECUTION PLAN that makes every specialist sharp. Respond with ONLY JSON:
+
+{"brand_name":"THE CLIENT's business or brand name EXACTLY as the brief states it (a quoted name beats everything) — '' only if the brief names none","audience":"who this page must convince, 5-10 words","page_goal":"the ONE thing this page must achieve, 3-8 words (book tables, sell the course, win trust)","features":["2-4 CONCRETE interactive features this page must ship working, each one buildable (e.g. 'table booking form with date+party-size validation', 'before/after gallery with lightbox', 'pricing toggle monthly/yearly') — not vague themes"],"layout":"the overall layout concept in one line (e.g. 'editorial one-column story with a full-bleed hero and a bento proof grid')","research_focus":"the single most valuable thing to learn from the live web for THIS business, one line","queries":["0-2 short, specific web searches"],"image_ideas":["0-3 photo subjects that would make THIS page feel real and specific (e.g. 'barista pouring latte art'), NOT stock clichés"],"sections_target":6,"emphasis":["2-4 parts of this page that deserve the most craft, e.g. 'the menu section must feel tactile'"],"risks":["1-3 ways this build could feel generic or wrong for this audience"],"tone_note":"one line of direction every writer on the team follows"}
 
 Rules:
+- ${FIRST_ROUND_LAW}
 - Decide from the BRIEF, not habit: a tiffin service and a law firm need different teams' energy.
 - brand_name: quote the client's name EXACTLY — every specialist will brand the page with it.
+- features are COMMITMENTS: the engineers must ship each one actually working — name real interactions (forms, toggles, galleries, booking, filters, calculators), never 'engaging experience'.
 - queries must be things a search engine can actually answer (markets, prices, local facts, trends) — not the business's own name.
 - image_ideas must be photographable scenes of THIS business's world (place, product, people, craft) — never abstract 'teamwork' stock.
-- sections_target: 4 for a tight page, 5 only when the brief is rich (event agenda, portfolio, report).
+- sections_target: 5 normally; 6-7 when the brief is rich (event agenda, portfolio, full business site). Never below 5 — thin pages read as template.
 - tone_note is ONE sentence, concrete enough to act on ("warm and specific — name the dishes, the neighbourhoods, the people").`;
 
 /** Deterministic plan when the Lead cannot be reached — still useful. */
@@ -223,14 +232,32 @@ export function defaultLeadPlan({ kind, brief, brand }) {
     report: 'make the findings impossible to ignore',
     webapp: 'make the core action effortless',
   };
+  const kindFeatures = {
+    landing: ['contact/enquiry form with inline validation and a success state', 'testimonial proof wall with real names and specifics', 'FAQ accordion answering the real objections'],
+    promo: ['offer claim flow with a working code copy button', 'countdown/urgency band that states the honest end date', 'FAQ accordion handling price and trust objections'],
+    event: ['registration form with ticket-type selection and validation', 'agenda timeline with per-session detail expansion', 'venue section with directions link'],
+    portfolio: ['project grid with per-project detail lightbox', 'capabilities/services section with concrete deliverables', 'commission enquiry form with project-type field'],
+    report: ['findings table with sortable/copyable rows', 'key-stat band with animated count-up numbers', 'methodology section with source citations'],
+    webapp: ['the core create/read action fully working with localStorage persistence', 'edit + delete with confirmation', 'empty state that teaches the first action'],
+  };
+  const kindLayout = {
+    landing: 'full-bleed hero with one promise, bento proof grid, then a conversion band',
+    promo: 'offer hero with the deal in giant type, product story split, urgency band before the footer',
+    event: 'date/location hero, day-timeline agenda, speakers/why-attend split, registration band',
+    portfolio: 'oversized name hero, masonry work grid, process strip, enquiry band',
+    report: 'editorial header with the finding in one line, stat band, findings table, methodology rail',
+    webapp: 'app header, single-purpose canvas, sticky action bar, list with inline edit',
+  };
   return {
     brand_name: '',
     audience: `${kind === 'webapp' ? 'people who need this tool daily' : "the business's real customers"}`,
     page_goal: kindGoal[kind] || kindGoal.landing,
+    features: kindFeatures[kind] || kindFeatures.landing,
+    layout: kindLayout[kind] || kindLayout.landing,
     research_focus: `what customers in this market expect from a ${kind === 'webapp' ? 'tool like this' : 'business like this'}`,
     queries: [],
     image_ideas: [],
-    sections_target: 4,
+    sections_target: 6,
     emphasis: kindEmphasis[kind] || kindEmphasis.landing,
     risks: ['generic stock phrasing', 'sections that could belong to any business'],
     tone_note: 'specific over grand — name real things, keep every line earning its place',
@@ -265,17 +292,21 @@ export async function leadPlan(env, { kind, brief, brand, site, style, team = nu
           ].filter(Boolean).join('\n'),
         },
       ],
-      { json: true, maxTokens: 800, temperature: 0.55 },
-      (out) => `${out.sections_target || 4} sections · ${String(out.audience || '').slice(0, 60)}`
+      { json: true, maxTokens: 1000, temperature: 0.55 },
+      (out) => `${out.sections_target || 6} sections · ${String(out.audience || '').slice(0, 60)}`
     );
     const plan = {
       brand_name: String(j.brand_name || '').replace(/^["'“”\s]+|["'“”\s]+$/g, '').slice(0, 80),
       audience: String(j.audience || '').slice(0, 140),
       page_goal: String(j.page_goal || '').slice(0, 90),
+      features: Array.isArray(j.features) ? j.features.map((f) => String(f).slice(0, 160)).filter(Boolean).slice(0, 4) : [],
+      layout: String(j.layout || '').slice(0, 180),
       research_focus: String(j.research_focus || '').slice(0, 200),
       queries: Array.isArray(j.queries) ? j.queries.map((q) => String(q).slice(0, 120)).filter(Boolean).slice(0, 2) : [],
       image_ideas: Array.isArray(j.image_ideas) ? j.image_ideas.map((q) => String(q).slice(0, 90)).filter(Boolean).slice(0, 3) : [],
-      sections_target: [4, 5].includes(Number(j.sections_target)) ? Number(j.sections_target) : 4,
+      // v15: 5-7 sections — the first round ships the full story (4 was
+      // starving it; the AI path can no longer undershoot the floor).
+      sections_target: [5, 6, 7].includes(Number(j.sections_target)) ? Number(j.sections_target) : 6,
       emphasis: Array.isArray(j.emphasis) ? j.emphasis.map((e) => String(e).slice(0, 160)).filter(Boolean).slice(0, 4) : [],
       risks: Array.isArray(j.risks) ? j.risks.map((r) => String(r).slice(0, 140)).filter(Boolean).slice(0, 3) : [],
       tone_note: String(j.tone_note || '').slice(0, 220),
@@ -295,6 +326,8 @@ export function leadBlock(lead) {
     lead.brand_name ? `THE CLIENT IS: "${lead.brand_name}" — brand every name and mention with exactly this` : '',
     lead.audience ? `AUDIENCE: ${lead.audience}` : '',
     lead.page_goal ? `THE PAGE MUST: ${lead.page_goal}` : '',
+    Array.isArray(lead.features) && lead.features.length ? `FEATURE CONTRACT (each must ship actually working): ${lead.features.join('; ')}` : '',
+    lead.layout ? `LAYOUT CONCEPT: ${lead.layout}` : '',
     lead.tone_note ? `TONE: ${lead.tone_note}` : '',
     lead.emphasis.length ? `CRAFT EMPHASIS: ${lead.emphasis.join('; ')}` : '',
     lead.risks.length ? `AVOID: ${lead.risks.join('; ')}` : '',
@@ -450,7 +483,7 @@ export function understandingBlock(u) {
 
 const SKILL_RESEARCH_SYSTEM = `You are the Skill Researcher of an elite multi-agent web studio. You research the web to make the team genuinely better at its craft, and distill what you find into DURABLE SKILLS the whole library applies. Respond with ONLY JSON:
 
-{"title":"skill title, 5-12 words, states the RULE not the topic","domain":"design|layout|motion|copy|ux|engineering|marketing","body":"2-4 sentences of concrete RULES distilled from these search results — what to always do, what to avoid, with the specific numbers/patterns found. Max 400 chars.","source":"the most credible source domain from the results, or 'synthesis'"}
+{"title":"skill title, 5-12 words, states the RULE not the topic","domain":"design|layout|motion|copy|ux|engineering|marketing|backend|database|security|testing|devops|mobile|research|documentation","body":"2-4 sentences of concrete RULES distilled from these search results — what to always do, what to avoid, with the specific numbers/patterns found. Max 400 chars.","source":"the most credible source domain from the results, or 'synthesis'"}
 
 Rules:
 - Distill ONLY what the results actually support — never invent a statistic or claim.
@@ -513,7 +546,7 @@ export async function researchAndLearnSkill(env, store, uid, { topic, brief = ''
 
 const REFLECTOR_SYSTEM = `You are the Reflector of an elite multi-agent web studio. After every finished build you extract ONE reusable, durable lesson from what the team just made, so future builds start smarter. Respond with ONLY JSON:
 
-{"title":"skill title, 5-12 words, states the rule not the topic","domain":"design|layout|motion|copy|ux|engineering|marketing","body":"2-4 sentences of RULES the team applies next time — what made THIS build work, what to always do or avoid. Concrete, not generic. Max 400 chars."}
+{"title":"skill title, 5-12 words, states the rule not the topic","domain":"design|layout|motion|copy|ux|engineering|marketing|backend|database|security|testing|devops|mobile|research|documentation","body":"2-4 sentences of RULES the team applies next time — what made THIS build work, what to always do or avoid. Concrete, not generic. Max 400 chars."}
 
 Rules:
 - Extract from the ACTUAL build below (goal, audience, sections, QA verdicts) — never generic advice.

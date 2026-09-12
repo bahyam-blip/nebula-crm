@@ -35,7 +35,7 @@ export { serveAgentSite } from './builder.js';
 const GRANT_TTL_SECONDS = 60 * 60 * 24; // pairing grants live 24h
 const GRANT_PREFIX = 'agent:mcp:grant:';
 const MCP_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18'];
-export const SERVER_VERSION = '7.0.0';
+export const SERVER_VERSION = '8.0.0';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -105,7 +105,10 @@ export const TOOL_SCHEMAS = {
   connect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger|supabase' }, label: STR, token: STR, key: STR, secret: STR, service_account_json: STR, access_token: { ...STR, description: 'Supabase personal access token' }, project_ref: { ...STR, description: 'Supabase project ref (the abcdefg part of abcdefg.supabase.co)' } }, required: ['connector'] },
   disconnect_platform: { type: 'object', properties: { connector: { ...STR, description: 'github|vercel|firebase|godaddy|hostinger' } }, required: ['connector'] },
   list_platform_domains: { type: 'object', properties: { connector: { ...STR, description: 'godaddy|hostinger' } }, required: ['connector'] },
-  publish_site: { type: 'object', properties: { artifact_id: { ...STR, description: 'id from list_artifacts (a built site, not a note)' }, connector: { ...STR, description: 'github|vercel|firebase' }, repo: { ...STR, description: 'repo/project name (optional)' }, domain: { ...STR, description: 'custom domain to attach (optional, github)' } }, required: ['artifact_id', 'connector'] },
+  publish_site: { type: 'object', properties: { artifact_id: { ...STR, description: 'id from list_artifacts (a built site, not a note)' }, connector: { ...STR, description: 'github|vercel|firebase' }, repo: { ...STR, description: 'repo/project name (optional)' }, domain: { ...STR, description: 'custom domain to attach (optional, github)' }, workflows: { type: 'array', items: { ...STR, description: 'pages|apk' }, description: 'github only — CI flow files to commit with the project (pages = GitHub Pages deploy, apk = Flutter APK build)' }, private: { type: 'boolean', description: 'github only — create the repo as private' } }, required: ['artifact_id', 'connector'] },
+  list_github_repos: { type: 'object', properties: {} },
+  trigger_workflow: { type: 'object', properties: { repo: { ...STR, description: '"owner/repo" or a repo name on the connected GitHub account' }, workflow: { ...STR, description: 'the workflow FILE name, e.g. build-apk.yml or deploy-pages.yml' }, ref: { ...STR, description: 'branch/ref to run it on (default main)' } }, required: ['repo', 'workflow'] },
+  workflow_runs: { type: 'object', properties: { repo: { ...STR, description: '"owner/repo" or a repo name on the connected GitHub account' }, per_page: NUM }, required: ['repo'] },
   supabase_sql: { type: 'object', properties: { query: { ...STR, description: 'SQL to run on the connected Supabase project (CREATE TABLE / INSERT / SELECT)' } }, required: ['query'] },
   create_email_task: { type: 'object', properties: { instruction: { ...STR, description: 'campaign instruction written like the owner would brief a marketer, incl. recipients' } }, required: ['instruction'] },
 };
@@ -132,7 +135,7 @@ const MCP_DESCRIPTIONS = {
   distribute_leads: 'Share leads evenly (round robin) across named teammates',
   save_business_profile: 'Update brand fields (name, tagline, industry, tone, colors…)',
   teach_memory: 'Remember a lasting fact or preference about the business',
-  build_website: 'BUILD AND HOST a complete website or mini web app from a brief — a deep-thinking multi-agent team (Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified design tokens + UX flow + per-brief design-DNA palette, Copywriter, Copy Chief, Architect, Photographer sourcing verified real images, Engineers hand-coding with an advanced motion system — marquee, count-up stats, scroll choreography — QA Director, Builder with an identity firewall so the page carries ONLY the client’s brand, Reflector, Skill Researcher) builds it, then grows the skill library from the build. Returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
+  build_website: 'BUILD AND HOST a complete website or mini web app from a brief — a deep-thinking multi-agent team runs on the ADVANCED FULL-STACK AI BUILDER constitution (FIRST ROUND IS THE PRODUCT: the first build ships the complete vision, features actually working): Lead with self-critique pass, Analyst, Researcher with two-round research, Art Director with WCAG-verified design tokens + UX flow + per-brief design-DNA palette, Copywriter, Copy Chief, Architect, Photographer sourcing verified real images, Engineers hand-coding with an advanced motion system — marquee, count-up stats, scroll choreography — QA Director, Builder with an identity firewall so the page carries ONLY the client’s brand, Reflector, Skill Researcher) builds it, then grows the skill library from the build. Returns a public URL. Kinds: landing, promo, event, portfolio, webapp, report',
   refine_site: 'Apply a change request to an already-built site and re-host it at the same URL as a new version. Pass sections (e.g. ["hero"]) for a fast surgical re-code of just those sections',
   save_note: 'Save a note / research summary / report as a shareable artifact',
   plan_task: 'Think in the open: turn a goal into an ordered execution plan before executing it step by step',
@@ -143,7 +146,10 @@ const MCP_DESCRIPTIONS = {
   connect_platform: 'Connect a platform once — credentials are encrypted server-side; publishing and SQL afterwards need no tokens. Prefer pointing the owner at the Studio → Hosting screen',
   disconnect_platform: 'Remove a platform connection and destroy its stored credentials',
   list_platform_domains: 'Domains the business owns on a connected registrar (GoDaddy/Hostinger)',
-  publish_site: 'DEPLOY a built site to GitHub Pages, Vercel or Firebase Hosting — returns the real public URL',
+  publish_site: 'DEPLOY a built site to GitHub Pages, Vercel or Firebase Hosting — GitHub pushes a FULL PROJECT (index.html + README + CI workflows) and returns the real public URL',
+  list_github_repos: 'Repos on the connected GitHub account — pick where to push a project or trigger a flow',
+  trigger_workflow: 'TRIGGER A CI FLOW on GitHub — dispatch build-apk.yml / deploy-pages.yml / any workflow on any repo of the connected account and return the run',
+  workflow_runs: 'Latest GitHub Actions run status on a repo — is the APK build green, did the deploy finish',
   supabase_sql: 'Run SQL on the connected Supabase project — provision tables / seed data for built web apps',
   create_email_task: 'QUEUE A REAL EMAIL CAMPAIGN (planning, on-brand copy, delivery, tracking). May wait for the owner in-app approval',
 };
@@ -290,6 +296,7 @@ export function mcpServerInfo(request, _env) {
       'AI email campaign engine with HITL approval',
       'website & mini web-app builder with public hosting (/sites/<id>)',
       'publish to GitHub Pages / Vercel / Firebase Hosting + domain pointing',
+      'GitHub power connector: full-project pushes (README + CI workflows) and workflow dispatch — trigger an APK build or a deploy flow on any repo of the connected account, with run status',
       'live-web research (search + fetch)',
       'business memory + live self-improving skill library (learned + web-researched skills)',
     ],

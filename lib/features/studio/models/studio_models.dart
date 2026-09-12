@@ -131,6 +131,9 @@ class SiteDeployment {
     this.domain,
     this.error,
     this.note,
+    this.repoUrl,
+    this.actionsUrl,
+    this.filesCommitted,
   });
 
   final String connector;
@@ -141,6 +144,11 @@ class SiteDeployment {
   final String? domain;
   final String? error;
   final String? note;
+
+  /// v15 GitHub power push — the repo/Actions links + project size.
+  final String? repoUrl;
+  final String? actionsUrl;
+  final int? filesCommitted;
 
   bool get isLive => ok && (url?.isNotEmpty ?? false);
 
@@ -153,6 +161,9 @@ class SiteDeployment {
         domain: m['domain'] as String?,
         error: m['error'] as String?,
         note: m['note'] as String?,
+        repoUrl: m['repoUrl'] as String?,
+        actionsUrl: m['actionsUrl'] as String?,
+        filesCommitted: (m['filesCommitted'] as num?)?.toInt(),
       );
 }
 
@@ -519,4 +530,69 @@ class BillingSnapshot {
           .toList(),
     );
   }
+}
+
+/// v15 GITHUB POWER CONNECTOR — a repo on the connected GitHub account.
+class GithubRepo {
+  const GithubRepo({
+    required this.fullName,
+    required this.name,
+    required this.isPrivate,
+    required this.defaultBranch,
+    required this.url,
+    this.updatedAt,
+  });
+
+  final String fullName; // owner/name — what push/trigger calls take
+  final String name;
+  final bool isPrivate;
+  final String defaultBranch;
+  final String url;
+  final String? updatedAt;
+
+  factory GithubRepo.fromMap(Map<String, dynamic> m) => GithubRepo(
+        fullName: (m['full_name'] as String?) ?? '',
+        name: (m['name'] as String?) ?? '',
+        isPrivate: m['private'] == true,
+        defaultBranch: (m['default_branch'] as String?) ?? 'main',
+        url: (m['url'] as String?) ?? '',
+        updatedAt: m['updated_at'] as String?,
+      );
+}
+
+/// v15 — one GitHub Actions run (the APK build / deploy status chip).
+class WorkflowRun {
+  const WorkflowRun({
+    required this.id,
+    required this.name,
+    required this.workflow,
+    required this.status,
+    required this.branch,
+    required this.url,
+    this.conclusion,
+    this.createdAt,
+  });
+
+  final int id;
+  final String name;
+  final String workflow; // e.g. build-apk.yml
+  final String status; // queued | in_progress | completed
+  final String? conclusion; // success | failure | null (still running)
+  final String branch;
+  final String url;
+  final String? createdAt;
+
+  bool get isRunning => status != 'completed';
+  bool get isGreen => conclusion == 'success';
+
+  factory WorkflowRun.fromMap(Map<String, dynamic> m) => WorkflowRun(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        name: (m['name'] as String?) ?? '',
+        workflow: (m['workflow'] as String?) ?? '',
+        status: (m['status'] as String?) ?? '',
+        conclusion: m['conclusion'] as String?,
+        branch: (m['branch'] as String?) ?? '',
+        url: (m['url'] as String?) ?? '',
+        createdAt: m['created_at'] as String?,
+      );
 }

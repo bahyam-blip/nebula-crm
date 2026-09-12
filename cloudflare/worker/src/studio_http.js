@@ -30,6 +30,9 @@ import {
   listDeployments,
   pointDomain,
   publishSite,
+  listGithubRepos,
+  triggerWorkflow,
+  workflowRuns,
 } from './emailer/publish.js';
 
 const WRITE_ROLES = ['superAdmin', 'admin', 'manager', 'salesRep', 'telecaller', 'supportAgent'];
@@ -156,6 +159,38 @@ async function handleStudioInner(request, env, { url, path, uid, ctx }) {
     const artifactId = String(url.searchParams.get('artifact_id') || '').trim();
     if (!artifactId) return json({ error: 'artifact_id is required' }, 400);
     return json({ ok: true, deployments: await listDeployments(store, uid, artifactId) });
+  }
+
+  /* ── v15 GitHub POWER CONNECTOR (manager+) ──
+   *   GET  /v1/studio/github/repos                → the account's repos
+   *   POST /v1/studio/github/push                 → publish_site(github) —
+   *         {artifact_id, repo?, private?, workflows?: ["pages","apk"], domain?}
+   *         commits the FULL PROJECT (index.html + README + CI flow files)
+   *   POST /v1/studio/github/trigger              → {repo, workflow, ref?}
+   *         dispatch a CI flow (APK build, Pages deploy) on any repo
+   *   GET  /v1/studio/github/runs?repo=owner/name → latest run status
+   */
+  if (path.startsWith('/v1/studio/github/')) {
+    if (!MANAGER_ROLES.includes(role)) return json({ error: `your role (${role}) cannot use the GitHub connector` }, 403);
+    const sub = path.slice('/v1/studio/github/'.length);
+    if (request.method === 'GET' && sub === 'repos') {
+      return json(await listGithubRepos(env, store, user), 200);
+    }
+    if (request.method === 'POST' && sub === 'push') {
+      const args = await body(request);
+      const result = await publishSite(env, store, user, { ...args, connector: 'github' });
+      return json(result, result.ok ? 200 : 400);
+    }
+    if (request.method === 'POST' && sub === 'trigger') {
+      const args = await body(request);
+      const result = await triggerWorkflow(env, store, user, args);
+      return json(result, result.ok ? 200 : 400);
+    }
+    if (request.method === 'GET' && sub === 'runs') {
+      const args = { repo: url.searchParams.get('repo'), per_page: Number(url.searchParams.get('per_page')) || 5 };
+      return json(await workflowRuns(env, store, user, args), 200);
+    }
+    return json({ error: `unknown github route: ${sub}` }, 404);
   }
 
   return json({ error: `unknown studio route: ${path}` }, 404);

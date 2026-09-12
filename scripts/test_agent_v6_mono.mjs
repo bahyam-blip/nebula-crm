@@ -151,10 +151,10 @@ const store = createStore(env);
 section('SKILLS LIBRARY');
 ok(SEED_SKILLS.length >= 10, `seeded expertise present (${SEED_SKILLS.length} skills)`);
 ok(SEED_SKILLS.every((s) => s.slug && s.title && s.body && s.domain), 'every seed has slug/title/body/domain');
-ok(SKILL_DOMAIN_GUARD(), 'domains constrained to the 7 known values');
+ok(SKILL_DOMAIN_GUARD(), 'domains constrained to the known curriculum (7 craft + 8 v15 engineering)');
 
 function SKILL_DOMAIN_GUARD() {
-  const known = new Set(['design', 'layout', 'motion', 'copy', 'ux', 'engineering', 'marketing']);
+  const known = new Set(['design', 'layout', 'motion', 'copy', 'ux', 'engineering', 'marketing', 'backend', 'database', 'security', 'testing', 'devops', 'mobile', 'research', 'documentation']);
   return SEED_SKILLS.every((s) => known.has(s.domain));
 }
 
@@ -313,7 +313,7 @@ ok(buildBlocked.ok === false && buildBlocked.rateLimited === true, 'build_websit
 
 /* ══ 5. TOOLS — registry, roles, plan ════════════════════════════ */
 section('TOOLS — 33 registry, role gates, plan_task');
-ok(Object.keys(TOOLS).length === 34, `registry has 34 tools (${Object.keys(TOOLS).length})`);
+ok(Object.keys(TOOLS).length === 37, `registry has 37 tools (34 + list_github_repos + trigger_workflow + workflow_runs) (${Object.keys(TOOLS).length})`);
 ok(TOOLS.plan_task?.tier === 'read' && TOOLS.list_skills?.tier === 'read', 'plan_task + list_skills are read-tier');
 ok(Array.isArray(TOOLS.learn_skill?.roles) && TOOLS.learn_skill.roles.includes('salesRep') && !TOOLS.learn_skill.roles.includes('viewer'), 'learn_skill is write-gated (viewer denied)');
 

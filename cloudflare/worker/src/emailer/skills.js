@@ -24,7 +24,11 @@ const LIB_KEY = (uid) => `skills:library:${uid || 'shared'}`;
 const LEARNED_CAP = 40;
 const BODY_MAX = 600;
 
-export const SKILL_DOMAINS = ['design', 'layout', 'motion', 'copy', 'ux', 'engineering', 'marketing'];
+export const SKILL_DOMAINS = [
+  'design', 'layout', 'motion', 'copy', 'ux', 'engineering', 'marketing',
+  // v15 — the full-stack curriculum (the master prompt's roles as domains)
+  'backend', 'database', 'security', 'testing', 'devops', 'mobile', 'research', 'documentation',
+];
 
 /* ══ Seeded expertise — senior-level rule cards ═══════════════════════ */
 
@@ -101,6 +105,79 @@ export const SEED_SKILLS = [
     domain: 'marketing',
     body: 'One h1, descriptive title <=60 chars, meta description 140-160, semantic sections (header/main/section/footer), og:title/description for shares. Above the fold: what-it-is + for-whom + one action. Marquee of offer keywords adds scannable energy. CTA band before the footer; giant wordmark footer for brand recall.',
   },
+  /* ══ v15 full-stack curriculum — the engineering roles as skill cards ══ */
+  {
+    slug: 'api-design-contracts',
+    title: 'Backend: APIs are contracts, not endpoints',
+    domain: 'backend',
+    body: 'Predictable resource nouns, consistent error format {error, code}, versionable responses. Validate EVERY input at the boundary (type, length, range, enum) — never trust the client. Authn before authz on every route; least privilege by default. Pagination (cursor > offset), rate limits on writes, idempotency keys on anything that charges or sends. Log the request id, never the secret.',
+  },
+  {
+    slug: 'data-modeling-first',
+    title: 'Database: model the queries, not the objects',
+    domain: 'database',
+    body: 'Design from the read patterns: list what each screen shows, then shape tables/keys so those queries are one index away. Every FK gets an index; every status filter gets a composite. Avoid N+1 with joins or batch loads. Constraints (NOT NULL, UNIQUE, CHECK) are cheaper than cleanup code. Timestamps on everything; soft-delete where history matters.',
+  },
+  {
+    slug: 'secure-by-default',
+    title: 'Security: the defaults are the defense',
+    domain: 'security',
+    body: 'Parameterized queries only (SQLi dies there). Escape on output, never trust user HTML — allowlist tags if you must render it. Secrets live in env/secret managers, never in code or logs or client bundles. CSRF tokens on state-changing forms; SSRF-guard outbound fetches (allowlist hosts, block private IPs). Fail closed on auth errors; generic messages for login failures.',
+  },
+  {
+    slug: 'test-the-risk-first',
+    title: 'Testing: spend the budget where the risk is',
+    domain: 'testing',
+    body: 'Unit-test pure logic and parsers (they break silently), integration-test boundaries (API↔DB, forms↔handlers), E2E only the money paths (signup, checkout, publish). Every bug fix ships with the regression test that would have caught it. Arrange-Act-Assert; test behavior, not implementation; flaky tests are deleted or fixed the same day — a red build nobody trusts is worse than none.',
+  },
+  {
+    slug: 'debugging-method',
+    title: 'Debugging: reproduce, isolate, fix the cause',
+    domain: 'testing',
+    body: 'OBSERVE the exact error → REPRODUCE it deterministically → ISOLATE (binary-search the inputs/layers) → fix the ROOT CAUSE, never the symptom → re-run to VERIFY. Classify first: syntax/type/runtime/logic/config/network — each has a different tool. Never repeat a failed action hoping for different output; when evidence contradicts the strategy, change the strategy. Log the fix so the team learns it.',
+  },
+  {
+    slug: 'performance-budgets',
+    title: 'Performance: budgets before optimization',
+    domain: 'engineering',
+    body: 'Budget: <150KB critical path, LCP <2.5s, INP <200ms. Ship content without JS; hydrate interactivity after. Images: sized, lazy below fold, modern formats. Fonts: display=swap + preconnect, max 2 families. Cache what is immutable; compress what is not. Measure before optimizing — the slow thing is rarely the thing you assume; optimize the single biggest cost first.',
+  },
+  {
+    slug: 'git-github-flow',
+    title: 'Git: small commits, honest messages, safe rolls',
+    domain: 'devops',
+    body: 'A branch per feature, a commit per coherent step: subject <=72 chars, imperative mood, the WHY in the body. Never force-push shared branches; never commit secrets or generated artifacts. CI gates deploys — red build blocks merge, no exceptions. Before risky work: tag or branch the current state so rollback is one command. Squash noisy WIP before review.',
+  },
+  {
+    slug: 'deploy-pipeline-discipline',
+    title: 'DevOps: pipelines ship, verifications prove',
+    domain: 'devops',
+    body: 'Every deploy is: build → test gate → deploy → smoke-check the live URL. Environment config through env vars, one .env.example as documentation. Zero-downtime means backward-compatible migrations first (add, backfill, then remove). Health endpoint + error tracking before launch. Rollback is a plan written BEFORE the deploy, not improvised during an incident.',
+  },
+  {
+    slug: 'flutter-product-craft',
+    title: 'Mobile: native feel is a product requirement',
+    domain: 'mobile',
+    body: '44-48dp touch targets, thumb-reachable primary actions, safe-area insets respected. Immutable state patterns (Riverpod/Bloc): state classes, no setState sprawl. Every async view has loading skeleton, error retry and empty state. Lists are builder-based with stable keys; images cached; jank-free 60fps means no layout work in build(). Handle offline gracefully — queue, do not lose.',
+  },
+  {
+    slug: 'component-architecture',
+    title: 'Frontend: components own one job each',
+    domain: 'engineering',
+    body: 'Break screens into components by role, not by pixel: container (data) vs presentational (render) vs primitive (button/input). Props down, events up, no deep mutation. State lives at the lowest common owner; server state cached and invalidated deliberately. Reuse abstractions only when the third use case appears — premature DRY calcifies. No giant files: a component over ~300 lines is two components.',
+  },
+  {
+    slug: 'primary-source-research',
+    title: 'Research: primary sources or it did not happen',
+    domain: 'research',
+    body: 'Prefer official docs, standards and first-party posts over SEO blogs; two independent sources for anything load-bearing. Note the publication date — frameworks rot fast. Distill findings into transferable RULES with numbers ("min tap target 44px"), not summaries. Never hallucinate an API: verify the signature before shipping it. Cite the source next to the claim.',
+  },
+  {
+    slug: 'readme-that-ships',
+    title: 'Documentation: written for the next engineer at 2am',
+    domain: 'documentation',
+    body: 'README answers in order: what is this, quickstart (copy-paste runnable), env vars table, architecture sketch, how to deploy, troubleshooting. Docs must match the ACTUAL implementation — stale docs are worse than none. Every non-obvious decision earns a comment that says WHY. Examples are real and tested; if a snippet cannot run, delete it.',
+  },
 ];
 
 /* ══ Library access ═══════════════════════════════════════════════════ */
@@ -175,7 +252,18 @@ export async function forgetSkill(store, uid, args) {
  */
 export async function skillsForDomain(store, uid, domain, { maxSkills = 6, maxChars = 1600 } = {}) {
   const learned = store ? safeParseList(await store.get(LIB_KEY(uid))) : [];
-  const adj = { design: ['layout', 'motion'], layout: ['design'], motion: ['design'], copy: ['marketing'], ux: ['design'], engineering: [], marketing: ['copy'] };
+  // v15 adjacency covers the full-stack curriculum: a build that asks for
+  // engineering reads backend/security/testing wisdom too.
+  const adj = {
+    design: ['layout', 'motion'], layout: ['design'], motion: ['design'],
+    copy: ['marketing'], ux: ['design'], engineering: ['architecture', 'security', 'testing', 'performance'],
+    marketing: ['copy'],
+    backend: ['database', 'security', 'engineering'], database: ['backend', 'security'],
+    security: ['backend', 'testing'], testing: ['engineering', 'debugging'],
+    devops: ['testing', 'security'], mobile: ['design', 'ux'],
+    research: ['documentation'], documentation: ['research'],
+    architecture: ['engineering'], performance: ['engineering'], debugging: ['testing'],
+  };
   const order = (s) => (s.domain === domain ? 0 : (adj[domain] || []).includes(s.domain) ? 1 : 2);
   const pool = [
     ...learned.map((s) => ({ ...s, learned: true })),

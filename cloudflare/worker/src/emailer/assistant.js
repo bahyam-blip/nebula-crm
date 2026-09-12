@@ -53,6 +53,9 @@ import {
   listPlatformDomains,
   publishSite,
   supabaseQuery,
+  listGithubRepos,
+  triggerWorkflow,
+  workflowRuns,
   CONNECTORS,
 } from './publish.js';
 
@@ -100,13 +103,16 @@ export const TOOLS = {
   save_note: { tier: 'write', roles: WRITE_ROLES, spec: 'save a research summary, plan or report as a shareable artifact {title, content} — the owner sees it in the app' },
   plan_task: { tier: 'read', spec: 'THINK in the open: turn a goal into an ordered execution plan {goal, steps: ["step 1", ...], risk?: "one-line main risk"} — the plan is shown to the user and remembered; then execute it step by step with other tools. Use BEFORE complex multi-step requests (research + build + email)' },
   list_skills: { tier: 'read', spec: 'list the agent\'s skill library {domain?}: seeded expert skills + everything learned live from research — these skills actively improve every site build' },
-  learn_skill: { tier: 'write', roles: WRITE_ROLES, spec: 'DISTILL a lasting capability into the skill library {title, domain: design|layout|motion|copy|ux|engineering|marketing, body: "the actual RULES, <=80 words"} — after research reveals a pattern worth keeping, or when the user teaches a preference. Learned skills are injected into every future site build. Improving an existing skill (same title) sharpens it' },
+  learn_skill: { tier: 'write', roles: WRITE_ROLES, spec: 'DISTILL a lasting capability into the skill library {title, domain: design|layout|motion|copy|ux|engineering|marketing|backend|database|security|testing|devops|mobile|research|documentation, body: "the actual RULES, <=80 words"} — after research reveals a pattern worth keeping, or when the user teaches a preference. Learned skills are injected into every future site build. Improving an existing skill (same title) sharpens it' },
   research_skill: { tier: 'write', roles: WRITE_ROLES, spec: 'RESEARCH A NEW SKILL FROM THE LIVE WEB {topic, brief?} — searches the web for real expert knowledge on the topic (e.g. "restaurant website hero patterns"), distills the transferable RULES into a sourced skill and stores it in the library where every future build applies it. Use when you notice a craft gap or the owner wants the agent stronger in a domain' },
   connector_status: { tier: 'read', spec: 'which platforms (GitHub, Vercel, Firebase, GoDaddy, Hostinger, Supabase) are connected and what they do' },
   connect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'connect a platform once {connector: github|vercel|firebase|godaddy|hostinger|supabase, ...credentials} — credentials are encrypted server-side; afterwards publishing and SQL need NO tokens. Only report that connecting is possible; the app Studio screen collects the credentials' },
   disconnect_platform: { tier: 'write', roles: MANAGER_ROLES, spec: 'remove a stored platform connection and destroy its stored credentials {connector}' },
   list_platform_domains: { tier: 'read', roles: MANAGER_ROLES, spec: 'list the domains the business owns on a connected registrar {connector: godaddy|hostinger}' },
-  publish_site: { tier: 'write', roles: MANAGER_ROLES, spec: 'DEPLOY a built site artifact to a connected hosting platform {artifact_id, connector: github|vercel|firebase, repo?, domain?} — returns the real public URL (github.io / vercel.app / web.app). Use after build_website when the owner wants their site on their own hosting' },
+  publish_site: { tier: 'write', roles: MANAGER_ROLES, spec: 'DEPLOY a built site artifact to a connected hosting platform {artifact_id, connector: github|vercel|firebase, repo?, domain?, workflows?: ["pages","apk"], private?: bool} — returns the real public URL (github.io / vercel.app / web.app). GitHub pushes a FULL PROJECT (index.html + README + CI flow files) and can include APK-build / Pages-deploy workflows. Use after build_website when the owner wants their site on their own hosting' },
+  list_github_repos: { tier: 'read', roles: MANAGER_ROLES, spec: 'list the repos on the connected GitHub account { } — for choosing where to push a project or trigger a flow' },
+  trigger_workflow: { tier: 'write', roles: MANAGER_ROLES, spec: 'TRIGGER A CI FLOW on the connected GitHub account {repo: "owner/repo" or name, workflow: "build-apk.yml"|"deploy-pages.yml"|any workflow file, ref?: "main"} — dispatches the workflow (workflow_dispatch) and returns the run. This is how an APK gets built or a site deployed from inside the app' },
+  workflow_runs: { tier: 'read', roles: MANAGER_ROLES, spec: 'latest CI run status on a GitHub repo {repo, per_page?} — is the APK build green, did the deploy finish' },
   supabase_sql: { tier: 'write', roles: MANAGER_ROLES, spec: 'run SQL on the connected Supabase project {query} — CREATE TABLE / INSERT / SELECT. Use after build_website when the owner\'s web app needs a real database backend; write safe, minimal schema and say what you created' },
   // ── consequential ──
   create_email_task: { tier: 'consequential', spec: 'QUEUE A REAL EMAIL CAMPAIGN {instruction} — write it like the owner would instruct a marketer, e.g. "send an announcement about <X> to all leads". The engine plans, writes on-brand copy and delivers. May require the owner\'s approval first.' },
@@ -540,6 +546,19 @@ export async function runTool(action, env, store, user, ctx = { waitUntil: () =>
       if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
       return publishSite(env, store, user, args);
     }
+
+    /* ── GitHub power connector (v15) ── */
+    case 'list_github_repos':
+      return listGithubRepos(env, store, user);
+
+    case 'trigger_workflow': {
+      const rl = await rateLimit(store, user?.uid || '', 'publish_site');
+      if (!rl.ok) return { ok: false, rateLimited: true, error: rl.error };
+      return triggerWorkflow(env, store, user, args);
+    }
+
+    case 'workflow_runs':
+      return workflowRuns(env, store, user, args);
 
     case 'supabase_sql': {
       const rl = await rateLimit(store, user?.uid || '', 'supabase_sql');

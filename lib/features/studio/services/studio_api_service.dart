@@ -285,6 +285,79 @@ class StudioApiService {
     return (json['note'] as String?) ?? 'DNS record set.';
   }
 
+  // ── v15 GITHUB POWER CONNECTOR ────────────────────────────────────
+
+  /// Repos on the connected GitHub account (newest activity first) —
+  /// the pickers for "where does this project go".
+  Future<List<GithubRepo>> listGithubRepos() async {
+    final json = await _send('GET', '/v1/studio/github/repos');
+    if (json['ok'] != true) {
+      throw StudioApiException((json['error'] as String?) ?? 'Could not list repos.');
+    }
+    return ((json['repos'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((r) => GithubRepo.fromMap(r.cast<String, dynamic>()))
+        .toList();
+  }
+
+  /// Push a built site to GitHub as a FULL PROJECT: index.html + README.md
+  /// + the requested CI flow files (pages = Pages deploy, apk = APK build).
+  /// Repo is created private on request; GitHub Pages is enabled. Returns
+  /// the deployment with repo/actions links.
+  Future<SiteDeployment> pushToGithub({
+    required String artifactId,
+    String? repo,
+    bool isPrivate = false,
+    List<String> workflows = const [],
+    String? domain,
+    String? title,
+  }) async {
+    final json = await _send('POST', '/v1/studio/github/push', body: {
+      'artifact_id': artifactId,
+      if (repo != null && repo.isNotEmpty) 'repo': repo,
+      'private': isPrivate,
+      if (workflows.isNotEmpty) 'workflows': workflows,
+      if (domain != null && domain.isNotEmpty) 'domain': domain,
+      if (title != null && title.isNotEmpty) 'title': title,
+    });
+    if (json['ok'] != true) {
+      throw StudioApiException((json['error'] as String?) ?? 'The GitHub push did not finish.');
+    }
+    return SiteDeployment.fromMap(json);
+  }
+
+  /// TRIGGER A CI FLOW (workflow_dispatch) on any repo of the connected
+  /// GitHub account — build the APK, run the Pages deploy. Returns the
+  /// run it started (null when GitHub has not registered it yet).
+  Future<WorkflowRun?> triggerWorkflow({
+    required String repo,
+    required String workflow,
+    String? ref,
+  }) async {
+    final json = await _send('POST', '/v1/studio/github/trigger', body: {
+      'repo': repo,
+      'workflow': workflow,
+      if (ref != null && ref.isNotEmpty) 'ref': ref,
+    });
+    if (json['ok'] != true) {
+      throw StudioApiException((json['error'] as String?) ?? 'The workflow could not be triggered.');
+    }
+    final run = (json['run'] as Map?)?.cast<String, dynamic>();
+    return run == null ? null : WorkflowRun.fromMap(run);
+  }
+
+  /// Latest GitHub Actions runs on a repo — the status chips.
+  Future<List<WorkflowRun>> workflowRuns(String repo) async {
+    final json = await _send('GET', '/v1/studio/github/runs?repo=${Uri.encodeComponent(repo)}');
+    if (json['ok'] != true) {
+      throw StudioApiException((json['error'] as String?) ?? 'Could not read workflow runs.');
+    }
+    return ((json['runs'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((r) => WorkflowRun.fromMap(r.cast<String, dynamic>()))
+        .toList();
+  }
+
   /// Deployment history for one artifact.
   Future<List<SiteDeployment>> deployments(String artifactId) async {
     final json = await _send('GET', '/v1/studio/deployments?artifact_id=$artifactId');

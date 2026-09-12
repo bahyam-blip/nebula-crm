@@ -133,6 +133,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         onDisconnect: (platform) => notifier.disconnectPlatform(platform.connector),
         onPointDomain: (platform, domain, target, name) =>
             notifier.pointDomain(connector: platform.connector, domain: domain, target: target, name: name),
+        onGithubRepos: () => notifier.listGithubRepos(),
+        onGithubTrigger: (repo, workflow) => notifier.triggerWorkflow(repo: repo, workflow: workflow),
+        onGithubRuns: (repo) => notifier.workflowRuns(repo),
       ),
     );
   }
@@ -160,6 +163,17 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
         onDisconnect: (platform) => notifier.disconnectPlatform(platform.connector),
         onPointDomain: (platform, domain, target, name) =>
             notifier.pointDomain(connector: platform.connector, domain: domain, target: target, name: name),
+        onGithubRepos: () => notifier.listGithubRepos(),
+        onGithubPush: (artifactId, repo, isPrivate, workflows, domain) => notifier.pushToGithub(
+          artifactId: artifactId,
+          repo: repo,
+          isPrivate: isPrivate,
+          workflows: workflows,
+          domain: domain,
+          title: site.title,
+        ),
+        onGithubTrigger: (repo, workflow) => notifier.triggerWorkflow(repo: repo, workflow: workflow),
+        onGithubRuns: (repo) => notifier.workflowRuns(repo),
       ),
     );
   }

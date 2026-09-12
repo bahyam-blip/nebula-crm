@@ -173,8 +173,11 @@ globalThis.fetch = async (url, init = {}) => {
       const name = JSON.parse(body).name;
       return jsonRes(201, { full_name: `testowner/${name}` });
     }
-    if (method === 'PUT' && u.includes('/contents/index.html')) return jsonRes(201, { content: { path: 'index.html' } });
-    if (method === 'PUT' && u.includes('/contents/CNAME')) return jsonRes(201, { content: { path: 'CNAME' } });
+    if (method === 'PUT' && u.includes('/contents/')) {
+      // v15: a publish commits a FULL PROJECT (index.html, README.md,
+      // .github/workflows/*) — the mock accepts every contents PUT.
+      return jsonRes(201, { content: { path: u.includes('CNAME') ? 'CNAME' : u.includes('index.html') ? 'index.html' : 'file' } });
+    }
     if (method === 'PATCH' && u.endsWith('/pages')) return jsonRes(200, { cname: JSON.parse(body).cname });
     if (method === 'POST' && u.endsWith('/pages')) return jsonRes(201, { html_url: 'https://testowner.github.io/x/' });
     return jsonRes(404, { message: 'not found (github mock)' });
@@ -514,7 +517,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   for (const t of ['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site']) {
     ok(names.includes(t) && !!TOOL_SCHEMAS[t], `MCP schema present: ${t}`);
   }
-  ok(names.length === 34, 'tool registry is 34 tools (30 + plan_task + list_skills + learn_skill + research_skill)', String(names.length));
+  ok(names.length === 37, 'tool registry is 37 tools (34 + list_github_repos + trigger_workflow + workflow_runs)', String(names.length));
 
   // Pair a grant and call connector_status + publish over MCP.
   const pairReq = new Request('https://worker.test/v1/assistant/mcp/pair', {
@@ -538,7 +541,7 @@ console.log('\n— 7. MCP: new tools exposed + callable —');
   const listed = list.json.result.tools.map((t) => t.name);
   ok(['connector_status', 'connect_platform', 'disconnect_platform', 'list_platform_domains', 'publish_site'].every((t) => listed.includes(t)),
     'tools/list shows all 5 hosting tools');
-  ok(listed.length === 34, 'tools/list count is 34', String(listed.length));
+  ok(listed.length === 37, 'tools/list count is 37', String(listed.length));
 
   const stCall = await rpc('tools/call', { name: 'connector_status', arguments: {} });
   const stPayload = JSON.parse(stCall.json.result.content[0].text);

@@ -455,7 +455,7 @@ section('research_skill TOOL — the capability is exposed');
   ok(TOOLS.research_skill && TOOLS.research_skill.tier === 'write', 'research_skill registered as a write tool');
   ok(Array.isArray(TOOLS.research_skill.roles) && TOOLS.research_skill.roles.includes('admin'), 'role-gated (admin can call)');
   ok(M.TOOL_SCHEMAS.research_skill && M.TOOL_SCHEMAS.research_skill.required.includes('topic'), 'MCP schema requires topic');
-  ok(M.SERVER_VERSION === '7.0.0', 'MCP server bumped to v7.0.0', M.SERVER_VERSION);
+  ok(M.SERVER_VERSION === '8.0.0', 'MCP server bumped to v8.0.0', M.SERVER_VERSION);
 
   // runTool happy path
   primeFullBuild();
