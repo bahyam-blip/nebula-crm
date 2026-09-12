@@ -57,8 +57,10 @@
  *   MAILERCLOUD_API_KEY (secret) — without it nothing can send.
  *   MAILERCLOUD_SENDER_EMAIL (secret, optional) — falls back to the
  *     MAIL_SENDER_EMAIL var, then the verified account sender das@aidraft.bond.
- *   SARVAM_API_KEY + FIREBASE_SERVICE_ACCOUNT — for the AI pipeline,
- *     CRM audiences and write-back; NOT needed for /test.
+ *   FIREBASE_SERVICE_ACCOUNT — for the AI pipeline's CRM audiences and
+ *     write-back; NOT needed for /test.
+ *   LLM engine — llm.js routes AI calls: Workers AI binding (free, default),
+ *     Nebula Core custom endpoint (LLM_CUSTOM_BASE_URL), or SARVAM_API_KEY.
  */
 
 import { MailerCloud } from './mailercloud.js';
@@ -75,6 +77,7 @@ import { writeEmail, renderHtml, saveTemplate, sampleCampaignCopy } from './copy
 import { collectAnalytics, getLatestAnalytics, analyticsDue, markAnalyticsPulled } from './analytics.js';
 import { putTask, getTask, listTasks, deleteTask, newTask, touch, addEvent, cancelTaskState, retryTaskState, progressOf } from './tasks.js';
 import { createStore, stateBackendName, safeParse } from './state.js';
+import { llmReady } from './llm.js';
 import { getMemory, saveMemory, resetMemory, teach, learnFromResults, memoryContext, syncBriefToMemory } from './memory.js';
 import { getBusinessProfile, saveBusinessProfile, brandFor, profileToFacts, mergeProfilePatch, normalizeStyle, TEMPLATE_STYLES } from './business.js';
 import { openToken, saveTokenMap } from './track.js';
@@ -124,7 +127,7 @@ function pickDeliveryMode(env, audienceSize) {
 /** What the mailer still needs; reports exactly what is missing. */
 export async function mailConfigState(env, store = null) {
   const missing = [];
-  if (!env.SARVAM_API_KEY) missing.push('SARVAM_API_KEY');
+  if (!llmReady(env)) missing.push('AI engine (Workers AI binding, LLM_CUSTOM_BASE_URL for Nebula Core, or SARVAM_API_KEY)');
   if (!env.MAILERCLOUD_API_KEY) missing.push('MAILERCLOUD_API_KEY');
   if (!env.FIREBASE_SERVICE_ACCOUNT) missing.push('FIREBASE_SERVICE_ACCOUNT');
   // MAILERCLOUD_SENDER_EMAIL is optional — resolveSender() has two fallbacks,

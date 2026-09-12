@@ -8,7 +8,7 @@
  * Analytics learnings are injected into both, closing the feedback loop.
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat } from './llm.js';
 import { fetchWithBackoff } from './http.js';
 import { getMemory, memoryContext } from './memory.js';
 import { profileContext, TEMPLATE_STYLES } from './business.js';
@@ -120,7 +120,7 @@ ${profileBlock}`
     BRIEF_SCHEMA_PROMPT,
   ].filter(Boolean).join('\n');
 
-  const brief = await sarvamChat(
+  const brief = await llmChat(
     env,
     [
       { role: 'system', content: 'You are a senior email marketing strategist. Understand a business deeply so you can write high-open-rate emails for it later.' },
@@ -212,7 +212,7 @@ export async function planTask(env, kv, task, brief, learnings, contactStats, me
   // NOTE: no reasoning_effort here — thinking is disabled by default in
   // sarvam.js (reasoning once devoured the token budget and left every
   // plan empty). Set MAIL_AI_REASONING=medium to re-enable deliberately.
-  const plan = await sarvamChat(
+  const plan = await llmChat(
     env,
     [
       { role: 'system', content: 'You are an autonomous email campaign planner. You convert owner instructions into precise, safe, executable campaign plans. You always output valid JSON.' },

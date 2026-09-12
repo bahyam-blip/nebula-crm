@@ -8,7 +8,7 @@
  * also saved into MailerCloud's template library (POST /templates/create).
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat } from './llm.js';
 import { esc, htmlToText } from './http.js';
 import { memoryContext } from './memory.js';
 import { normalizeStyle } from './business.js';
@@ -88,7 +88,7 @@ export async function writeEmail(env, task, planEmail, brief, learnings, memory 
     COPY_SCHEMA_PROMPT,
   ].filter(Boolean).join('\n');
 
-  const copy = await sarvamChat(
+  const copy = await llmChat(
     env,
     [
       { role: 'system', content: `You are an elite direct-response email copywriter and creative strategist. Your emails get opened because they are specific, honest and human — never spammy. You invent fresh angles (story hooks, pattern interrupts, bold specific promises) instead of recycling generic marketing phrases. You always reply with valid JSON.\n\n${CREATIVE_PLAYBOOK}` },

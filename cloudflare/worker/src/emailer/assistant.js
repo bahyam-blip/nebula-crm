@@ -32,7 +32,7 @@
  * tools add their own role requirements on top.
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat, llmReady } from './llm.js';
 import { createStore, stateBackendName, safeParse } from './state.js';
 import { getMemory, teach, memoryContext } from './memory.js';
 import { getBusinessProfile, saveBusinessProfile, brandFor, profileToFacts } from './business.js';
@@ -844,7 +844,7 @@ async function runAgentLoop(env, store, user, messages, ctx) {
   const artifacts = [];
   let reply = '';
   for (let step = 0; step < MAX_STEPS; step++) {
-    const out = await sarvamChat(env, convo, { json: true, temperature: 0.35, maxTokens: 2200 });
+    const out = await llmChat(env, convo, { json: true, temperature: 0.35, maxTokens: 2200 });
     if (out.action && out.action.tool) {
       const tool = String(out.action.tool);
       const t0 = Date.now();
@@ -894,7 +894,7 @@ function jsonResponse(obj, status = 200) {
 /** POST /v1/assistant handler (auth already verified by index.js). */
 export async function handleAssistant(request, env, { uid, ctx = { waitUntil: () => {} } }) {
   try {
-    if (!env.SARVAM_API_KEY) {
+    if (!llmReady(env)) {
       return jsonResponse({ error: 'AI is not configured on the server.' }, 503);
     }
     let body;

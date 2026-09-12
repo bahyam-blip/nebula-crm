@@ -1,0 +1,14 @@
+{
+  "total": 494,
+  "by_family": {
+    "plan": 60,
+    "section": 220,
+    "tokens": 60,
+    "copy": 80,
+    "qa_fix": 12,
+    "devops": 9,
+    "skill": 48,
+    "assistant": 5
+  },
+  "approx_tokens": 315033
+}

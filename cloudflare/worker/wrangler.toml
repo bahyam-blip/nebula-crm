@@ -38,6 +38,14 @@ crons = ["*/5 * * * *"]
 # binding = "NEBULA_EMAIL_KV"
 # id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
 
+# ── Workers AI (default LLM engine) ──────────────────────────────────
+# Included free with the Cloudflare account (daily neuron allocation) —
+# no API key, no billing setup. The LLM router (emailer/llm.js) routes
+# agent/chat/code traffic here first, our fine-tuned Nebula Core second
+# (if LLM_CUSTOM_BASE_URL is set), Sarvam last (if its key is set).
+[ai]
+binding = "AI"
+
 # ── Self service binding (chunked delivery) ───────────────────────────
 # A Worker on workers.dev cannot HTTP-fetch ITSELF (Cloudflare error 1042),
 # so the delivery chain calls itself through this binding instead. Each

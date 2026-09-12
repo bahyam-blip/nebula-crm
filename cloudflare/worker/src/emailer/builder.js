@@ -29,7 +29,7 @@
  * rebuild. Served publicly at GET /sites/<id> (?v=N for a snapshot).
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat } from './llm.js';
 import { createTeamRun, leadPlan, leadDeepThink, applyDeepThink, projectUnderstanding, runAgent, reflectOnBuild, researchAndLearnSkill } from './agents.js';
 import { getBusinessProfile, brandFor, profileToFacts } from './business.js';
 import { extractSiteBrand, siteIdentityBlock, scrubSiteHtml } from './sitebrand.js';
@@ -279,7 +279,7 @@ async function buildWebapp(env, { title, brief, style, brand, site, team = null 
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const raw = await sarvamChat(env, messages, { maxTokens: 1900, temperature: 0.55 });
+      const raw = await llmChat(env, messages, { maxTokens: 1900, temperature: 0.55 });
       const { html, error } = extractSiteHtml(raw);
       if (!html) throw new Error(error);
       return { html: sanitizeSiteHtml(html), builder: 'ai', plan };

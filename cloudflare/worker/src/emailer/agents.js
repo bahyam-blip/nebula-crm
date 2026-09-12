@@ -46,7 +46,7 @@
  * reflector | analyst | skill_researcher.
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat } from './llm.js';
 import { masterBlock, FIRST_ROUND_LAW } from './masterprompt.js';
 
 /* ══ The team roster ═════════════════════════════════════════════════ */
@@ -157,7 +157,7 @@ export function silentTeam() {
 
 /**
  * runAgent — one named agent performs one action.
- * Wraps sarvamChat, records the invocation (ok or failed, with duration)
+ * Wraps llmChat (engine-routed), records the invocation (ok or failed, with duration)
  * into the team trace, and re-throws so the caller's existing fallbacks
  * keep working unchanged. detailFn distills a human line from the result.
  */
@@ -165,7 +165,7 @@ export async function runAgent(env, team, key, action, messages, opts = {}, deta
   const T = team || silentTeam();
   const t0 = Date.now();
   try {
-    const out = await sarvamChat(env, messages, opts);
+    const out = await llmChat(env, messages, opts);
     let detail = '';
     let code = null;
     let artifact = null;

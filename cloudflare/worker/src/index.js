@@ -24,6 +24,7 @@ import { handleAssistant, handleAssistantApproval } from './emailer/assistant.js
 import { handleDataRequest } from './data_http.js';
 import { handleStudioRequest } from './studio_http.js';
 import { handleBillingRequest } from './billing_http.js';
+import { llmChat, engineStatus, openAiShape } from './emailer/llm.js';
 import { recordOpen, recordClick, recordUnsub, PNG_1X1 } from './emailer/track.js';
 import { verifyIdToken } from './auth.js';
 import { handleMcp, handleMcpPair, serveAgentSite, mcpServerInfo } from './emailer/mcp.js';
@@ -341,23 +342,20 @@ export default {
       return handleMail(request, env, { url, uid, ctx });
     }
 
-    // ── AI proxy ──
-    // Sarvam's key lives here as a Worker secret. It must never ship in the
-    // APK: an APK can be decompiled, and a leaked key is billable to you.
-    // The Worker only relays; it never decides what the AI may touch. The
-    // app executes any resulting action with the signed-in user's own
-    // permissions, so the AI cannot escalate privileges.
-    //
-    // sarvam-105b reasons before answering and reasoning shares the token
-    // budget with the answer — an unlucky run returns finish_reason:"length"
-    // with EMPTY content (this killed campaign planning; see sarvam.js).
-    // Two defenses here:
-    //   • thinking is DISABLED unless the caller explicitly asks for it
-    //     (reasoning_effort: 'low'|'medium'|'high');
-    //   • an empty answer is retried once server-side, so the app never
-    //     has to parse a hollow 200.
+    // ── AI proxy (engine-routed) ──
+    // Keys live here as Worker secrets and never ship in the APK. The
+    // request is served by the llm.js router: Workers AI binding (free,
+    // default), our fine-tuned Nebula Core (LLM_CUSTOM_BASE_URL), then
+    // Sarvam (paid, legacy). The response keeps the OpenAI shape the app
+    // already parses (choices[0].message.content) for every engine.
+    if (request.method === 'GET' && path === '/v1/ai/engine') {
+      const status = engineStatus(env);
+      return json({ ...status, hint: 'POST /v1/ai for completions' }, 200);
+    }
+
     if (request.method === 'POST' && path === '/v1/ai') {
-      if (!env.SARVAM_API_KEY) {
+      const status = engineStatus(env);
+      if (!status.ready) {
         return json({ error: 'AI is not configured on the server.' }, 503);
       }
       let body;
@@ -367,70 +365,91 @@ export default {
         return json({ error: 'invalid JSON body' }, 400);
       }
 
-      const forcedEffort = ['low', 'medium', 'high'].includes(
-        String(body.reasoning_effort || '').toLowerCase()
-      )
-        ? String(body.reasoning_effort).toLowerCase()
-        : null; // null = thinking off (documented switch)
+      const engine = status.active;
 
-      const buildPayload = () =>
-        JSON.stringify({
-          // sarvam-m was retired; the API names sarvam-105b as the replacement.
-          model: body.model || 'sarvam-105b',
-          messages: body.messages || [],
-          temperature: body.temperature ?? 0.2,
-          // Keep the payload minimal beyond what the app asked for. Extra
-          // parameters are the usual cause of a 400 from providers that
-          // only accept a subset of the OpenAI shape.
-          ...(Number.isFinite(Number(body.max_tokens)) && Number(body.max_tokens) > 0
-            ? { max_tokens: Math.min(Number(body.max_tokens), 4096) }
-            : {}),
-          ...(body.response_format && body.response_format.type === 'json_object'
-            ? { response_format: { type: 'json_object' } }
-            : {}),
-          reasoning_effort: forcedEffort,
-        });
+      // ── Sarvam passthrough (legacy engine) ──
+      // sarvam-105b reasons before answering and reasoning shares the token
+      // budget with the answer — an unlucky run returns finish_reason:"length"
+      // with EMPTY content. Defenses kept exactly as before: thinking off
+      // unless asked, one server-side retry on the hollow-200 signature.
+      if (engine === 'sarvam') {
+        const forcedEffort = ['low', 'medium', 'high'].includes(
+          String(body.reasoning_effort || '').toLowerCase()
+        )
+          ? String(body.reasoning_effort).toLowerCase()
+          : null; // null = thinking off (documented switch)
 
-      const callUpstream = async () =>
-        fetch('https://api.sarvam.ai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'api-subscription-key': env.SARVAM_API_KEY,
-          },
-          body: buildPayload(),
-        });
+        const buildPayload = () =>
+          JSON.stringify({
+            model: body.model || 'sarvam-105b',
+            messages: body.messages || [],
+            temperature: body.temperature ?? 0.2,
+            ...(Number.isFinite(Number(body.max_tokens)) && Number(body.max_tokens) > 0
+              ? { max_tokens: Math.min(Number(body.max_tokens), 4096) }
+              : {}),
+            ...(body.response_format && body.response_format.type === 'json_object'
+              ? { response_format: { type: 'json_object' } }
+              : {}),
+            reasoning_effort: forcedEffort,
+          });
 
-      let upstream = await callUpstream();
-      let text = await upstream.text();
+        const callUpstream = async () =>
+          fetch('https://api.sarvam.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'api-subscription-key': env.SARVAM_API_KEY,
+            },
+            body: buildPayload(),
+          });
 
-      // Retry once when the model 200s but answers with nothing (its
-      // thinking ate the budget). Any real HTTP error still surfaces.
-      try {
-        const parsed = JSON.parse(text);
-        const content = parsed?.choices?.[0]?.message?.content;
-        if (upstream.ok && (!content || !String(content).trim())) {
-          upstream = await callUpstream();
-          text = await upstream.text();
+        let upstream = await callUpstream();
+        let text = await upstream.text();
+
+        try {
+          const parsed = JSON.parse(text);
+          const content = parsed?.choices?.[0]?.message?.content;
+          if (upstream.ok && (!content || !String(content).trim())) {
+            upstream = await callUpstream();
+            text = await upstream.text();
+          }
+        } catch (_) { /* non-JSON body — fall through */ }
+
+        if (!upstream.ok) {
+          return json(
+            {
+              error: 'upstream',
+              status: upstream.status,
+              detail: text.slice(0, 600),
+            },
+            upstream.status
+          );
         }
-      } catch (_) { /* non-JSON body — fall through */ }
-
-      if (!upstream.ok) {
-        // Surface what the provider actually said; "error (400)" is useless
-        // for diagnosis.
-        return json(
-          {
-            error: 'upstream',
-            status: upstream.status,
-            detail: text.slice(0, 600),
-          },
-          upstream.status
-        );
+        return new Response(text, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...CORS },
+        });
       }
-      return new Response(text, {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', ...CORS },
-      });
+
+      // ── Router engines (Workers AI / Nebula Core) ──
+      try {
+        const content = await llmChat(env, body.messages || [], {
+          engine,
+          temperature: body.temperature ?? 0.2,
+          maxTokens:
+            Number.isFinite(Number(body.max_tokens)) && Number(body.max_tokens) > 0
+              ? Math.min(Number(body.max_tokens), 8192)
+              : 2048,
+          json: !!(body.response_format && body.response_format.type === 'json_object'),
+        });
+        const model =
+          engine === 'workers-ai'
+            ? env.WAI_CHAT_MODEL || '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+            : env.LLM_CUSTOM_MODEL || 'nebula-core';
+        return json(openAiShape(content, { model, engine }), 200);
+      } catch (e) {
+        return json({ error: 'upstream', engine, detail: String(e?.message || e).slice(0, 600) }, 502);
+      }
     }
 
     // ── Cross-user push ──

@@ -10,7 +10,7 @@
  *    every future plan/copy prompt — the loop that makes it improve.
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat, llmReady } from './llm.js';
 import { findMailerCampaigns, updateCampaignMetrics } from './firestore.js';
 import { safeParse } from './state.js';
 import { openStats, clickStats } from './track.js';
@@ -145,9 +145,9 @@ export async function collectAnalytics(mc, env, kv, { onUnsubscribers = null } =
     inbox_tracking: summariseInbox(inbox),
   };
 
-  if (snapshot.length > 0 && env.SARVAM_API_KEY) {
+  if (snapshot.length > 0 && llmReady(env)) {
     try {
-      const learnings = await sarvamChat(
+      const learnings = await llmChat(
         env,
         [
           { role: 'system', content: 'You are an email marketing analyst. Study campaign metrics and extract short, concrete, actionable learnings. Always reply with valid JSON.' },

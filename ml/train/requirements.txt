@@ -1,0 +1,7 @@
+# Nebula Core training deps (local GPU or Colab — Colab installs these itself)
+unsloth>=2024.12
+datasets
+trl
+transformers
+torch
+huggingface_hub

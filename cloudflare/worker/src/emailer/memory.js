@@ -24,7 +24,7 @@
  *   POST /v1/mail/memory/reset  — wipe
  */
 
-import { sarvamChat } from './sarvam.js';
+import { llmChat, llmReady } from './llm.js';
 
 const MEMORY_KEY = 'biz:memory';
 const MAX_INSIGHTS = 40;
@@ -184,9 +184,9 @@ export async function teach(env, store, { facts = {}, note = '', origin = 'owner
   const noteText = String(note || '').trim().slice(0, 2000);
   if (noteText) {
     patch.notes = [`[owner] ${noteText.slice(0, 260)}`];
-    if (env.SARVAM_API_KEY) {
+    if (llmReady(env)) {
       try {
-        const distilled = await sarvamChat(
+        const distilled = await llmChat(
           env,
           [
             { role: 'system', content: 'You maintain the marketing memory of a business. Extract durable, concrete facts and lessons. Always reply with valid JSON.' },

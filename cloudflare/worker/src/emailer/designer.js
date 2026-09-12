@@ -16,7 +16,6 @@
 
 import { runAgent, leadBlock, understandingBlock } from './agents.js';
 import { masterBlock } from './masterprompt.js';
-import { sarvamChat } from './sarvam.js';
 import { webSearch } from './research.js';
 import { normalizeDesign, themeForStyleHint, THEMES } from './site_templates.js';
 import { expandPalette, fontPairFor, colorPack } from './mastery.js';
