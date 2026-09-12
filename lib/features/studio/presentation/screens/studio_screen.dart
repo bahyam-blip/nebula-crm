@@ -51,13 +51,15 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
   ];
 
   /// Each style swatch carries its actual palette so the picker TEACHES
-  /// the look before the build — three dots, real colors.
+  /// the look before the build — three dots, real colors. $3 is the FULL
+  /// hint sentence sent to the Worker (its theme matcher keys on words
+  /// like "deep black" / "glassy" / "magazine" — not the short label).
   static const _styles = <(String, List<Color>, String)>[
-    ('Onyx', [Color(0xFF050505), Color(0xFF161616), Color(0xFFF2F2F2)], 'Deep black minimal'),
-    ('Aurora', [Color(0xFF07080F), Color(0xFF1C2436), Color(0xFF7DD3FC)], 'Dark glass, glowing'),
-    ('Editorial', [Color(0xFFFAF7F2), Color(0xFF14100C), Color(0xFFB4530A)], 'Magazine serif'),
-    ('Minimal', [Color(0xFFFFFFFF), Color(0xFFF0F0F0), Color(0xFF111111)], 'Whitespace first'),
-    ('Festive', [Color(0xFF2A0A12), Color(0xFFE11D48), Color(0xFFF59E0B)], 'Vivid celebration'),
+    ('Onyx', [Color(0xFF050505), Color(0xFF161616), Color(0xFFF2F2F2)], 'Deep black minimal — white type, hairlines, one restrained accent, editorial spacing.'),
+    ('Aurora', [Color(0xFF07080F), Color(0xFF1C2436), Color(0xFF7DD3FC)], 'Dark premium aurora look — glassy, glowing, high-end.'),
+    ('Editorial', [Color(0xFFFAF7F2), Color(0xFF14100C), Color(0xFFB4530A)], 'Clean editorial magazine look with serif headlines.'),
+    ('Minimal', [Color(0xFFFFFFFF), Color(0xFFF0F0F0), Color(0xFF111111)], 'Clean, minimal, lots of whitespace.'),
+    ('Festive', [Color(0xFF2A0A12), Color(0xFFE11D48), Color(0xFFF59E0B)], 'Make it look festive and energetic with a bold offer layout.'),
   ];
 
   static const _examples = [
@@ -180,11 +182,14 @@ class _StudioScreenState extends ConsumerState<StudioScreen> {
     final title = _titleCtrl.text.trim().isEmpty ? brief.split(RegExp(r'[.!?\n]')).first.trim() : _titleCtrl.text.trim();
     FocusScope.of(context).unfocus();
     setState(() => _tab = 'team'); // the build IS the team's show
+    final styleHint = _style == null
+        ? null
+        : _styles.firstWhere((s) => s.$1 == _style, orElse: () => _styles.first).$3;
     await ref.read(studioProvider.notifier).buildSite(
           title: title,
           brief: brief,
           kind: _kind,
-          style: _style,
+          style: styleHint,
           ctaText: _ctaCtrl.text.trim().isNotEmpty ? _ctaCtrl.text.trim() : null,
           onDone: _openPreview,
         );
