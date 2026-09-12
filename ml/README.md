@@ -2,6 +2,9 @@
 
 Fine-tuned coding/build model for the Nebula platform. Zero third-party API keys.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bahyam-blip/nebula-crm/blob/master/ml/train/nebula_core_colab.ipynb)
+**← one click opens the training notebook in Google Colab (free T4).**
+
 ```
 node ml/dataset/build_dataset.mjs        # rebuild the corpus (deterministic)
 # → ml/dataset/nebula-core.jsonl  (494 pairs, ~315k tokens)
